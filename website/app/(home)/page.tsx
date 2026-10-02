@@ -59,7 +59,7 @@ docker compose exec app cat .run/setup-token`}
         </pre>
         <p className="text-sm text-fd-muted-foreground">
           Then open <code>http://localhost:3000/admin/setup</code> and enter the token. Until 0.1.0 is
-          released, set <code>VYASA_VERSION=0.1.0-rc.1</code> first. Full steps in{' '}
+          released, set <code>VYASA_VERSION=0.1.0-rc.2</code> first. Full steps in{' '}
           <Link href="/docs/getting-started" className="underline">Getting started</Link>.
         </p>
       </section>
