@@ -12,7 +12,7 @@ use crate::error::ApiError;
 use crate::state::AppState;
 
 /// The banner put at the top of every public page of a demo.
-fn banner(username: &str, password: &str) -> String {
+fn banner(email: &str, password: &str) -> String {
     format!(
         "<div data-vyasa-demo-banner style=\"position:sticky;top:0;z-index:2147483647;\
          background:#1f2937;color:#f9fafb;font:14px/1.4 system-ui,sans-serif;\
@@ -20,7 +20,7 @@ fn banner(username: &str, password: &str) -> String {
          This is the Vyasa demo. It resets every hour. \
          <a href=\"/admin\" style=\"color:#93c5fd\">Sign in</a> as \
          <strong>{}</strong> / <strong>{}</strong>.</div>",
-        html_escape(username),
+        html_escape(email),
         html_escape(password)
     )
 }
@@ -65,7 +65,7 @@ pub async fn demo(State(state): State<AppState>, req: Request<Body>, next: Next)
         return Response::from_parts(parts, Body::empty());
     };
     let html = String::from_utf8_lossy(&bytes);
-    let banner = banner(&state.config.demo.username, &state.config.demo.password);
+    let banner = banner(&state.config.demo.email, &state.config.demo.password);
     let out = match html.find("<body") {
         Some(start) => match html[start..].find('>') {
             Some(end) => {

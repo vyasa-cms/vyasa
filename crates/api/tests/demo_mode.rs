@@ -38,17 +38,13 @@ fn outcome(r: ureq::Response) -> (u16, String) {
     (status, message)
 }
 
-/// A server in demo mode whose shared account is `username`.
-fn demo_server(db: &TestDb, username: &str) -> TestServer {
+/// A server in demo mode whose shared account is `email`.
+fn demo_server(db: &TestDb, email: &str) -> TestServer {
     TestServer::builder(common::BIN, db)
         .env("VYASA_DEMO__ENABLED", "true")
-        .env("VYASA_DEMO__USERNAME", username)
+        .env("VYASA_DEMO__EMAIL", email)
         .env("VYASA_DEMO__PASSWORD", common::PASSWORD)
         .start()
-}
-
-fn username_of(seeded: &common::Seeded) -> String {
-    seeded.email.split('@').next().unwrap().to_owned()
 }
 
 #[tokio::test]
@@ -56,7 +52,7 @@ async fn a_demo_refuses_what_would_harm_the_site_or_the_next_visitor() {
     let db = TestDb::new().await;
     let demo = common::seed_user(db.pool(), Role::Admin).await;
     let other = common::seed_user(db.pool(), Role::Author).await;
-    let server = demo_server(&db, &username_of(&demo));
+    let server = demo_server(&db, &demo.email);
     let base = server.base();
     let cookie = common::login_cookie(base, &demo.email, &demo.password);
 
@@ -217,7 +213,7 @@ async fn without_demo_mode_the_same_requests_are_not_refused_as_demo() {
 async fn a_demo_tells_search_engines_to_stay_away_and_shows_its_account() {
     let db = TestDb::new().await;
     let demo = common::seed_user(db.pool(), Role::Admin).await;
-    let server = demo_server(&db, &username_of(&demo));
+    let server = demo_server(&db, &demo.email);
     let base = server.base();
 
     let home = http(ureq::get(&format!("{base}/")).call());
@@ -236,7 +232,7 @@ async fn a_demo_tells_search_engines_to_stay_away_and_shows_its_account() {
     let status: Value = http(ureq::get(&format!("{base}/api/v1/setup/status")).call())
         .into_json()
         .unwrap();
-    assert_eq!(status["demo"]["username"], username_of(&demo));
+    assert_eq!(status["demo"]["email"], demo.email.as_str());
     assert_eq!(status["demo"]["password"], common::PASSWORD);
 }
 

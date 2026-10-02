@@ -747,7 +747,7 @@ pub fn demo_options<'a>(
 /// # Errors
 /// `Forbidden` with the demo message when `target` is the shared account.
 pub fn demo_account(state: &AppState, target: &UserRow, what: &str) -> Result<(), AppError> {
-    if state.config.demo.enabled && target.username == state.config.demo.username {
+    if state.config.demo.enabled && target.email.eq_ignore_ascii_case(&state.config.demo.email) {
         Err(demo_refusal(&format!("{what} the demo account")))
     } else {
         Ok(())

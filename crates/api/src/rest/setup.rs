@@ -109,7 +109,7 @@ pub struct SetupStatus {
 /// every page of the demo.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct DemoAccount {
-    pub username: String,
+    pub email: String,
     pub password: String,
 }
 
@@ -127,7 +127,7 @@ pub async fn status(State(state): State<AppState>) -> ApiResult<Json<SetupStatus
         step: progress,
         instance: state.instance_nonce.clone(),
         demo: state.config.demo.enabled.then(|| DemoAccount {
-            username: state.config.demo.username.clone(),
+            email: state.config.demo.email.clone(),
             password: state.config.demo.password.clone(),
         }),
     }))

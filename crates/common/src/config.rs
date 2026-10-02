@@ -113,8 +113,9 @@ impl Default for JobsConfig {
 pub struct DemoConfig {
     /// Whether this install is a public demo.
     pub enabled: bool,
-    /// The shared account's username, shown on the sign-in page.
-    pub username: String,
+    /// The shared account's email (what the sign-in form asks for), shown
+    /// on every page of the demo.
+    pub email: String,
     /// The shared account's password, shown on the sign-in page. Not a
     /// secret: the whole point is that everyone has it.
     pub password: String,
@@ -124,7 +125,7 @@ impl Default for DemoConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            username: "demo".to_string(),
+            email: "demo@vyasa.site".to_string(),
             password: "demo".to_string(),
         }
     }
@@ -620,7 +621,7 @@ mod tests {
         std::env::set_var("VYASA_DEMO__ENABLED", "true");
         let demo = VyasaConfig::load_from_file(&path).expect("load with demo");
         assert!(demo.demo.enabled);
-        assert_eq!(demo.demo.username, "demo");
+        assert_eq!(demo.demo.email, "demo@vyasa.site");
         assert_eq!(demo.demo.password, "demo");
         std::env::remove_var("VYASA_DEMO__ENABLED");
 
