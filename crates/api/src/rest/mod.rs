@@ -36,6 +36,7 @@ pub mod terms;
 pub mod theme_studio;
 pub mod themes;
 pub mod updates;
+pub mod upload_schema;
 pub mod users;
 pub mod webhooks;
 

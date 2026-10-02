@@ -363,7 +363,7 @@ pub async fn batch_delete(
 #[utoipa::path(post, path = "/api/v1/media/{id}/replace", tag = "media",
     security(("session_cookie" = [])),
     params(("id" = i64, Path, description = "Media id")),
-    request_body(content = String, content_type = "multipart/form-data"),
+    request_body(content = crate::rest::upload_schema::FileUpload, description = "multipart/form-data with `file`", content_type = "multipart/form-data"),
     responses((status = 200, description = "The row, now pointing at the new file", body = MediaResponse),
               (status = 403, description = "Forbidden", body = ApiErrorBody),
               (status = 404, description = "Not found", body = ApiErrorBody)))]
@@ -435,7 +435,7 @@ pub struct ListMediaQuery {
     post, path = "/api/v1/media",
     tag = "media",
     security(("session_cookie" = [])),
-    request_body(content = String, description = "multipart/form-data with `file` field", content_type = "multipart/form-data"),
+    request_body(content = crate::rest::upload_schema::MediaUpload, description = "multipart/form-data with `file` and optional `alt` and `caption`", content_type = "multipart/form-data"),
     responses(
         (status = 201, description = "Media created", body = MediaResponse),
         (status = 400, description = "Validation failed", body = ApiErrorBody),
