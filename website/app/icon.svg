@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" role="img" aria-label="Vyasa">
+  <title>Vyasa</title>
+  <!--
+    The mark: a solid half-disc resolving into lines of text.
+
+    vyāsa (व्यास) is "diameter" in Sanskrit geometry — the line that divides a
+    circle — from vi + √as, "to divide, to arrange". Veda Vyāsa earned the name
+    by dividing the one Veda into four. The whole on the left becomes ordered
+    parts on the right: a document becoming blocks.
+
+    Single colour via currentColor, and legible down to 16px.
+  -->
+  <g fill="currentColor"><path d="M31 5 A27 27 0 0 0 31 59 Z"/><rect x="36" y="14" width="25" height="5.5" rx="2.75"/><rect x="36" y="24.5" width="25" height="5.5" rx="2.75"/><rect x="36" y="35" width="21" height="5.5" rx="2.75"/><rect x="36" y="45.5" width="13" height="5.5" rx="2.75"/></g>
+</svg>
