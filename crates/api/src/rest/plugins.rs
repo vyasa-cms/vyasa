@@ -47,7 +47,7 @@ fn response(row: vyasa_db::repo::PluginRow) -> PluginResponse {
 #[utoipa::path(
     post, path = "/api/v1/plugins", tag = "plugins",
     security(("session_cookie" = [])),
-    request_body(content = String, description = "multipart .vyplugin", content_type = "multipart/form-data"),
+    request_body(content = crate::rest::upload_schema::FileUpload, description = "multipart/form-data with `file` (.vyplugin)", content_type = "multipart/form-data"),
     responses(
         (status = 201, description = "Installed", body = PluginResponse),
         (status = 400, description = "Invalid package", body = ApiErrorBody),
@@ -268,7 +268,7 @@ pub struct Inspection {
 #[utoipa::path(
     post, path = "/api/v1/plugins/inspect", tag = "plugins",
     security(("session_cookie" = [])),
-    request_body(content = String, description = "multipart .vyplugin", content_type = "multipart/form-data"),
+    request_body(content = crate::rest::upload_schema::FileUpload, description = "multipart/form-data with `file` (.vyplugin)", content_type = "multipart/form-data"),
     responses((status = 200, description = "What the package is", body = Inspection),
               (status = 400, description = "Malformed package", body = ApiErrorBody))
 )]

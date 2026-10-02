@@ -4449,6 +4449,14 @@ export interface components {
             options?: string[];
             required?: boolean;
         };
+        /** @description A single file in the multipart field `file`. */
+        FileUpload: {
+            /**
+             * Format: binary
+             * @description The file.
+             */
+            file: string;
+        };
         /** @description One preflight finding. */
         Finding: {
             /** @description One line an operator can act on. */
@@ -4813,6 +4821,18 @@ export interface components {
              * @description Images with no alt text.
              */
             missing_alt: number;
+        };
+        /** @description A media upload: the file, plus optional text stored with it. */
+        MediaUpload: {
+            /** @description Alternative text for images. */
+            alt?: string | null;
+            /** @description Caption shown under the item. */
+            caption?: string | null;
+            /**
+             * Format: binary
+             * @description The file.
+             */
+            file: string;
         };
         /** @description Where a file is used: posts that embed it, and site identity slots. */
         MediaUsage: {
@@ -5198,6 +5218,11 @@ export interface components {
             /** @description Theme package name (`[a-z0-9-]{1,60}`); publishes as its next version. */
             name: string;
         };
+        /**
+         * Format: binary
+         * @description The raw bytes of one file.
+         */
+        RawBytes: string;
         /** @description Ids to mark read. */
         ReadBody: {
             ids: number[];
@@ -8055,10 +8080,10 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        /** @description multipart/form-data with `file` field */
+        /** @description multipart/form-data with `file` and optional `alt` and `caption` */
         requestBody: {
             content: {
-                "multipart/form-data": string;
+                "multipart/form-data": components["schemas"]["MediaUpload"];
             };
         };
         responses: {
@@ -8363,9 +8388,10 @@ export interface operations {
             };
             cookie?: never;
         };
+        /** @description multipart/form-data with `file` */
         requestBody: {
             content: {
-                "multipart/form-data": string;
+                "multipart/form-data": components["schemas"]["FileUpload"];
             };
         };
         responses: {
@@ -8732,10 +8758,10 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        /** @description multipart .vyplugin */
+        /** @description multipart/form-data with `file` (.vyplugin) */
         requestBody: {
             content: {
-                "multipart/form-data": string;
+                "multipart/form-data": components["schemas"]["FileUpload"];
             };
         };
         responses: {
@@ -8775,10 +8801,10 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        /** @description multipart .vyplugin */
+        /** @description multipart/form-data with `file` (.vyplugin) */
         requestBody: {
             content: {
-                "multipart/form-data": string;
+                "multipart/form-data": components["schemas"]["FileUpload"];
             };
         };
         responses: {
@@ -11757,7 +11783,7 @@ export interface operations {
         /** @description multipart/form-data with `file` (.vytheme) */
         requestBody: {
             content: {
-                "multipart/form-data": string;
+                "multipart/form-data": components["schemas"]["FileUpload"];
             };
         };
         responses: {
@@ -12466,7 +12492,7 @@ export interface operations {
         };
         requestBody: {
             content: {
-                "application/octet-stream": number[];
+                "application/octet-stream": components["schemas"]["RawBytes"];
             };
         };
         responses: {
