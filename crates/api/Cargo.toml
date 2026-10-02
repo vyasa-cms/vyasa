@@ -59,7 +59,7 @@ futures-util = "0.3"
 vyasa-themes = { path = "../themes" }
 rss = "2"
 atom_syndication = "0.12"
-zip = { version = "2", features = ["deflate"] }
+zip = { version = "8", features = ["deflate"] }
 html5ever = { version = "0.39", optional = true }
 markup5ever_rcdom = { version = "0.39", optional = true }
 ureq = { version = "2", optional = true }
@@ -81,7 +81,7 @@ vyasa-testkit = { path = "../testkit" }
 serde_json = "1"
 sha2 = "0.11"
 ureq = { version = "2", default-features = false, features = ["json", "tls"] }
-zip = { version = "2", features = ["deflate"] }
+zip = { version = "8", features = ["deflate"] }
 tempfile = "3.27.0"
 tower = { version = "0.5", features = ["util"] }
 
