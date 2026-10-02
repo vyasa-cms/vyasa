@@ -161,7 +161,8 @@ pub async fn update(
     Path(id): Path<i64>,
     Json(body): Json<UpdateUserRequest>,
 ) -> ApiResult<Json<UserResponse>> {
-    policy::account_for_management(&state, &user, id).await?;
+    let target = policy::account_for_management(&state, &user, id).await?;
+    policy::demo_account(&state, &target, "Changing")?;
     let email = body.email.as_deref().map(str::trim);
     if let Some(e) = email {
         if e.is_empty() || !e.contains('@') {
@@ -234,7 +235,8 @@ pub async fn suspend(
             "you cannot suspend your own account",
         )));
     }
-    policy::account_for_management(&state, &user, id).await?;
+    let target = policy::account_for_management(&state, &user, id).await?;
+    policy::demo_account(&state, &target, "Suspending")?;
     // One transaction decides and writes: two admins suspending each
     // other cannot both go through.
     state.users.set_suspended(id, body.suspended).await?;
@@ -599,6 +601,7 @@ pub async fn update_me(
 ) -> ApiResult<StatusCode> {
     let body_avatar = body.avatar_media_id;
     let changing_password = body.password.is_some();
+    policy::demo_password_change(&state, changing_password)?;
     if changing_password {
         check_current_password(&state, &user, &client_ip, body.current_password.as_deref()).await?;
     }
@@ -701,7 +704,8 @@ pub async fn set_role(
     Json(body): Json<SetRoleRequest>,
 ) -> ApiResult<StatusCode> {
     let choice = policy::may_grant_role(&state, &user, &body.role).await?;
-    policy::account_for_management(&state, &user, id).await?;
+    let target = policy::account_for_management(&state, &user, id).await?;
+    policy::demo_account(&state, &target, "Changing the role of")?;
     match &choice {
         RoleChoice::BuiltIn(role) => state.users.set_role(id, *role).await?,
         RoleChoice::Custom(role) => {
@@ -766,7 +770,8 @@ pub async fn delete(
     }
     // The account deleted is the one that must be within reach; whoever
     // takes over its content only gains content.
-    policy::account_for_management(&state, &user, id).await?;
+    let target = policy::account_for_management(&state, &user, id).await?;
+    policy::demo_account(&state, &target, "Deleting")?;
     state
         .users
         .delete_reassigning(id, query.reassign_to)

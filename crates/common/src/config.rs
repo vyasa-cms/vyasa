@@ -102,6 +102,34 @@ impl Default for JobsConfig {
     }
 }
 
+/// Public sandbox mode (`VYASA_DEMO__ENABLED=true`).
+///
+/// Visitors sign in with the shared account below and may edit freely,
+/// but nothing that runs code, sends mail, reaches other servers, stores
+/// credentials or locks the next visitor out is allowed. Every such
+/// refusal is decided in the API's `policy` module.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(default)]
+pub struct DemoConfig {
+    /// Whether this install is a public demo.
+    pub enabled: bool,
+    /// The shared account's username, shown on the sign-in page.
+    pub username: String,
+    /// The shared account's password, shown on the sign-in page. Not a
+    /// secret: the whole point is that everyone has it.
+    pub password: String,
+}
+
+impl Default for DemoConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            username: "demo".to_string(),
+            password: "demo".to_string(),
+        }
+    }
+}
+
 /// Cloud AI provider settings (keys optional until the AI features run).
 #[derive(Clone, Debug, Deserialize)]
 #[serde(default)]
@@ -318,6 +346,8 @@ pub struct VyasaConfig {
     /// `VYASA_TRUSTED_PROXIES=127.0.0.1,::1` plus this.
     #[serde(default)]
     pub trust_cf_connecting_ip: bool,
+    /// Public sandbox mode; off unless configured.
+    pub demo: DemoConfig,
 }
 
 /// One trusted proxy: an address (`127.0.0.1`) or a CIDR block
@@ -400,6 +430,7 @@ struct RawConfig {
     secret_key: Option<String>,
     trusted_proxies: Option<Vec<String>>,
     trust_cf_connecting_ip: Option<bool>,
+    demo: Option<DemoConfig>,
 }
 
 impl TryFrom<RawConfig> for VyasaConfig {
@@ -464,6 +495,7 @@ impl TryFrom<RawConfig> for VyasaConfig {
                 .map(Secret::new),
             trusted_proxies,
             trust_cf_connecting_ip: raw.trust_cf_connecting_ip.unwrap_or(false),
+            demo: raw.demo.unwrap_or_default(),
         })
     }
 }
@@ -582,6 +614,15 @@ mod tests {
         assert_eq!(cfg.db.acquire_timeout_secs, 5);
         assert!((cfg.ai.monthly_budget_usd - 25.0).abs() < 1e-9);
         assert!(cfg.smtp.is_none());
+        assert!(!cfg.demo.enabled, "demo mode is off unless asked for");
+
+        // 2c. Demo mode from the environment, with the default account.
+        std::env::set_var("VYASA_DEMO__ENABLED", "true");
+        let demo = VyasaConfig::load_from_file(&path).expect("load with demo");
+        assert!(demo.demo.enabled);
+        assert_eq!(demo.demo.username, "demo");
+        assert_eq!(demo.demo.password, "demo");
+        std::env::remove_var("VYASA_DEMO__ENABLED");
 
         // 3. Environment overrides the file; `__` reaches nested fields.
         std::env::set_var("VYASA_BIND_ADDR", "0.0.0.0:1");

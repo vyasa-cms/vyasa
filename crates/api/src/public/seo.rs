@@ -126,7 +126,13 @@ pub async fn robots(State(state): State<AppState>, headers: HeaderMap) -> Respon
         // The admin is disallowed not as a security measure — it requires
         // authentication regardless — but so crawlers do not spend their
         // budget on a login screen.
-        format!("User-agent: *\nAllow: /\nDisallow: /admin\nSitemap: {base}/sitemap.xml\n"),
+        // A demo is a sandbox that resets every hour: nothing in it should
+        // end up in a search index.
+        if state.config.demo.enabled {
+            "User-agent: *\nDisallow: /\n".to_owned()
+        } else {
+            format!("User-agent: *\nAllow: /\nDisallow: /admin\nSitemap: {base}/sitemap.xml\n")
+        },
     )
 }
 

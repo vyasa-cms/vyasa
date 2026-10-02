@@ -100,6 +100,17 @@ pub struct SetupStatus {
     pub step: Option<String>,
     /// A nonce minted at boot; `site_url` verification looks for it.
     pub instance: String,
+    /// On a public demo, the shared account the sign-in page offers;
+    /// `null` everywhere else.
+    pub demo: Option<DemoAccount>,
+}
+
+/// The shared account of a public demo. Not a secret: it is printed on
+/// every page of the demo.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct DemoAccount {
+    pub username: String,
+    pub password: String,
 }
 
 /// `GET /api/v1/setup/status` — public.
@@ -115,6 +126,10 @@ pub async fn status(State(state): State<AppState>) -> ApiResult<Json<SetupStatus
         needs_setup: needs_admin || progress.as_deref().is_some_and(|p| p != "done"),
         step: progress,
         instance: state.instance_nonce.clone(),
+        demo: state.config.demo.enabled.then(|| DemoAccount {
+            username: state.config.demo.username.clone(),
+            password: state.config.demo.password.clone(),
+        }),
     }))
 }
 
