@@ -257,7 +257,7 @@ jobs:
           path: dist
           merge-multiple: true
       - run: scripts/release-notes.sh "${{ needs.meta.outputs.version }}" > notes.md
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@v3
         with:
           body_path: notes.md
           prerelease: ${{ needs.meta.outputs.prerelease == 'true' }}
