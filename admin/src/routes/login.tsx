@@ -6,6 +6,7 @@ import { Mark } from "@/components/ui/logo";
 import { api, type UserResponse } from "@/api/client";
 import { isSessionExpired } from "@/lib/session";
 import { useI18n } from "@/lib/i18n";
+import { useDemo } from "@/components/DemoNotice";
 
 export const Route = createFileRoute("/login")({
   // Where to go back to after signing in (set when a session expired or a
@@ -36,6 +37,7 @@ export const Route = createFileRoute("/login")({
  */
 function LoginPage() {
   const { t } = useI18n();
+  const demo = useDemo();
   // Drawing the line between "sign in" and "you can also sign up here" is
   // the site owner's call (`registration_enabled`); the link only exists
   // once they've turned it on and the server can actually send the
@@ -58,7 +60,7 @@ function LoginPage() {
         </div>
 
         <div className="flex flex-1 items-center justify-center py-10">
-          <LoginForm className="w-full max-w-sm" />
+          <LoginForm className="w-full max-w-sm" demo={demo} />
         </div>
 
         <p className="text-center text-xs text-muted-foreground">

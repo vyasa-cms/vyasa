@@ -1382,7 +1382,13 @@ export const api = {
   },
 
   /* ------------------------------------------------------------ setup */
-  setupStatus(): Promise<{ needs_admin: boolean; needs_setup: boolean; step: string | null; instance: string }> {
+  setupStatus(): Promise<{
+    needs_admin: boolean;
+    needs_setup: boolean;
+    step: string | null;
+    instance: string;
+    demo?: { email: string; password: string } | null;
+  }> {
     return request("/api/v1/setup/status");
   },
   setupClaim(token: string): Promise<void> {

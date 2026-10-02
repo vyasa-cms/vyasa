@@ -48,6 +48,7 @@ import { ThemeToggle, ThemeCycleButton } from "@/components/ui/theme-toggle";
 import { Mark } from "@/components/ui/logo";
 import { api, type UserResponse } from "@/api/client";
 import { cn } from "@/lib/utils";
+import { DemoBanner } from "@/components/DemoNotice";
 import { safeRedirect, useSessionExpired } from "@/lib/session";
 
 /**
@@ -498,6 +499,7 @@ function AuthLayout() {
         )}
 
         <div className="flex min-w-0 flex-1 flex-col">
+          <DemoBanner />
           <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-card/85 px-3 backdrop-blur-sm supports-backdrop-filter:bg-card/70 md:px-5">
             {restricted ? null : (
               <button
