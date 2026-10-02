@@ -862,3 +862,18 @@ fn every_demo_refused_route_exists() {
         );
     }
 }
+
+/// The demo upload cap names real routes, like the refusal table.
+#[test]
+fn every_demo_upload_route_exists() {
+    let rules = crate::rest::rules();
+    for (method, path) in crate::policy::DEMO_UPLOAD_ROUTES {
+        let relative = path.strip_prefix("/api/v1").expect("an /api/v1 path");
+        assert!(
+            rules
+                .iter()
+                .any(|r| r.method.as_str() == *method && r.path == relative),
+            "{method} {path} is not a route"
+        );
+    }
+}

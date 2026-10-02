@@ -1,0 +1,60 @@
+# The public demo: a Vyasa install in demo mode (VYASA_DEMO__ENABLED) plus
+# its own Postgres, capped so a busy or abused demo cannot take the host
+# down. Listens on 127.0.0.1 only; a tunnel or reverse proxy publishes it.
+#
+#   ./seed.sh     build the seed database once (or after an upgrade)
+#   ./reset.sh    restore the seed; run hourly (see README.md)
+
+name: vyasa-demo
+
+services:
+  app:
+    image: ghcr.io/vyasa-cms/vyasa:${VYASA_VERSION:-latest}
+    environment:
+      VYASA_DATABASE_URL: postgres://vyasa:vyasa@db:5432/vyasa
+      VYASA_MEDIA_DIR: /opt/vyasa/media
+      VYASA_INDEX_DIR: /opt/vyasa/index
+      VYASA_DEMO__ENABLED: "true"
+      VYASA_DEMO__EMAIL: ${DEMO_EMAIL:-demo@vyasa.site}
+      VYASA_DEMO__PASSWORD: ${DEMO_PASSWORD:-vyasademo}
+      # The tunnel connects from the host's loopback through Docker's NAT.
+      VYASA_TRUSTED_PROXIES: ${DEMO_TRUSTED_PROXIES:-172.16.0.0/12}
+      VYASA_TRUST_CF_CONNECTING_IP: "true"
+      VYASA_DB__MAX_CONNECTIONS: "8"
+      VYASA_JOBS__WORKERS: "1"
+    ports:
+      - "127.0.0.1:${DEMO_PORT:-38400}:3000"
+    volumes:
+      - media:/opt/vyasa/media
+      - index:/opt/vyasa/index
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 256
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: vyasa
+      POSTGRES_PASSWORD: vyasa
+      POSTGRES_DB: vyasa
+    command: ["postgres", "-c", "max_connections=40", "-c", "shared_buffers=64MB"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./seed:/seed
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vyasa"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 0.5
+
+volumes:
+  media:
+  index:
+  pgdata:

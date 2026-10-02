@@ -779,3 +779,41 @@ pub fn demo_password_change(state: &AppState, changing: bool) -> Result<(), AppE
         Ok(())
     }
 }
+
+/// The largest upload a demo takes: enough for a photo, not enough to
+/// make the demo a free file host.
+pub const DEMO_UPLOAD_LIMIT: u64 = 2 * 1024 * 1024;
+
+/// The upload routes the demo cap applies to.
+pub(crate) const DEMO_UPLOAD_ROUTES: &[(&str, &str)] = &[
+    ("POST", "/api/v1/media"),
+    ("POST", "/api/v1/media/{id}/replace"),
+    ("POST", "/api/v1/ai/images"),
+];
+
+/// A demo refuses uploads over [`DEMO_UPLOAD_LIMIT`], judged by the
+/// declared length (a body that declares none is refused too).
+///
+/// # Errors
+/// `TooLarge` with the demo message.
+pub fn demo_upload(
+    state: &AppState,
+    method: &str,
+    matched_path: &str,
+    content_length: Option<u64>,
+) -> Result<(), AppError> {
+    if !state.config.demo.enabled
+        || !DEMO_UPLOAD_ROUTES
+            .iter()
+            .any(|(m, p)| *m == method && *p == matched_path)
+    {
+        return Ok(());
+    }
+    match content_length {
+        Some(n) if n <= DEMO_UPLOAD_LIMIT => Ok(()),
+        _ => Err(AppError::too_large(format!(
+            "Uploads over {} MiB are disabled in the demo. Install Vyasa to try it on your own site.",
+            DEMO_UPLOAD_LIMIT / (1024 * 1024)
+        ))),
+    }
+}
