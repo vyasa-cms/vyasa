@@ -206,7 +206,7 @@ export function BubbleToolbar({ editor }: { editor: Editor }) {
               }}
               placeholder="Link, or the title of a page or post"
               aria-label="Link address"
-              className="h-7 w-56 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="h-7 w-56 rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
             />
             <button
               type="submit"

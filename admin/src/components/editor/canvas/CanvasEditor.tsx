@@ -53,7 +53,7 @@ export const CanvasEditor = React.forwardRef<
     content: blocksToDoc(value) as unknown as Record<string, unknown>,
     editorProps: {
       attributes: {
-        class: "vy-canvas prose-none focus:outline-none min-h-[50vh] px-1 py-2",
+        class: "vy-canvas prose-none focus:outline-hidden min-h-[50vh] px-1 py-2",
         "aria-label": "Post content",
       },
       // Rich pastes (Google Docs, Word, Notion) are normalised first:

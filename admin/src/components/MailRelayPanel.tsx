@@ -108,7 +108,7 @@ export function MailRelayPanel({ testTo, compact = false, onSaved }: { testTo?: 
       <div className="flex flex-wrap items-end gap-2">
         <Button type="button" size="sm" disabled={save.isPending || !touched} onClick={() => save.mutate()}>{save.isPending ? "Saving…" : "Save relay"}</Button>
         <span className="flex-1" />
-        <div className="min-w-[14rem]"><Field label="Send a test to" htmlFor="smtp-test-to"><Input id="smtp-test-to" type="email" value={to} onChange={(e) => setTo(e.target.value)} /></Field></div>
+        <div className="min-w-56"><Field label="Send a test to" htmlFor="smtp-test-to"><Input id="smtp-test-to" type="email" value={to} onChange={(e) => setTo(e.target.value)} /></Field></div>
         <Button type="button" size="sm" variant="outline" disabled={test.isPending || to.trim() === "" || touched || source === "none"} title={touched ? "Save the relay first" : undefined} onClick={() => test.mutate()}>
           {test.isPending ? "Sending…" : "Send test"}
         </Button>

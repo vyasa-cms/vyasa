@@ -15,7 +15,7 @@ export function CodeBlockView({ node, updateAttributes }: ReactNodeViewProps) {
         onChange={(e) => updateAttributes({ language: e.target.value === "" ? null : e.target.value })}
         onMouseDown={(e) => e.stopPropagation()}
         aria-label="Code language"
-        className="absolute right-2 top-2 z-10 h-6 rounded border bg-background px-1.5 font-sans text-[11px] text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="absolute right-2 top-2 z-10 h-6 rounded border bg-background px-1.5 font-sans text-[11px] text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
       >
         {CODE_LANGUAGES.map((l) => (
           <option key={l.value} value={l.value}>

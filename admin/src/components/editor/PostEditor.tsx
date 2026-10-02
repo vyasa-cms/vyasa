@@ -208,7 +208,7 @@ function ModeButton({
       className={cn(
         "inline-flex h-7 items-center gap-1.5 rounded-md px-2 text-xs transition-colors",
         active
-          ? "bg-background font-medium text-foreground shadow-sm"
+          ? "bg-background font-medium text-foreground shadow-xs"
           : "text-muted-foreground hover:text-foreground",
       )}
     >
@@ -1484,7 +1484,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
       data-focus-mode={focus ? "true" : undefined}
     >
       {focus ? (
-        <div className="mx-auto mb-6 flex max-w-[var(--vy-canvas-measure,70ch)] items-center gap-3 text-xs text-muted-foreground">
+        <div className="mx-auto mb-6 flex max-w-(--vy-canvas-measure,70ch) items-center gap-3 text-xs text-muted-foreground">
           <Button variant="outline" size="sm" onClick={() => setFocus(false)}>
             <Minimize2 className="h-3.5 w-3.5" aria-hidden="true" />
             Exit focus
@@ -1767,7 +1767,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
             className={cn(
               editorMode === "canvas" &&
                 !showJson &&
-                "mx-auto max-w-[var(--vy-canvas-measure,70ch)] lg:max-w-[calc(var(--vy-canvas-measure,70ch)+7.5rem)] lg:pl-[7.5rem]",
+                "mx-auto max-w-(--vy-canvas-measure,70ch) lg:max-w-[calc(var(--vy-canvas-measure,70ch)+7.5rem)] lg:pl-30",
             )}
           >
             <textarea
@@ -1784,7 +1784,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
               placeholder="Post title"
               aria-label="Post title"
               data-testid="post-title"
-              className="block w-full resize-none overflow-hidden bg-transparent py-1 text-2xl font-semibold leading-tight tracking-tight placeholder:text-muted-foreground/50 focus:outline-none focus-visible:ring-0 focus-visible:ring-offset-0 sm:text-3xl"
+              className="block w-full resize-none overflow-hidden bg-transparent py-1 text-2xl font-semibold leading-tight tracking-tight placeholder:text-muted-foreground/50 focus:outline-hidden focus-visible:ring-0 focus-visible:ring-offset-0 sm:text-3xl"
             />
           </div>
           {surface}
@@ -2066,7 +2066,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
           then the primary action one thumb away. Sticky inside the content
           column (not fixed to the viewport) so they never cover the
           navigation sidebar on a tablet. */}
-      <div className="sticky bottom-0 z-30 -mx-3 -mb-3 mt-auto border-t bg-card/95 backdrop-blur sm:-mx-4 sm:-mb-4 md:-mx-6 md:-mb-6 lg:hidden">
+      <div className="sticky bottom-0 z-30 -mx-3 -mb-3 mt-auto border-t bg-card/95 backdrop-blur-sm sm:-mx-4 sm:-mb-4 md:-mx-6 md:-mb-6 lg:hidden">
         {editorMode === "canvas" && !showJson ? (
           <div id={MOBILE_TOOLBAR_SLOT} className="border-b" />
         ) : null}
@@ -2178,7 +2178,7 @@ export function JsonPane({
         spellCheck={false}
         aria-label="Document JSON"
         data-testid="json-editor"
-        className="w-full rounded-lg border bg-muted/40 p-3 font-mono text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="w-full rounded-lg border bg-muted/40 p-3 font-mono text-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
       />
       {error !== null ? (
         <p className="text-xs text-destructive" role="alert">

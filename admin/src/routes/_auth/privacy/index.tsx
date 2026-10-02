@@ -108,7 +108,7 @@ function AuditPanel() {
                     <td className="py-1 pr-3">{r.actor_name || "system"}</td>
                     <td className="py-1 pr-3 font-mono text-xs">{r.action}</td>
                     <td className="py-1 pr-3 font-mono text-xs text-muted-foreground">{r.target}</td>
-                    <td className="max-w-[28rem] truncate py-1 text-xs text-muted-foreground" title={JSON.stringify(r.detail)}>{Object.keys(r.detail).length > 0 ? JSON.stringify(r.detail) : ""}</td>
+                    <td className="max-w-md truncate py-1 text-xs text-muted-foreground" title={JSON.stringify(r.detail)}>{Object.keys(r.detail).length > 0 ? JSON.stringify(r.detail) : ""}</td>
                   </tr>
                 ))}
               </tbody>

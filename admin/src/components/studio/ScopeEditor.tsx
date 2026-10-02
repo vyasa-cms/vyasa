@@ -136,7 +136,7 @@ export function ScopeEditor({
                   onChange={(e) => set(role, e.target.value)}
                   className={cn(
                     "h-6 w-full rounded border border-input bg-background px-1.5 font-mono text-[10px]",
-                    "focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring",
+                    "focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring",
                   )}
                 />
                 <span
@@ -160,7 +160,7 @@ export function ScopeEditor({
               onChange={(e) =>
                 set("padding_y", e.target.value === "" ? "" : Number(e.target.value))
               }
-              className="h-6 w-full rounded border border-input bg-background px-1.5 text-[10px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="h-6 w-full rounded border border-input bg-background px-1.5 text-[10px] focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
             />
             <span className="text-[9px] text-muted-foreground">u</span>
           </label>

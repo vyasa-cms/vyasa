@@ -117,7 +117,7 @@ export function AssistantPanel({
   }
 
   return (
-    <div className="flex h-full min-h-[24rem] flex-col gap-2" data-testid="assistant-panel">
+    <div className="flex h-full min-h-96 flex-col gap-2" data-testid="assistant-panel">
       <div className="min-h-0 flex-1 space-y-2 overflow-y-auto pr-1">
         {(messages.data ?? []).length === 0 ? (
           <p className="rounded-md bg-muted/50 px-3 py-2 text-xs text-muted-foreground">
@@ -134,7 +134,7 @@ export function AssistantPanel({
               m.role === "you" ? "ml-6 bg-primary text-primary-foreground" : "border bg-muted/50",
             )}
           >
-            <p className="mb-0.5 text-[9px] font-semibold uppercase tracking-[0.1em] opacity-70">
+            <p className="mb-0.5 text-[9px] font-semibold uppercase tracking-widest opacity-70">
               {m.role === "you" ? "You" : "Assistant"} · {formatRelative(m.created_at)}
             </p>
             <p className="whitespace-pre-wrap">{m.text}</p>
@@ -204,7 +204,7 @@ export function AssistantPanel({
               }
             }}
             placeholder={generating ? "Waiting for the assistant…" : "What should change?"}
-            className="w-full rounded-md border border-input bg-background p-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="w-full rounded-md border border-input bg-background p-2 text-sm placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
             data-testid="assistant-input"
           />
         </label>
@@ -298,7 +298,7 @@ function Proposal({
     <div className="mt-2 rounded-md border bg-background/60 p-2" data-testid="proposal">
       {steps.length > 0 ? (
         <details className="mb-1.5" data-testid="agent-steps">
-          <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+          <summary className="cursor-pointer text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
             Worked in {steps.length} step{steps.length === 1 ? "" : "s"}
           </summary>
           <ol className="mt-1 space-y-1 border-l pl-2 text-[10px] text-muted-foreground">
@@ -311,7 +311,7 @@ function Proposal({
           </ol>
         </details>
       ) : null}
-      <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+      <p className="mb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
         Would change
       </p>
       <ul className="mb-2 space-y-0.5 text-[11px] text-muted-foreground">

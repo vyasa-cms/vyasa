@@ -115,7 +115,7 @@ export function ProfilePage() {
             </Field>
             <Field label="Display name" htmlFor="pf-name"><Input id="pf-name" value={name} onChange={(e) => { setTouched(true); setName(e.target.value); }} /></Field>
             <Field label="Bio" htmlFor="pf-bio">
-              <textarea id="pf-bio" rows={3} value={bio} onChange={(e) => { setTouched(true); setBio(e.target.value); }} className="w-full resize-y rounded-md border border-input bg-background p-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" />
+              <textarea id="pf-bio" rows={3} value={bio} onChange={(e) => { setTouched(true); setBio(e.target.value); }} className="w-full resize-y rounded-md border border-input bg-background p-2 text-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring" />
             </Field>
             <div className="grid gap-3 sm:grid-cols-3">
               <Field label="Current password" htmlFor="pf-pw0" hint={pw.next !== "" && pw.current === "" ? "Needed to set a new one." : undefined} error={pwError}><Input id="pf-pw0" type="password" autoComplete="current-password" value={pw.current} onChange={(e) => { setPwError(null); setPw({ ...pw, current: e.target.value }); }} /></Field>

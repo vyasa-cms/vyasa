@@ -74,7 +74,7 @@ function Editor({
         rows={14}
         onChange={(e) => onChange(e.target.value)}
         className={
-          "w-full rounded-md border bg-background p-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" +
+          "w-full rounded-md border bg-background p-2 font-mono text-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring" +
           (over ? " border-destructive" : "")
         }
         placeholder={

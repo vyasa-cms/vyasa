@@ -78,7 +78,7 @@ function CheckRow({ check, onOp, busy }: { check: HealthCheck; onOp: (op: string
             {check.status === "ok" ? "OK" : check.status === "warn" ? "Attention" : "Failing"}
           </Chip>
         </div>
-        <p className="mt-1 break-words text-sm text-muted-foreground">{check.detail}</p>
+        <p className="mt-1 wrap-break-word text-sm text-muted-foreground">{check.detail}</p>
       </div>
       {action ? (
         action.href ? (

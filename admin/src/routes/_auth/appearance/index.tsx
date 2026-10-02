@@ -278,7 +278,7 @@ export function AppearancePage({
                 value={prompt}
                 onChange={(e) => setPrompt(e.target.value)}
                 placeholder="A reading-focused journal for a Rust systems blog. Warm paper feel, generous line height, one rust-orange accent."
-                className="w-full rounded-md border border-input bg-background p-3 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="w-full rounded-md border border-input bg-background p-3 text-sm placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
               />
             </label>
             <div className="flex flex-wrap items-center gap-2">

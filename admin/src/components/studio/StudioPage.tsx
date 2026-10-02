@@ -446,7 +446,7 @@ export function StudioPage({
       <div className="min-h-0 flex-1 overflow-x-auto">
         <div
           className={cn(
-            "grid h-full min-h-0 min-w-0 gap-3 xl:min-w-[64rem]",
+            "grid h-full min-h-0 min-w-0 gap-3 xl:min-w-5xl",
             rail === "templates" || rail === "assets"
               ? "xl:grid-cols-[2.75rem_28rem_minmax(0,1fr)_16rem] 2xl:grid-cols-[2.75rem_30rem_minmax(0,1fr)_19rem]"
               : "xl:grid-cols-[2.75rem_15rem_minmax(0,1fr)_16rem] 2xl:grid-cols-[2.75rem_17rem_minmax(0,1fr)_19rem]",

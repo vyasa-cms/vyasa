@@ -42,7 +42,7 @@ import {
 } from "./sectionTree";
 
 const inputClass =
-  "h-7 w-full rounded-md border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+  "h-7 w-full rounded-md border border-input bg-background px-2 text-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 
 /** Groups for the insert menu, so 25 kinds are not one flat list. */
 const GROUPS: { label: string; kinds: string[] }[] = [

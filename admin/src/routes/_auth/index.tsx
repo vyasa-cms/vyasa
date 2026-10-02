@@ -72,7 +72,7 @@ function StatCard({
         />
         <span
           className={cn(
-            "text-[10px] font-semibold uppercase tracking-[0.1em]",
+            "text-[10px] font-semibold uppercase tracking-widest",
             tone === "attention" ? "text-warning" : "text-muted-foreground",
           )}
         >

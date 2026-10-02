@@ -31,7 +31,7 @@ function Toggle({
       className={cn(
         "inline-flex h-6 w-7 items-center justify-center rounded transition-colors",
         active
-          ? "bg-background text-foreground shadow-sm"
+          ? "bg-background text-foreground shadow-xs"
           : "text-muted-foreground hover:text-foreground",
       )}
     >
@@ -124,7 +124,7 @@ export function SectionPreview({
 
   return (
     <div
-      className="flex min-h-[24rem] flex-col overflow-hidden rounded-lg border bg-muted/40"
+      className="flex min-h-96 flex-col overflow-hidden rounded-lg border bg-muted/40"
       data-testid="section-preview"
     >
       <div className="flex flex-wrap items-center gap-2 border-b bg-card px-2 py-1.5">
@@ -172,7 +172,7 @@ export function SectionPreview({
         </div>
       ) : null}
 
-      <div className="flex min-h-[22rem] flex-1 justify-center overflow-auto p-2">
+      <div className="flex min-h-88 flex-1 justify-center overflow-auto p-2">
         <iframe
           ref={frameRef}
           srcDoc={preview.data ?? "<!doctype html><title>Preview</title>"}
@@ -183,7 +183,7 @@ export function SectionPreview({
           title="Preview of this page"
           onLoad={onFrameLoad}
           style={{ width }}
-          className="h-full min-h-[22rem] rounded-md border bg-white shadow-sm transition-[width] duration-200"
+          className="h-full min-h-88 rounded-md border bg-white shadow-xs transition-[width] duration-200"
           data-testid="page-preview-frame"
         />
       </div>

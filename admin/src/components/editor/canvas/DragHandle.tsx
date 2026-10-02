@@ -160,7 +160,7 @@ export function DragHandle({
     <div
       data-drag-handle-ui=""
       style={style}
-      className="absolute z-30 hidden items-center gap-0.5 rounded-md border bg-popover p-0.5 shadow-sm lg:flex"
+      className="absolute z-30 hidden items-center gap-0.5 rounded-md border bg-popover p-0.5 shadow-xs lg:flex"
       onMouseLeave={() => {
         hover.current = null;
         place(editor.isFocused ? currentBlock(editor) : null);

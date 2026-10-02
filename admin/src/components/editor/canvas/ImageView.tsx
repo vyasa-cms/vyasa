@@ -185,7 +185,7 @@ export function ImageView({
               }
             }}
             placeholder="Describe the image for people who can't see it"
-            className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="mt-1 h-8 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
           />
           <p className="mt-1 text-[11px] text-muted-foreground">
             Leave it empty only if the image is purely decorative.
@@ -225,7 +225,7 @@ export function ImageView({
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             placeholder="A watercolour of a lighthouse at dusk, soft light, no text"
-            className="w-full rounded-md border border-input bg-background p-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="w-full rounded-md border border-input bg-background p-2 text-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
           />
           <div className="flex items-center gap-2">
             <button type="submit" disabled={generating || prompt.trim() === ""} className="h-8 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground disabled:opacity-60">
@@ -257,7 +257,7 @@ export function ImageView({
             }}
             placeholder="https://… or /api/v1/media/…/raw"
             aria-label="Image address"
-            className="h-8 flex-1 rounded-md border border-input bg-background px-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="h-8 flex-1 rounded-md border border-input bg-background px-2 font-mono text-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
           />
           <button type="submit" className="h-8 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground">
             Use

@@ -101,7 +101,7 @@ export function Modal({
         tabIndex={-1}
         data-testid={testId}
         className={cn(
-          "relative z-10 flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-xl border bg-popover text-popover-foreground shadow-2xl outline-none",
+          "relative z-10 flex max-h-[92dvh] w-full flex-col overflow-hidden rounded-t-xl border bg-popover text-popover-foreground shadow-2xl outline-hidden",
           "animate-scale-in sm:rounded-xl",
           width,
         )}
@@ -235,7 +235,7 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
               autoFocus
               value={typed}
               onChange={(e) => setTyped(e.target.value)}
-              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
             />
           </label>
         ) : null}

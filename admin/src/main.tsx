@@ -75,7 +75,7 @@ function App() {
 
   if (!ready) {
     return (
-      <div className="flex min-h-[100dvh] flex-col items-center justify-center gap-3">
+      <div className="flex min-h-dvh flex-col items-center justify-center gap-3">
         <Mark className="h-9 w-9 animate-pulse text-primary" />
         <span className="text-sm text-muted-foreground">Loading Vyasa…</span>
       </div>

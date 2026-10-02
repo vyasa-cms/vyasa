@@ -134,7 +134,7 @@ export function DataList<T>({
                 onChange={(e) => search.onChange(e.target.value)}
                 placeholder={search.placeholder ?? "Search"}
                 aria-label={search.placeholder ?? "Search"}
-                className="h-9 w-full rounded-md border border-input bg-background pl-8 pr-8 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="h-9 w-full rounded-md border border-input bg-background pl-8 pr-8 text-sm placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
               />
               {search.value !== "" ? (
                 <button
@@ -367,7 +367,7 @@ export function FilterSelect({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         aria-label={label}
-        className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring sm:h-8"
+        className="h-9 rounded-md border border-input bg-background px-2 text-sm text-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring sm:h-8"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value}>

@@ -47,7 +47,7 @@ function LoginPage() {
     staleTime: 60_000,
   });
   return (
-    <div className="grid min-h-[100dvh] lg:grid-cols-2">
+    <div className="grid min-h-dvh lg:grid-cols-2">
       <div className="flex flex-col px-5 py-8 sm:px-10">
         <div className="flex items-center gap-2">
           <Mark className="h-7 w-7 text-primary" />

@@ -34,7 +34,7 @@ function ToggleButton({
       className={cn(
         "inline-flex h-6 w-7 items-center justify-center rounded transition-colors",
         active
-          ? "bg-background text-foreground shadow-sm"
+          ? "bg-background text-foreground shadow-xs"
           : "text-muted-foreground hover:text-foreground",
       )}
     >
@@ -163,7 +163,7 @@ export function PreviewPane({
           aria-label="Page to preview"
           value={path}
           onChange={(e) => onPathChange(e.target.value)}
-          className="h-7 max-w-[14rem] rounded-md border bg-background px-2 text-xs"
+          className="h-7 max-w-56 rounded-md border bg-background px-2 text-xs"
         >
           {options.map((o) => (
             <option key={o.value} value={o.value}>

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 type Item = Record<string, unknown>;
 
 const inputClass =
-  "h-6 w-full rounded border border-input bg-background px-1.5 text-[11px] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+  "h-6 w-full rounded border border-input bg-background px-1.5 text-[11px] focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 
 /**
  * Repeating rows for a section's `items` array.

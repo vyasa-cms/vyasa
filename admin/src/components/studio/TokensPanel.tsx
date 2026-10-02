@@ -61,7 +61,7 @@ const scaleCustom = (s: ScaleRatio): number =>
   typeof s === "string" ? 1.25 : s.custom;
 
 const inputClass =
-  "h-8 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+  "h-8 w-full rounded-md border border-input bg-background px-2 text-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 
 /**
  * A hex field that only commits well-formed values, so a half-typed colour
@@ -145,7 +145,7 @@ function Section({
 }) {
   return (
     <section className="space-y-2">
-      <h3 className="text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">
+      <h3 className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground">
         {title}
       </h3>
       {children}
