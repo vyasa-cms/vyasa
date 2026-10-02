@@ -102,7 +102,7 @@ jobs:
       - name: Build
         if: ${{ !matrix.public_only || !github.event.repository.private }}
         run: cargo build --release --locked --bin vyasa
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         if: ${{ !matrix.public_only || !github.event.repository.private }}
         with:
           name: admin-dist
@@ -185,7 +185,7 @@ jobs:
     outputs:
       digest: ${{ steps.inspect.outputs.digest }}
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: digest-*
           path: digests
@@ -251,7 +251,7 @@ jobs:
       contents: write
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: archive-*
           path: dist
