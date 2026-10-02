@@ -64,7 +64,7 @@ for (const [from, slug] of Object.entries(pages)) {
   const { title, body } = split(source);
   const file = join(out, `${slug}.md`);
   await mkdir(dirname(file), { recursive: true });
-  const front = `---\ntitle: ${JSON.stringify(title)}\n---\n\n`;
+  const front = `---\ntitle: ${JSON.stringify(title)}\nsource: ${JSON.stringify(from)}\n---\n\n`;
   const note = `<!-- Generated from ${from} by scripts/sync-docs.mjs. Edit that file instead. -->\n\n`;
   await writeFile(file, front + note + rewriteLinks(body, from));
 }

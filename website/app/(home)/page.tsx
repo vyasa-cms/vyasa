@@ -50,14 +50,16 @@ export default function HomePage() {
 
       <section className="flex flex-col gap-3">
         <h2 className="text-xl font-semibold">Run it in a minute</h2>
-        <pre className="overflow-x-auto rounded-lg border bg-fd-card p-4 text-sm">
+        <pre tabIndex={0} className="overflow-x-auto rounded-lg border bg-fd-card p-4 text-sm">
 {`mkdir vyasa && cd vyasa
 curl -fsSLO https://raw.githubusercontent.com/vyasa-cms/vyasa/main/docker-compose.yml
 docker compose run --rm app migrate
-docker compose up -d`}
+docker compose up -d
+docker compose exec app cat .run/setup-token`}
         </pre>
         <p className="text-sm text-fd-muted-foreground">
-          Then open <code>http://localhost:3000/admin/setup</code>. Full steps in{' '}
+          Then open <code>http://localhost:3000/admin/setup</code> and enter the token. Until 0.1.0 is
+          released, set <code>VYASA_VERSION=0.1.0-rc.1</code> first. Full steps in{' '}
           <Link href="/docs/getting-started" className="underline">Getting started</Link>.
         </p>
       </section>

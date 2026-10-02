@@ -17,11 +17,17 @@ docker compose exec app cat .run/setup-token # the one-time setup token
 
 Open `http://localhost:3000/admin/setup`, enter the token, and create the first administrator. The site is on `http://localhost:3000`, the admin on `/admin`.
 
-Pin a version with `VYASA_VERSION=0.1.0 docker compose up -d`. Back up the database before moving to a newer version: migrations only go forward.
+<Callout title="Before 0.1.0">
+
+Only release candidates exist so far. Put `VYASA_VERSION=0.1.0-rc.1` in an `.env` file next to `docker-compose.yml` (or in front of each `docker compose` command) until 0.1.0 is released.
+
+</Callout>
+
+Pin a version by setting `VYASA_VERSION` (for example `0.1.0`) in that `.env` file. Back up the database before moving to a newer version: migrations only go forward.
 
 ## From a release archive
 
-Each [release](https://github.com/vyasa-cms/vyasa/releases) has an archive for Linux (x86_64 and arm64) and macOS (arm64), with a checksum next to it. You also need PostgreSQL 16 or newer.
+Each [release](https://github.com/vyasa-cms/vyasa/releases) has an archive for Linux (x86_64 and arm64) and macOS (arm64), with a checksum next to it. You also need PostgreSQL 15 or newer with the `citext` extension available.
 
 ```bash
 sha256sum -c vyasa-0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256

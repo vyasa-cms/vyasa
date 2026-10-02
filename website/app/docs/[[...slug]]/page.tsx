@@ -32,7 +32,7 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
         <MarkdownCopyButton markdownUrl={markdownUrl} />
         <ViewOptionsPopover
           markdownUrl={markdownUrl}
-          githubUrl={`https://github.com/${gitConfig.user}/${gitConfig.repo}/blob/${gitConfig.branch}/website/content/docs/${page.path}`}
+          githubUrl={`https://github.com/${gitConfig.user}/${gitConfig.repo}/blob/${gitConfig.branch}/${editPath(page)}`}
         />
       </div>
       <DocsBody>
@@ -48,6 +48,14 @@ export default async function Page(props: PageProps<'/docs/[[...slug]]'>) {
       </DocsBody>
     </DocsPage>
   );
+}
+
+/** The repository file a page is edited in: the synced original, the
+ * OpenAPI document for the generated API reference, else the page itself. */
+function editPath(page: { path: string; data: { source?: string; _openapi?: unknown } }): string {
+  if (page.data.source) return page.data.source;
+  if (page.data._openapi) return 'admin/openapi.json';
+  return `website/content/docs/${page.path}`;
 }
 
 export async function generateStaticParams() {
