@@ -59,10 +59,11 @@ capabilities they declare. One server binary and PostgreSQL are all it needs.
 With Docker:
 
 ```bash
-git clone https://github.com/vyasa-cms/vyasa && cd vyasa
-docker compose run --rm app migrate      # create the database schema
+mkdir vyasa && cd vyasa
+curl -fsSLO https://raw.githubusercontent.com/vyasa-cms/vyasa/main/docker-compose.yml
+docker compose run --rm app migrate          # create the database schema
 docker compose up -d
-docker compose exec app cat .run/setup-token  # the one-time setup token
+docker compose exec app cat .run/setup-token # the one-time setup token
 ```
 
 Open <http://localhost:3000/admin/setup>, enter the token, and create the

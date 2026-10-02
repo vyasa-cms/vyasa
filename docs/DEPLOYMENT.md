@@ -106,6 +106,41 @@ once before the first `up`, and again after upgrading the image.
 Uploads and the index are on named volumes: an image upgrade that did not
 preserve them would silently discard every uploaded file.
 
+### Image tags and verification
+
+`docker-compose.yml` runs `ghcr.io/vyasa-cms/vyasa`. Tags:
+
+| Tag | Moves when |
+|---|---|
+| `latest` | every stable release |
+| `0.1` | every `0.1.x` release |
+| `0.1.0` | never (one release) |
+| `0.1.0-rc.1` | never (a release candidate; candidates never move `latest`) |
+
+Pin a version with `VYASA_VERSION=0.1.0 docker compose up -d`. Back up the
+database before moving to a newer version: migrations are forward-only.
+
+Every image and release archive carries a build provenance attestation:
+
+```bash
+gh attestation verify oci://ghcr.io/vyasa-cms/vyasa:0.1.0 --owner vyasa-cms
+gh attestation verify vyasa-0.1.0-x86_64-unknown-linux-gnu.tar.gz --owner vyasa-cms
+```
+
+## Release archives
+
+Each release has an archive per platform (Linux x86_64 and arm64, macOS
+arm64) with a `.sha256` next to it. Unpack it and run the server from that
+directory — it serves the admin from `admin/dist` beside the binary:
+
+```bash
+sha256sum -c vyasa-0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf vyasa-0.1.0-x86_64-unknown-linux-gnu.tar.gz
+cd vyasa-0.1.0-x86_64-unknown-linux-gnu
+export VYASA_DATABASE_URL=postgres://vyasa:…@localhost:5432/vyasa
+./vyasa migrate && ./vyasa serve
+```
+
 The image is debian-slim rather than scratch/musl. wasmtime and Tantivy both
 expect a real libc, and a static build of them costs more maintenance than
 the image size saves.
