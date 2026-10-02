@@ -43,7 +43,7 @@ export function DragHandle({
   container,
 }: {
   editor: Editor;
-  container: React.RefObject<HTMLDivElement>;
+  container: React.RefObject<HTMLDivElement | null>;
 }) {
   const [placed, setPlaced] = React.useState<Placed | null>(null);
   const hover = React.useRef<BlockTarget | null>(null);
@@ -160,7 +160,7 @@ export function DragHandle({
     <div
       data-drag-handle-ui=""
       style={style}
-      className="absolute z-30 hidden items-center gap-0.5 rounded-md border bg-popover p-0.5 shadow-sm lg:flex"
+      className="absolute z-30 hidden items-center gap-0.5 rounded-md border bg-popover p-0.5 shadow-xs lg:flex"
       onMouseLeave={() => {
         hover.current = null;
         place(editor.isFocused ? currentBlock(editor) : null);

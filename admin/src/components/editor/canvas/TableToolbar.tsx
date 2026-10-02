@@ -71,7 +71,7 @@ export function TableToolbar({ editor }: { editor: Editor }) {
         onChange={(e) => editor.chain().updateAttributes("table", { caption: e.target.value }).run()}
         placeholder="Caption (optional)"
         aria-label="Table caption"
-        className="ml-1 h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="ml-1 h-7 min-w-0 flex-1 rounded-md border border-input bg-background px-2 text-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
       />
       <Btn label="Delete table" destructive onClick={run((c) => c.deleteTable())}>
         <Trash2 className="h-3.5 w-3.5" aria-hidden="true" />

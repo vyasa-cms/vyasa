@@ -315,7 +315,7 @@ export function PostChromeSidebar({
             value={value.type}
             disabled={value.type !== "post" && value.type !== "page"}
             onChange={(e) => onChange({ type: e.target.value })}
-            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
           >
             <option value="post">Post</option>
             <option value="page">Page</option>
@@ -397,7 +397,7 @@ export function PostChromeSidebar({
             value={value.excerpt}
             onChange={(e) => onChange({ excerpt: e.target.value })}
             placeholder="A short description…"
-            className="w-full rounded-md border border-input bg-background p-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="w-full rounded-md border border-input bg-background p-2 text-sm placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
           />
         </Field>
         {document !== undefined ? (
@@ -422,7 +422,7 @@ export function PostChromeSidebar({
             value={value.seo_description}
             onChange={(e) => onChange({ seo_description: e.target.value })}
             maxLength={200}
-            className="w-full rounded-md border border-input bg-background p-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="w-full rounded-md border border-input bg-background p-2 text-sm placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
           />
         </Field>
         {document !== undefined ? (

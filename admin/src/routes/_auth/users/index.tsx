@@ -313,7 +313,7 @@ function UsersPage() {
           <select
             value={roleValue(u)}
             onChange={(e) => void askRole(u, e.target.value)}
-            className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+            className="h-8 w-full rounded-md border border-input bg-background px-2 text-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
           >
             <optgroup label="Built-in roles">{roleOptionElements(builtInRoleOptions)}</optgroup>
             {customRoleOptions.length > 0 ? (
@@ -511,7 +511,7 @@ function ReassignDialog({
               id="reassign-target"
               value={validTarget}
               onChange={(e) => setTarget(e.target.value)}
-              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+              className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
             >
               {options.map((o) => (
                 <option key={o.id} value={o.id}>{o.display_name || o.email}{o.id === me?.id ? " (you)" : ""}</option>
@@ -581,7 +581,7 @@ function UserForm({
               <Input id="user-password" type="password" autoComplete="new-password" value={v.password} onChange={set("password")} />
             </Field>
             <Field label="Role" htmlFor="user-role">
-              <select id="user-role" value={v.role} onChange={set("role")} className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring">
+              <select id="user-role" value={v.role} onChange={set("role")} className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring">
                 <optgroup label="Built-in roles">{roleOptionElements(options.builtIn)}</optgroup>
                 {options.custom.length > 0 ? <optgroup label="Custom roles">{roleOptionElements(options.custom)}</optgroup> : null}
               </select>

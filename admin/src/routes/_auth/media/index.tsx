@@ -320,7 +320,7 @@ function MediaPage() {
         </p>
       ) : null}
       <div className="flex flex-wrap items-center gap-2" data-testid="media-filters">
-        <div className="relative min-w-[12rem] flex-1">
+        <div className="relative min-w-48 flex-1">
           <Search className="pointer-events-none absolute left-2 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
           <Input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search by name, alt text or caption" aria-label="Search media" className="h-9 pl-8" />
         </div>
@@ -402,7 +402,7 @@ function MediaPage() {
       ) : media.isPending ? (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
           {Array.from({ length: 10 }, (_, i) => (
-            <Skeleton key={i} className="aspect-[4/3] w-full" />
+            <Skeleton key={i} className="aspect-4/3 w-full" />
           ))}
         </div>
       ) : items.length === 0 ? (
@@ -422,12 +422,12 @@ function MediaPage() {
               const isSelected = selected.has(m.id);
               return (
                 <li key={m.id} className={cn("group relative overflow-hidden rounded-lg border bg-card transition-colors", isSelected ? "border-primary ring-1 ring-primary" : "hover:border-input")}>
-                  <label className="absolute left-2 top-2 z-10 flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-background/90 shadow-sm" onClick={(e) => { if (e.shiftKey) { e.preventDefault(); toggle(m.id, true); } }}>
+                  <label className="absolute left-2 top-2 z-10 flex h-6 w-6 cursor-pointer items-center justify-center rounded-md bg-background/90 shadow-xs" onClick={(e) => { if (e.shiftKey) { e.preventDefault(); toggle(m.id, true); } }}>
                     <span className="sr-only">Select {m.file_name}</span>
                     <input type="checkbox" checked={isSelected} onChange={() => toggle(m.id, false)} className="h-3.5 w-3.5 accent-primary" />
                   </label>
                   <button type="button" onClick={() => setDetail(m)} className="block w-full text-left">
-                    <span className="flex aspect-[4/3] items-center justify-center overflow-hidden bg-muted">
+                    <span className="flex aspect-4/3 items-center justify-center overflow-hidden bg-muted">
                       {isImage(m) ? (
                         <img src={thumbUrl(m)} alt={m.alt ?? ""} loading="lazy" className="h-full w-full object-cover" style={m.focal_x != null && m.focal_y != null ? { objectPosition: `${Math.round(m.focal_x * 100)}% ${Math.round(m.focal_y * 100)}%` } : undefined} />
                       ) : (
@@ -699,7 +699,7 @@ function MediaDetail({
               >
                 <img src={`${url}?v=${version}`} alt={item.alt ?? ""} className="max-h-72 w-full object-contain" draggable={false} />
                 {focal !== null && !cropping ? (
-                  <span aria-hidden="true" className="pointer-events-none absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-primary/80 shadow" style={{ left: `${focal.x * 100}%`, top: `${focal.y * 100}%` }} />
+                  <span aria-hidden="true" className="pointer-events-none absolute h-5 w-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-white bg-primary/80 shadow-sm" style={{ left: `${focal.x * 100}%`, top: `${focal.y * 100}%` }} />
                 ) : null}
                 {crop && crop.w > 0.01 && crop.h > 0.01 ? (
                   <span aria-hidden="true" className="pointer-events-none absolute border-2 border-white shadow-[0_0_0_9999px_rgba(0,0,0,0.45)]" style={{ left: `${crop.x * 100}%`, top: `${crop.y * 100}%`, width: `${crop.w * 100}%`, height: `${crop.h * 100}%` }} />

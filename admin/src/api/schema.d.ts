@@ -4493,7 +4493,7 @@ export interface components {
         };
         /** @description Crop first, then rotation (0, 90, 180 or 270 clockwise), then flips. */
         ImageEditBody: {
-            crop?: null | components["schemas"]["CropBody"];
+            crop?: components["schemas"]["CropBody"] | null;
             flip_h?: boolean;
             flip_v?: boolean;
             /** Format: int32 */
@@ -12717,7 +12717,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": null | components["schemas"]["Progress"];
+                    "application/json": components["schemas"]["Progress"] | null;
                 };
             };
             /** @description Forbidden */

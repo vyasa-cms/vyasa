@@ -329,7 +329,7 @@ function AuthLayout() {
         <div key={t(group.heading)}>
           <p
             className={cn(
-              "px-2 pb-1 text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground",
+              "px-2 pb-1 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground",
               collapsed && "lg:sr-only",
             )}
           >
@@ -406,7 +406,7 @@ function AuthLayout() {
 
   return (
     <ConfirmProvider>
-      <div className="flex min-h-[100dvh] bg-background">
+      <div className="flex min-h-dvh bg-background">
         {/* Mobile drawer backdrop */}
         {mobileOpen && !restricted ? (
           <button
@@ -421,11 +421,11 @@ function AuthLayout() {
         <aside
           id="admin-sidebar"
           className={cn(
-            "fixed inset-y-0 left-0 z-40 flex w-[17rem] max-w-[82vw] flex-col border-r bg-card transition-[transform,width] duration-200 ease-out",
+            "fixed inset-y-0 left-0 z-40 flex w-68 max-w-[82vw] flex-col border-r bg-card transition-[transform,width] duration-200 ease-out",
             // Desktop: sticky, so the navigation stays put while a long post
             // scrolls and never scrolls out of reach. Collapsible to a rail.
             "lg:sticky lg:top-0 lg:z-auto lg:h-dvh lg:max-w-none lg:translate-x-0 lg:self-start",
-            collapsed ? "lg:w-[4.25rem]" : "lg:w-56",
+            collapsed ? "lg:w-17" : "lg:w-56",
             mobileOpen ? "translate-x-0 shadow-2xl" : "-translate-x-full lg:shadow-none",
           )}
         >
@@ -498,7 +498,7 @@ function AuthLayout() {
         )}
 
         <div className="flex min-w-0 flex-1 flex-col">
-          <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-card/85 px-3 backdrop-blur supports-[backdrop-filter]:bg-card/70 md:px-5">
+          <header className="sticky top-0 z-20 flex h-14 shrink-0 items-center gap-2 border-b bg-card/85 px-3 backdrop-blur-sm supports-backdrop-filter:bg-card/70 md:px-5">
             {restricted ? null : (
               <button
                 type="button"

@@ -57,7 +57,7 @@ function TextArea({
       onChange={(e) => onChange(e.target.value)}
       placeholder={placeholder}
       rows={rows}
-      className={`w-full rounded-md border bg-background p-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring ${mono ? "font-mono text-xs" : ""}`}
+      className={`w-full rounded-md border bg-background p-2 text-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring ${mono ? "font-mono text-xs" : ""}`}
     />
   );
 }
@@ -104,7 +104,7 @@ function RichTextArea({
       rows={rows}
       aria-label={ariaLabel}
       data-testid="rich-field"
-      className="w-full rounded-md border bg-background p-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="w-full rounded-md border bg-background p-2 text-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
     />
   );
 }
@@ -439,7 +439,7 @@ export function BlockEditor({
             key={b._id}
             data-vy-kind={b.kind}
             tabIndex={-1}
-            className="group relative rounded-lg border border-transparent px-3 py-2.5 transition-colors hover:border-border hover:bg-card focus-within:border-border focus-within:bg-card focus:outline-none"
+            className="group relative rounded-lg border border-transparent px-3 py-2.5 transition-colors hover:border-border hover:bg-card focus-within:border-border focus-within:bg-card focus:outline-hidden"
           >
             {/* Chrome appears on hover/focus so the document reads as content,
                 not as a stack of labelled form cards. Kept keyboard-reachable

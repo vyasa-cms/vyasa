@@ -367,13 +367,13 @@ function MenuItems({
                     value={item.label}
                     aria-label={`Label for ${item.label}`}
                     onCommit={(label) => update.mutate({ id: item.id, body: { label } })}
-                    className="w-full truncate border-0 bg-transparent p-0 text-sm font-medium focus-visible:outline-none focus-visible:ring-0"
+                    className="w-full truncate border-0 bg-transparent p-0 text-sm font-medium focus-visible:outline-hidden focus-visible:ring-0"
                   />
                   <CommitInput
                     value={item.url}
                     aria-label={`Address for ${item.label}`}
                     onCommit={(url) => update.mutate({ id: item.id, body: { url } })}
-                    className="w-full truncate border-0 bg-transparent p-0 font-mono text-[11px] text-muted-foreground focus-visible:outline-none focus-visible:ring-0"
+                    className="w-full truncate border-0 bg-transparent p-0 font-mono text-[11px] text-muted-foreground focus-visible:outline-hidden focus-visible:ring-0"
                   />
                 </div>
 
@@ -440,7 +440,7 @@ function MenuItems({
             onChange={(e) => setLabel(e.target.value)}
             placeholder="Link text"
             aria-label="New link text"
-            className="sm:max-w-[12rem]"
+            className="sm:max-w-48"
           />
           <Input
             value={url}

@@ -271,11 +271,11 @@ export function ErrorNote({
     >
       <p className="font-medium">{title}</p>
       {onRetry ? <button type="button" className="mt-2 underline" onClick={onRetry}>Try again</button> : null}
-      <p className="mt-0.5 break-words opacity-90">{summary}</p>
+      <p className="mt-0.5 wrap-break-word opacity-90">{summary}</p>
       {rest === null ? null : (
         <details className="mt-1">
           <summary className="cursor-pointer text-xs opacity-70">Details</summary>
-          <p className="mt-1 whitespace-pre-wrap break-words font-mono text-[11px] opacity-80">
+          <p className="mt-1 whitespace-pre-wrap wrap-break-word font-mono text-[11px] opacity-80">
             {rest}
           </p>
         </details>

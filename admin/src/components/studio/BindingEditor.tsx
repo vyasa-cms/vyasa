@@ -1,7 +1,7 @@
 import type { ContentSource } from "@/api/themes";
 
 const inputClass =
-  "h-7 w-full rounded-md border bg-background px-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring";
+  "h-7 w-full rounded-md border bg-background px-2 text-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring";
 
 const SORTS = ["newest", "oldest", "title", "updated"] as const;
 

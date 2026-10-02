@@ -115,7 +115,7 @@ function Switch({ id, checked, onChange, label }: { id: string; checked: boolean
     <label className="inline-flex cursor-pointer items-center gap-2 text-sm">
       <input id={id} type="checkbox" role="switch" className="peer sr-only" checked={checked} aria-checked={checked} onChange={(e) => onChange(e.target.checked)} aria-label={label} />
       <span aria-hidden="true" className={cn("relative inline-block h-5 w-9 rounded-full border transition-colors peer-focus-visible:ring-2 peer-focus-visible:ring-ring", checked ? "border-primary bg-primary" : "bg-muted")}>
-        <span className={cn("absolute top-0.5 h-3.5 w-3.5 rounded-full bg-background shadow transition-transform", checked ? "translate-x-[1.1rem]" : "translate-x-0.5")} />
+        <span className={cn("absolute top-0.5 h-3.5 w-3.5 rounded-full bg-background shadow-sm transition-transform", checked ? "translate-x-[1.1rem]" : "translate-x-0.5")} />
       </span>
       <span className="text-muted-foreground">{checked ? "On" : "Off"}</span>
     </label>
@@ -286,7 +286,7 @@ function KeysField({ id, value, onChange }: { id: string; value: string; onChang
       value={value}
       onChange={(e) => onChange(e.target.value)}
       placeholder="one hex ed25519 public key per line"
-      className="w-full resize-y rounded-md border border-input bg-background p-2 font-mono text-xs placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+      className="w-full resize-y rounded-md border border-input bg-background p-2 font-mono text-xs placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
     />
   );
 }
@@ -723,7 +723,7 @@ export function SettingsPage() {
                                 placeholder={f.placeholder}
                                 maxLength={600}
                                 onChange={(e) => setBrand((prev) => ({ ...prev, [f.key]: e.target.value }))}
-                                className="w-full max-w-[70ch] resize-y rounded-md border border-input bg-background p-2 text-sm placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                className="w-full max-w-[70ch] resize-y rounded-md border border-input bg-background p-2 text-sm placeholder:text-muted-foreground focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
                               />
                             </Field>
                           ))}
@@ -747,7 +747,7 @@ export function SettingsPage() {
       {/* Save bar appears only when something changed, names what, and
           stays reachable above the phone's home indicator. */}
       {isDirty ? (
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-card/95 px-3 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur sm:px-6" data-testid="save-bar">
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-card/95 px-3 py-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] backdrop-blur-sm sm:px-6" data-testid="save-bar">
           <div className="mx-auto flex items-center gap-3">
             <span className="min-w-0 flex-1 truncate text-sm text-muted-foreground" title={changedLabels.join(", ")}>
               <b className="font-medium text-foreground">{changedLabels.length} unsaved {changedLabels.length === 1 ? "change" : "changes"}:</b> {changedLabels.join(", ")}

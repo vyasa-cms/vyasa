@@ -128,7 +128,7 @@ function PluginAttrs({
         onChange={(e) => commit(e.target.value)}
         rows={8}
         spellCheck={false}
-        className="w-full rounded-md border bg-background p-2 font-mono text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="w-full rounded-md border bg-background p-2 font-mono text-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
       />
       {error === null ? null : (
         <p className="text-xs text-destructive" role="alert">
@@ -260,7 +260,7 @@ export function OpaqueBlockPanel({
                 rows={f.kind === "code" ? 8 : 3}
                 spellCheck={f.kind !== "code"}
                 className={
-                  "w-full rounded-md border bg-background p-2 text-sm focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring" +
+                  "w-full rounded-md border bg-background p-2 text-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring" +
                   (f.kind === "code" ? " font-mono text-xs" : "")
                 }
               />

@@ -150,7 +150,7 @@ function Inbox({ form, onClose, onRead }: { form: FormDef; onClose: () => void; 
               </div>
               <dl className="mt-1 grid gap-x-4 gap-y-0.5 sm:grid-cols-[auto_1fr]">
                 {[...form.fields, ...Object.keys(r.data).filter(key => !form.fields.some(f => f.key === key)).map(key => ({ key, label: `${key} (previous field)` }))].map((f) => (
-                  <React.Fragment key={f.key}><dt className="text-muted-foreground">{f.label}</dt><dd className="whitespace-pre-wrap break-words">{r.data[f.key] ?? ""}</dd></React.Fragment>
+                  <React.Fragment key={f.key}><dt className="text-muted-foreground">{f.label}</dt><dd className="whitespace-pre-wrap wrap-break-word">{r.data[f.key] ?? ""}</dd></React.Fragment>
                 ))}
               </dl>
             </li>

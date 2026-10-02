@@ -12,8 +12,8 @@ workspace = true
 
 [dependencies]
 argon2 = "0.6"
-base64 = "0.22"
-chrono-tz = "0.9"
+base64 = "0.23"
+chrono-tz = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 hmac = "0.13"
 rand = "0.8"

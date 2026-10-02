@@ -92,7 +92,7 @@ export function MediaPicker({
               onClick={() => onPick(m)}
               title={m.file_name}
               aria-label={`Use ${m.file_name}`}
-              className="h-16 w-16 shrink-0 overflow-hidden rounded border hover:ring-2 hover:ring-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className="h-16 w-16 shrink-0 overflow-hidden rounded border hover:ring-2 hover:ring-primary focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring"
             >
               {m.mime.startsWith("image/") ? (
                 <img

@@ -217,7 +217,7 @@ function Compose({
         aria-label="What should this page do?"
         placeholder="A landing page for launch week: hero, three features, a dark call to action."
         onChange={(e) => setMessage(e.target.value)}
-        className="w-full resize-y rounded-md border border-input bg-background p-2 text-xs focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+        className="w-full resize-y rounded-md border border-input bg-background p-2 text-xs focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
       />
 
       <div className="flex items-center gap-2">
