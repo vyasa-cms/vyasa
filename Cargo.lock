@@ -6260,7 +6260,7 @@ dependencies = [
  "futures-util",
  "hex",
  "hmac 0.13.0",
- "html5ever 0.39.0",
+ "html5ever 0.40.1",
  "markup5ever_rcdom",
  "mime_guess",
  "moka",
