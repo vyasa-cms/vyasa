@@ -23,7 +23,7 @@ moka = { version = "0.12", features = ["sync"] }
 vyasa-search = { path = "../search" }
 ammonia = { version = "4", optional = true }
 axum = { version = "0.8", features = ["json", "tokio", "http1", "multipart"] }
-chrono-tz = "0.9"
+chrono-tz = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 clap = { version = "4", features = ["derive"] }
 vyasa-common = { path = "../common" }
