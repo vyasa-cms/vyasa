@@ -94,6 +94,10 @@ jobs:
   audit:
     name: Dependency audit
     runs-on: ubuntu-latest
+    # The action reports through a check run; org tokens are read-only by default.
+    permissions:
+      contents: read
+      checks: write
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
