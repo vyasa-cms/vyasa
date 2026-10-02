@@ -22,7 +22,8 @@ trap cleanup EXIT
 
 start=$(date +%s)
 # --no-build: the point is the published image, not a local build.
-docker compose pull app
+# Every image the stack needs, so nothing below has to pull or build.
+docker compose pull
 docker compose run --rm --pull never app migrate
 docker compose up -d --no-build
 

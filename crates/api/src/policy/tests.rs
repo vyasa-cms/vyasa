@@ -846,3 +846,34 @@ async fn a_full_administrator_holds_every_capability() {
     );
     assert!(!message.contains("site_title"), "{message}");
 }
+
+/// Every route a demo refuses must be a real route: a typo would leave the
+/// action allowed without anyone noticing.
+#[test]
+fn every_demo_refused_route_exists() {
+    let rules = crate::rest::rules();
+    for (method, path, what) in crate::policy::DEMO_REFUSED_ROUTES {
+        let relative = path.strip_prefix("/api/v1").expect("an /api/v1 path");
+        assert!(
+            rules
+                .iter()
+                .any(|r| r.method.as_str() == *method && r.path == relative),
+            "{method} {path} ({what}) is not a route"
+        );
+    }
+}
+
+/// The demo upload cap names real routes, like the refusal table.
+#[test]
+fn every_demo_upload_route_exists() {
+    let rules = crate::rest::rules();
+    for (method, path) in crate::policy::DEMO_UPLOAD_ROUTES {
+        let relative = path.strip_prefix("/api/v1").expect("an /api/v1 path");
+        assert!(
+            rules
+                .iter()
+                .any(|r| r.method.as_str() == *method && r.path == relative),
+            "{method} {path} is not a route"
+        );
+    }
+}

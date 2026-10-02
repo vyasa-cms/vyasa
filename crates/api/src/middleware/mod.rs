@@ -9,6 +9,7 @@ pub use auth::{request_context, CurrentUser, SESSION_COOKIE};
 pub use principal::{MaybePrincipal, Principal};
 
 pub mod csrf;
+pub mod demo;
 pub mod headers;
 pub mod lockout;
 pub mod rate_limit;

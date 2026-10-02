@@ -252,6 +252,7 @@ pub async fn create(
     user: CurrentUser,
     Json(body): Json<CreateRoleRequest>,
 ) -> ApiResult<(StatusCode, Json<RoleResponse>)> {
+    crate::policy::demo_role_capabilities(&state, &body.capabilities)?;
     let role = state
         .roles
         .create(
@@ -298,6 +299,9 @@ pub async fn update(
     Json(body): Json<UpdateRoleRequest>,
 ) -> ApiResult<Json<RoleResponse>> {
     custom_only(&slug)?;
+    if let Some(capabilities) = &body.capabilities {
+        crate::policy::demo_role_capabilities(&state, capabilities)?;
+    }
     let role = state
         .roles
         .update(

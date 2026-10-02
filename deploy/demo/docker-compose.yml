@@ -1,0 +1,78 @@
+# The public demo: a Vyasa install in demo mode (VYASA_DEMO__ENABLED) plus
+# its own Postgres, capped so a busy or abused demo cannot take the host
+# down. Listens on 127.0.0.1 only; a tunnel or reverse proxy publishes it.
+#
+#   ./seed.sh     build the seed database once (or after an upgrade)
+#   ./reset.sh    restore the seed; run hourly (see README.md)
+
+name: vyasa-demo
+
+services:
+  app:
+    image: ghcr.io/vyasa-cms/vyasa:${VYASA_VERSION:-latest}
+    environment:
+      VYASA_DATABASE_URL: postgres://vyasa:vyasa@db:5432/vyasa
+      VYASA_MEDIA_DIR: /opt/vyasa/media
+      VYASA_INDEX_DIR: /opt/vyasa/index
+      # seed.sh turns it off while it builds the seed; always on otherwise.
+      VYASA_DEMO__ENABLED: ${VYASA_DEMO__ENABLED:-true}
+      VYASA_DEMO__EMAIL: ${DEMO_EMAIL:-demo@vyasa.site}
+      VYASA_DEMO__PASSWORD: ${DEMO_PASSWORD:-vyasademo}
+      # The tunnel reaches the app through Docker's NAT, so requests come
+      # from this network's gateway; trust exactly that address.
+      VYASA_TRUSTED_PROXIES: 172.31.240.1
+      VYASA_TRUST_CF_CONNECTING_IP: "true"
+      VYASA_DB__MAX_CONNECTIONS: "8"
+      VYASA_JOBS__WORKERS: "1"
+    ports:
+      - "127.0.0.1:${DEMO_PORT:-38400}:3000"
+    # Uploads and the index live in memory with hard caps: a busy demo
+    # cannot fill the host's disk, and reset.sh restores both anyway.
+    tmpfs:
+      - /opt/vyasa/media:size=256m,uid=10001,gid=10001
+      - /opt/vyasa/index:size=128m,uid=10001,gid=10001
+      - /opt/vyasa/.run:size=1m,uid=10001,gid=10001
+      - /tmp:size=64m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [demo]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+    mem_limit: 1g
+    cpus: 1.0
+    pids_limit: 256
+
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: vyasa
+      POSTGRES_PASSWORD: vyasa
+      POSTGRES_DB: vyasa
+    command: ["postgres", "-c", "max_connections=40", "-c", "shared_buffers=64MB"]
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./seed:/seed:ro
+    networks: [demo]
+    pids_limit: 256
+    security_opt: ["no-new-privileges:true"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vyasa"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+    mem_limit: 512m
+    cpus: 0.5
+
+networks:
+  demo:
+    ipam:
+      config:
+        - subnet: 172.31.240.0/24
+          gateway: 172.31.240.1
+
+volumes:
+  pgdata:

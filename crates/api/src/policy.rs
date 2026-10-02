@@ -620,6 +620,259 @@ pub async fn may_grant_role(
     name: &str,
 ) -> ApiResult<RoleChoice> {
     let choice = RoleChoice::resolve(state, name).await?;
-    may_grant(actor, &choice.capabilities())?;
+    let caps = choice.capabilities();
+    demo_grant(state, &caps)?;
+    may_grant(actor, &caps)?;
     Ok(choice)
+}
+
+// ------------------------------------------------------------------- demo
+
+/// The error every demo refusal carries.
+fn demo_refusal(what: &str) -> AppError {
+    AppError::forbidden(format!(
+        "{what} is disabled in the demo. Install Vyasa to try it on your own site."
+    ))
+}
+
+/// Routes a demo refuses outright, by method and matched path: running
+/// code (plugins, theme packages), reaching other servers (updates, the
+/// marketplace, AI providers, mail), storing credentials (API keys,
+/// two-factor), re-running setup, importing a site, and actions that would
+/// lock the next visitor out of the shared account.
+pub const DEMO_REFUSED_ROUTES: &[(&str, &str, &str)] = &[
+    ("POST", "/api/v1/updates/apply", "Updating the site"),
+    (
+        "GET",
+        "/api/v1/setup/verify-url",
+        "Fetching other addresses",
+    ),
+    ("POST", "/api/v1/webhooks", "Webhooks"),
+    ("PATCH", "/api/v1/webhooks/{id}", "Webhooks"),
+    ("POST", "/api/v1/webhooks/{id}/test", "Webhooks"),
+    (
+        "POST",
+        "/api/v1/webhooks/{id}/deliveries/{delivery_id}/redeliver",
+        "Webhooks",
+    ),
+    ("POST", "/api/v1/webhooks/{id}/rotate-secret", "Webhooks"),
+    (
+        "POST",
+        "/api/v1/posts/{id}/check-links",
+        "Checking links on other sites",
+    ),
+    ("GET", "/api/v1/export", "Exporting the whole site"),
+    (
+        "PUT",
+        "/api/v1/ai/providers/{provider}",
+        "Storing AI provider keys",
+    ),
+    (
+        "DELETE",
+        "/api/v1/ai/providers/{provider}",
+        "Removing AI providers",
+    ),
+    (
+        "POST",
+        "/api/v1/ai/providers/{provider}/test",
+        "Testing AI providers",
+    ),
+    ("PUT", "/api/v1/mail/settings", "Changing the mail relay"),
+    ("POST", "/api/v1/mail/test", "Sending mail"),
+    ("POST", "/api/v1/import", "Importing a site"),
+    ("POST", "/api/v1/plugins", "Installing plugins"),
+    ("POST", "/api/v1/plugins/inspect", "Uploading plugins"),
+    (
+        "POST",
+        "/api/v1/plugins/{id}/rollback",
+        "Rolling plugins back",
+    ),
+    (
+        "POST",
+        "/api/v1/registry/install",
+        "Installing from the marketplace",
+    ),
+    ("POST", "/api/v1/themes", "Uploading theme packages"),
+    ("POST", "/api/v1/api-keys", "Creating API keys"),
+    ("POST", "/api/v1/auth/mfa/setup", "Two-factor sign-in"),
+    ("POST", "/api/v1/auth/mfa/confirm", "Two-factor sign-in"),
+    (
+        "POST",
+        "/api/v1/users/{id}/sessions/revoke",
+        "Signing people out everywhere",
+    ),
+    (
+        "POST",
+        "/api/v1/users/{id}/reset-link",
+        "Sending password reset links",
+    ),
+    (
+        "DELETE",
+        "/api/v1/users/{id}/mfa",
+        "Resetting two-factor sign-in",
+    ),
+    ("POST", "/api/v1/setup/account", "Re-running setup"),
+    ("POST", "/api/v1/setup/assistants", "Re-running setup"),
+    ("POST", "/api/v1/setup/content", "Re-running setup"),
+    ("POST", "/api/v1/setup/delivery", "Re-running setup"),
+    ("POST", "/api/v1/setup/finish", "Re-running setup"),
+    ("POST", "/api/v1/setup/keypair", "Re-running setup"),
+    ("POST", "/api/v1/setup/mail", "Re-running setup"),
+    ("POST", "/api/v1/setup/mail/test", "Re-running setup"),
+    ("POST", "/api/v1/setup/site", "Re-running setup"),
+    ("POST", "/api/v1/setup/updates", "Re-running setup"),
+];
+
+/// Whether a demo refuses `method` on the route matched as `matched_path`.
+///
+/// # Errors
+/// `Forbidden` with the demo message when it does.
+pub fn demo_route(state: &AppState, method: &str, matched_path: &str) -> Result<(), AppError> {
+    if !state.config.demo.enabled {
+        return Ok(());
+    }
+    match DEMO_REFUSED_ROUTES
+        .iter()
+        .find(|(m, p, _)| *m == method && *p == matched_path)
+    {
+        Some((_, _, what)) => Err(demo_refusal(what)),
+        None => Ok(()),
+    }
+}
+
+/// A demo refuses writing the options that redirect mail, links, updates
+/// or package trust ([`vyasa_core::options::FULL_ADMINISTRATOR_OPTION_KEYS`]).
+///
+/// # Errors
+/// `Forbidden` with the demo message.
+pub fn demo_options<'a>(
+    state: &AppState,
+    keys: impl IntoIterator<Item = &'a str>,
+) -> Result<(), AppError> {
+    if !state.config.demo.enabled {
+        return Ok(());
+    }
+    match keys
+        .into_iter()
+        .find(|key| vyasa_core::options::FULL_ADMINISTRATOR_OPTION_KEYS.contains(key))
+    {
+        Some(key) => Err(demo_refusal(&format!("Changing \"{key}\""))),
+        None => Ok(()),
+    }
+}
+
+/// A demo's shared account stays usable for the next visitor: it cannot
+/// be deleted, suspended, demoted or have its sign-in details changed.
+///
+/// # Errors
+/// `Forbidden` with the demo message when `target` is the shared account.
+pub fn demo_account(state: &AppState, target: &UserRow, what: &str) -> Result<(), AppError> {
+    if state.config.demo.enabled && target.email.eq_ignore_ascii_case(&state.config.demo.email) {
+        Err(demo_refusal(&format!("{what} the demo account")))
+    } else {
+        Ok(())
+    }
+}
+
+/// A demo never hands out account management: no role that holds
+/// `manage_users` (the built-in administrator included) is granted, so the
+/// shared account stays the only one that can manage others.
+///
+/// # Errors
+/// `Forbidden` with the demo message.
+pub fn demo_grant(state: &AppState, caps: &[Capability]) -> Result<(), AppError> {
+    if state.config.demo.enabled && caps.contains(&Capability::ManageUsers) {
+        Err(demo_refusal("Granting account management"))
+    } else {
+        Ok(())
+    }
+}
+
+/// A demo's shared password stays the one on the sign-in page.
+///
+/// # Errors
+/// `Forbidden` with the demo message when a password change is asked for.
+pub fn demo_password_change(state: &AppState, changing: bool) -> Result<(), AppError> {
+    if state.config.demo.enabled && changing {
+        Err(demo_refusal("Changing the demo password"))
+    } else {
+        Ok(())
+    }
+}
+
+/// The largest upload a demo takes: enough for a photo, not enough to
+/// make the demo a free file host.
+pub const DEMO_UPLOAD_LIMIT: u64 = 2 * 1024 * 1024;
+
+/// The upload routes the demo cap applies to.
+pub(crate) const DEMO_UPLOAD_ROUTES: &[(&str, &str)] = &[
+    ("POST", "/api/v1/media"),
+    ("POST", "/api/v1/media/{id}/replace"),
+    ("POST", "/api/v1/ai/images"),
+];
+
+/// A demo refuses uploads over [`DEMO_UPLOAD_LIMIT`], judged by the
+/// declared length (a body that declares none is refused too).
+///
+/// # Errors
+/// `TooLarge` with the demo message.
+pub fn demo_upload(
+    state: &AppState,
+    method: &str,
+    matched_path: &str,
+    content_length: Option<u64>,
+) -> Result<(), AppError> {
+    if !state.config.demo.enabled
+        || !DEMO_UPLOAD_ROUTES
+            .iter()
+            .any(|(m, p)| *m == method && *p == matched_path)
+    {
+        return Ok(());
+    }
+    match content_length {
+        Some(n) if n <= DEMO_UPLOAD_LIMIT => Ok(()),
+        _ => Err(AppError::too_large(format!(
+            "Uploads over {} MiB are disabled in the demo. Install Vyasa to try it on your own site.",
+            DEMO_UPLOAD_LIMIT / (1024 * 1024)
+        ))),
+    }
+}
+
+/// A demo's shared account cannot have its personal data erased (which
+/// would also remove the account).
+///
+/// # Errors
+/// `Forbidden` with the demo message when `email` is the shared account's.
+pub fn demo_erasure(state: &AppState, email: &str) -> Result<(), AppError> {
+    if state.config.demo.enabled && email.trim().eq_ignore_ascii_case(&state.config.demo.email) {
+        Err(demo_refusal("Erasing the demo account"))
+    } else {
+        Ok(())
+    }
+}
+
+/// A demo never creates or widens a custom role into account management:
+/// such a role, given to a new account, would be a private manager login.
+///
+/// # Errors
+/// `Forbidden` with the demo message when `capabilities` names
+/// `manage_users`.
+pub fn demo_role_capabilities(state: &AppState, capabilities: &[String]) -> Result<(), AppError> {
+    if state.config.demo.enabled
+        && capabilities
+            .iter()
+            .any(|c| c == cap_name(Capability::ManageUsers))
+    {
+        Err(demo_refusal("Granting account management"))
+    } else {
+        Ok(())
+    }
+}
+
+/// Whether background work that reaches other servers on its own (webhook
+/// delivery, the link-check sweep, IndexNow pings) should start. Off in a
+/// demo, where anyone can make the site point at anything.
+#[must_use]
+pub fn outbound_jobs_allowed(state: &AppState) -> bool {
+    !state.config.demo.enabled
 }

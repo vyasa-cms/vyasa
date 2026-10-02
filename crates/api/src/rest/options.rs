@@ -49,6 +49,7 @@ pub async fn put(
     Path(key): Path<String>,
     Json(value): Json<Value>,
 ) -> ApiResult<StatusCode> {
+    crate::policy::demo_options(&state, [key.as_str()])?;
     crate::policy::option_write(&principal, [key.as_str()])?;
     state.options_service.put(&key, value).await?;
     // Site settings can appear anywhere: drop every rendered page.
@@ -101,6 +102,7 @@ pub async fn put_many(
     principal: Principal,
     Json(body): Json<Map<String, Value>>,
 ) -> ApiResult<StatusCode> {
+    crate::policy::demo_options(&state, body.keys().map(String::as_str))?;
     crate::policy::option_write(&principal, body.keys().map(String::as_str))?;
     // Validate the whole batch before touching storage.
     for (key, value) in &body {

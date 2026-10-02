@@ -68,7 +68,7 @@ docker compose exec app cat .run/setup-token # the one-time setup token
 
 Open <http://localhost:3000/admin/setup>, enter the token, and create the
 first administrator. Until 0.1.0 is released, start with
-`VYASA_VERSION=0.1.0-rc.1` in front of the `docker compose` commands (or in
+`VYASA_VERSION=0.1.0-rc.2` in front of the `docker compose` commands (or in
 an `.env` file next to `docker-compose.yml`). The site is on <http://localhost:3000>, the admin on
 `/admin`.
 

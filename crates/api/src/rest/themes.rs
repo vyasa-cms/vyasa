@@ -56,7 +56,7 @@ impl From<ThemeRow> for ThemeResponse {
     post, path = "/api/v1/themes",
     tag = "themes",
     security(("session_cookie" = [])),
-    request_body(content = String, description = "multipart/form-data with `file` (.vytheme)", content_type = "multipart/form-data"),
+    request_body(content = crate::rest::upload_schema::FileUpload, description = "multipart/form-data with `file` (.vytheme)", content_type = "multipart/form-data"),
     responses(
         (status = 201, description = "Installed", body = ThemeResponse),
         (status = 400, description = "Invalid package", body = ApiErrorBody),
@@ -201,7 +201,7 @@ pub async fn files(
     put, path = "/api/v1/themes/{id}/files/{path}",
     tag = "themes",
     security(("session_cookie" = [])),
-    request_body(content = Vec<u8>, content_type = "application/octet-stream"),
+    request_body(content = crate::rest::upload_schema::RawBytes, content_type = "application/octet-stream"),
     params(
         ("id" = i64, Path, description = "Theme row id"),
         ("path" = String, Path, description = "Path under assets/, e.g. images/hero.jpg"),
