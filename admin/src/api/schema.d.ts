@@ -4374,8 +4374,8 @@ export interface components {
          *     every page of the demo.
          */
         DemoAccount: {
+            email: string;
             password: string;
-            username: string;
         };
         /**
          * @description How this install is deployed.
