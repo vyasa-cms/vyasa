@@ -4,7 +4,9 @@
 # a statically linked build of them is more maintenance than the size saving
 # is worth here. The runtime stage is debian-slim with only ca-certificates
 # and tzdata added.
-FROM rust:1.99-slim AS builder
+# Bookworm, like the runtime stage: a newer glibc in the builder can leave
+# the binary needing symbols the runtime does not have.
+FROM rust:1.99-slim-bookworm AS builder
 WORKDIR /build
 # Build dependencies for the native crates in the tree (ring, tantivy).
 RUN apt-get update \
@@ -12,7 +14,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
+# Compiled into the binary: the starter themes and the logo marks.
 COPY themes-starter ./themes-starter
+COPY assets ./assets
 RUN cargo build --release --bin vyasa
 
 FROM node:22-slim AS admin-builder

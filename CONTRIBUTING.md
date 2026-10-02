@@ -24,7 +24,7 @@ agree on the approach before you spend time on it. Issues labelled
 
 ## Setting up
 
-You need Rust (the stable toolchain; `rust-toolchain.toml` picks it), Node 22
+You need Rust (the version pinned in `rust-toolchain.toml`; rustup installs it automatically), Node 22
 with pnpm, and Docker.
 
 ```bash

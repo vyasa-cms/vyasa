@@ -39,7 +39,7 @@ sqlx = { version = "0.8", default-features = false, features = [
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "signal"] }
 tracing = "0.1"
 utoipa = { version = "6", features = ["axum_extras", "chrono", "macros"] }
-utoipa-swagger-ui = { version = "10", features = ["axum"] }
+utoipa-swagger-ui = { version = "10", features = ["axum", "vendored"] }
 rpassword = "7"
 sha2 = "0.11"
 hmac = "0.13"
@@ -56,16 +56,16 @@ async-graphql = { version = "7", features = ["dataloader", "chrono", "tracing"] 
 async-graphql-axum = "7"
 tokio-stream = { version = "0.1", features = ["sync"] }
 futures-util = "0.3"
-vyasa-themes = { version = "0.1.0", path = "../themes" }
+vyasa-themes = { path = "../themes" }
 rss = "2"
 atom_syndication = "0.12"
 zip = { version = "2", features = ["deflate"] }
 html5ever = { version = "0.39", optional = true }
 markup5ever_rcdom = { version = "0.39", optional = true }
 ureq = { version = "2", optional = true }
-vyasa-plugins = { version = "0.1.0", path = "../plugins" }
+vyasa-plugins = { path = "../plugins" }
 ed25519-dalek = "2"
-vyasa-ai = { version = "0.1.0", path = "../ai" }
+vyasa-ai = { path = "../ai" }
 schemars = "1.2.2"
 reqwest = "0.13.4"
 url = "2"

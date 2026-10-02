@@ -59,14 +59,17 @@ capabilities they declare. One server binary and PostgreSQL are all it needs.
 With Docker:
 
 ```bash
-git clone https://github.com/vyasa-cms/vyasa && cd vyasa
-docker compose run --rm app migrate      # create the database schema
+mkdir vyasa && cd vyasa
+curl -fsSLO https://raw.githubusercontent.com/vyasa-cms/vyasa/main/docker-compose.yml
+docker compose run --rm app migrate          # create the database schema
 docker compose up -d
-docker compose exec app cat .run/setup-token  # the one-time setup token
+docker compose exec app cat .run/setup-token # the one-time setup token
 ```
 
 Open <http://localhost:3000/admin/setup>, enter the token, and create the
-first administrator. The site is on <http://localhost:3000>, the admin on
+first administrator. Until 0.1.0 is released, start with
+`VYASA_VERSION=0.1.0-rc.1` in front of the `docker compose` commands (or in
+an `.env` file next to `docker-compose.yml`). The site is on <http://localhost:3000>, the admin on
 `/admin`.
 
 Building from source and production deployment are covered in

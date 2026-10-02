@@ -1,3 +1,7 @@
+# Pinned so local builds, CI and the Docker image use one compiler and one
+# set of lints. Bump it here, in the Dockerfile (rust:X.Y-slim) and in the
+# workflows' dtolnay/rust-toolchain@X.Y in the same pull request.
 [toolchain]
-channel = "stable"
+channel = "1.99"
 components = ["rustfmt", "clippy"]
+targets = ["wasm32-wasip2"]

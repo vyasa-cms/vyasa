@@ -13,9 +13,9 @@ workspace = true
 [dependencies]
 reqwest = { version = "0.13.4", features = ["json", "multipart"] }
 base64 = "0.23"
-vyasa-common = { version = "0.1.0", path = "../common" }
-vyasa-core = { version = "0.1.0", path = "../core" }
-vyasa-themes = { version = "0.1.0", path = "../themes" }
+vyasa-common = { path = "../common" }
+vyasa-core = { path = "../core" }
+vyasa-themes = { path = "../themes" }
 schemars = "1.2.2"
 serde = "1.0.229"
 serde_json = "1.0.151"

@@ -11,7 +11,7 @@ description = "Vyasa full-text search (Tantivy)"
 tantivy = "0.25"
 tracing = "0.1"
 vyasa-common = { path = "../common" }
-vyasa-core = { version = "0.1.0", path = "../core" }
+vyasa-core = { path = "../core" }
 
 [dev-dependencies]
 tempfile = "3"
