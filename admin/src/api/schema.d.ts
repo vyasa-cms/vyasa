@@ -4370,6 +4370,14 @@ export interface components {
             media_storage_cap_mb?: number | null;
         };
         /**
+         * @description The shared account of a public demo. Not a secret: it is printed on
+         *     every page of the demo.
+         */
+        DemoAccount: {
+            password: string;
+            username: string;
+        };
+        /**
          * @description How this install is deployed.
          * @enum {string}
          */
@@ -5389,6 +5397,7 @@ export interface components {
         };
         /** @description What a visitor may know before anything else. */
         SetupStatus: {
+            demo?: components["schemas"]["DemoAccount"] | null;
             /** @description A nonce minted at boot; `site_url` verification looks for it. */
             instance: string;
             /** @description No administrator exists yet. */

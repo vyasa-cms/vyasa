@@ -294,6 +294,7 @@ use crate::rest::UserResponse;
             crate::seo::Redirect,
             crate::locks::LockState,
             crate::rest::setup::SetupStatus,
+            crate::rest::setup::DemoAccount,
             crate::rest::setup::ClaimBody,
             crate::rest::setup::SetupCheck,
             crate::rest::setup::SiteResult,

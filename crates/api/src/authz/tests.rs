@@ -71,6 +71,7 @@ fn dummy_config(dir: &Path) -> VyasaConfig {
         storage: None,
         trusted_proxies: Vec::new(),
         trust_cf_connecting_ip: false,
+        demo: vyasa_common::config::DemoConfig::default(),
     }
 }
 
