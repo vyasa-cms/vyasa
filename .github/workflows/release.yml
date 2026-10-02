@@ -93,7 +93,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         if: ${{ !matrix.public_only || !github.event.repository.private }}
-      - uses: dtolnay/rust-toolchain@1.99
+      - uses: dtolnay/rust-toolchain@1.120
         if: ${{ !matrix.public_only || !github.event.repository.private }}
       - uses: Swatinem/rust-cache@v2
         if: ${{ !matrix.public_only || !github.event.repository.private }}
