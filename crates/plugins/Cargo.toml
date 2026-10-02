@@ -22,7 +22,7 @@ vyasa-db = { path = "../db" }
 wasmtime-wasi = "36"
 
 serde_json = "1"
-sqlx = { version = "0.8", features = ["postgres", "runtime-tokio"] }
+sqlx = { version = "0.9", features = ["postgres", "runtime-tokio"] }
 vyasa-core = { path = "../core" }
 ed25519-dalek = "2"
 hex = "0.4.3"

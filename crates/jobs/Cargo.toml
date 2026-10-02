@@ -16,7 +16,7 @@ vyasa-common = { path = "../common" }
 vyasa-core = { path = "../core" }
 vyasa-db = { path = "../db" }
 serde_json = "1"
-sqlx = { version = "0.8", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres"] }
+sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres"] }
 tokio = { version = "1", features = ["rt", "macros", "sync", "time", "net", "io-util"] }
 tracing = "0.1"
 rand = "0.8"
