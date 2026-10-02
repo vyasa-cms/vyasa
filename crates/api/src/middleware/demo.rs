@@ -44,6 +44,16 @@ pub async fn demo(State(state): State<AppState>, req: Request<Body>, next: Next)
         if let Err(e) = crate::policy::demo_route(&state, req.method().as_str(), path.as_str()) {
             return ApiError(e).into_response();
         }
+        let declared = req
+            .headers()
+            .get(header::CONTENT_LENGTH)
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.parse::<u64>().ok());
+        if let Err(e) =
+            crate::policy::demo_upload(&state, req.method().as_str(), path.as_str(), declared)
+        {
+            return ApiError(e).into_response();
+        }
     }
     let public_page =
         !req.uri().path().starts_with("/admin") && !req.uri().path().starts_with("/api");

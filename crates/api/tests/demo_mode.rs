@@ -27,6 +27,17 @@ fn call(base: &str, cookie: &str, method: &str, path: &str, body: Option<Value>)
     })
 }
 
+/// Sends `head` as-is (headers only) and returns the whole response.
+fn raw_request(base: &str, head: &str) -> String {
+    use std::io::{Read, Write};
+    let addr = base.trim_start_matches("http://");
+    let mut stream = std::net::TcpStream::connect(addr).expect("connect");
+    stream.write_all(head.as_bytes()).expect("write");
+    let mut out = String::new();
+    let _ = stream.read_to_string(&mut out);
+    out
+}
+
 /// The status and the error message.
 fn outcome(r: ureq::Response) -> (u16, String) {
     let status = r.status();
@@ -159,6 +170,20 @@ async fn a_demo_refuses_what_would_harm_the_site_or_the_next_visitor() {
         caps.as_array().unwrap().iter().any(|c| c == "manage_users"),
         "still an administrator"
     );
+
+    // Uploads are capped well below the usual limit, judged by the declared
+    // length before any of the body is read.
+    let response = raw_request(
+        base,
+        &format!(
+            "POST /api/v1/media HTTP/1.1\r\nHost: x\r\nCookie: {cookie}\r\nOrigin: {base}\r\n\
+             Content-Type: multipart/form-data; boundary=x\r\nContent-Length: {}\r\n\
+             Connection: close\r\n\r\n",
+            3 * 1024 * 1024
+        ),
+    );
+    assert!(response.starts_with("HTTP/1.1 413"), "{response}");
+    assert!(response.contains("demo"), "{response}");
 
     // Ordinary editing still works.
     let created = call(
