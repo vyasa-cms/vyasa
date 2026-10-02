@@ -131,7 +131,9 @@ gh attestation verify vyasa-0.1.0-x86_64-unknown-linux-gnu.tar.gz --owner vyasa-
 ## Release archives
 
 Each release has an archive per platform (Linux x86_64 and arm64, macOS
-arm64) with a `.sha256` next to it. Unpack it and run the server from that
+arm64) with a `.sha256` next to it. The Linux binaries need glibc 2.34 or
+newer and the system CA certificates (`ca-certificates` on Debian and
+Ubuntu — minimal container images may not have it). Unpack it and run the server from that
 directory — it serves the admin from `admin/dist` beside the binary:
 
 ```bash

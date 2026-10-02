@@ -27,7 +27,7 @@ Pin a version by setting `VYASA_VERSION` (for example `0.1.0`) in that `.env` fi
 
 ## From a release archive
 
-Each [release](https://github.com/vyasa-cms/vyasa/releases) has an archive for Linux (x86_64 and arm64) and macOS (arm64), with a checksum next to it. You also need PostgreSQL 15 or newer with the `citext` extension available.
+Each [release](https://github.com/vyasa-cms/vyasa/releases) has an archive for Linux (x86_64 and arm64) and macOS (arm64), with a checksum next to it. You also need PostgreSQL 15 or newer with the `citext` extension available, and the system CA certificates (the `ca-certificates` package on Debian and Ubuntu; minimal container images may lack it).
 
 ```bash
 sha256sum -c vyasa-0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
