@@ -73,7 +73,14 @@ export function useLogout() {
 }
 
 /** Login form with error states. */
-export function LoginForm({ className }: { className?: string }) {
+export function LoginForm({
+  className,
+  demo = null,
+}: {
+  className?: string;
+  /** On a public demo, the shared account to offer. */
+  demo?: { email: string; password: string } | null;
+}) {
   const { t } = useI18n();
   const login = useLogin();
   const queryClient = useQueryClient();
@@ -176,6 +183,26 @@ export function LoginForm({ className }: { className?: string }) {
           </form>
         ) : (
         <>
+        {demo !== null ? (
+          <div className="mb-4 rounded-md border bg-muted/40 p-3 text-sm" role="note">
+            <p>
+              This is a public demo. Sign in as <strong>{demo.email}</strong> with the
+              password <strong>{demo.password}</strong>. It resets every hour.
+            </p>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="mt-2"
+              onClick={() => {
+                setEmail(demo.email);
+                setPassword(demo.password);
+              }}
+            >
+              Use the demo account
+            </Button>
+          </div>
+        ) : null}
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <label className="flex flex-col gap-1.5 text-sm font-medium">
             {t("login.email")}
