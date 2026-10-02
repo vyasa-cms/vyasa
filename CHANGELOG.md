@@ -7,6 +7,11 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.1.0-rc.1] - 2026-10-02
+
+First release candidate of the first public release: Linux and macOS
+archives, a container image and the quick start, for testing before 0.1.0.
+
 ## [0.1.0] - unreleased
 
 First public release.
