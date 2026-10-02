@@ -15,3 +15,9 @@ updates:
   - package-ecosystem: github-actions
     directory: /
     schedule: { interval: monthly }
+  - package-ecosystem: npm
+    directory: /website
+    schedule: { interval: weekly }
+    open-pull-requests-limit: 5
+    groups:
+      website-minor: { update-types: [minor, patch] }

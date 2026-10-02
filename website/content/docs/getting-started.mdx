@@ -1,0 +1,43 @@
+---
+title: Getting started
+description: Run Vyasa with Docker, from a release archive, or from source.
+---
+
+## With Docker
+
+You need Docker with the Compose plugin.
+
+```bash
+mkdir vyasa && cd vyasa
+curl -fsSLO https://raw.githubusercontent.com/vyasa-cms/vyasa/main/docker-compose.yml
+docker compose run --rm app migrate          # create the database schema
+docker compose up -d
+docker compose exec app cat .run/setup-token # the one-time setup token
+```
+
+Open `http://localhost:3000/admin/setup`, enter the token, and create the first administrator. The site is on `http://localhost:3000`, the admin on `/admin`.
+
+Pin a version with `VYASA_VERSION=0.1.0 docker compose up -d`. Back up the database before moving to a newer version: migrations only go forward.
+
+## From a release archive
+
+Each [release](https://github.com/vyasa-cms/vyasa/releases) has an archive for Linux (x86_64 and arm64) and macOS (arm64), with a checksum next to it. You also need PostgreSQL 16 or newer.
+
+```bash
+sha256sum -c vyasa-0.1.0-x86_64-unknown-linux-gnu.tar.gz.sha256
+tar -xzf vyasa-0.1.0-x86_64-unknown-linux-gnu.tar.gz
+cd vyasa-0.1.0-x86_64-unknown-linux-gnu
+export VYASA_DATABASE_URL=postgres://vyasa:password@localhost:5432/vyasa
+./vyasa migrate
+./vyasa serve        # prints the setup token on first start
+```
+
+Run the server from the unpacked directory: it serves the admin from `admin/dist` beside the binary.
+
+## From source
+
+See [Contributing](/docs/contributing) for the development setup.
+
+## Configuration
+
+Configuration comes from `vyasa.toml` in the working directory, overridden by `VYASA_*` environment variables; `__` separates nested keys, so `VYASA_LOG__LEVEL=debug`. Production settings are covered in [Deployment](/docs/running/deployment).

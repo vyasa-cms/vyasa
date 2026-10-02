@@ -158,3 +158,24 @@ jobs:
           push: false
           cache-from: type=gha,scope=ci-amd64
           cache-to: type=gha,mode=max,scope=ci-amd64
+
+  website:
+    name: Website builds
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: website
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 11
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: website/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm types:check
+      - run: pnpm build
