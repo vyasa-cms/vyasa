@@ -647,15 +647,19 @@ pub const DEMO_REFUSED_ROUTES: &[(&str, &str, &str)] = &[
         "/api/v1/setup/verify-url",
         "Fetching other addresses",
     ),
-    ("POST", "/api/v1/webhooks", "Webhooks"),
-    ("PATCH", "/api/v1/webhooks/{id}", "Webhooks"),
-    ("POST", "/api/v1/webhooks/{id}/test", "Webhooks"),
+    ("POST", "/api/v1/webhooks", "Using webhooks"),
+    ("PATCH", "/api/v1/webhooks/{id}", "Using webhooks"),
+    ("POST", "/api/v1/webhooks/{id}/test", "Using webhooks"),
     (
         "POST",
         "/api/v1/webhooks/{id}/deliveries/{delivery_id}/redeliver",
         "Webhooks",
     ),
-    ("POST", "/api/v1/webhooks/{id}/rotate-secret", "Webhooks"),
+    (
+        "POST",
+        "/api/v1/webhooks/{id}/rotate-secret",
+        "Using webhooks",
+    ),
     (
         "POST",
         "/api/v1/posts/{id}/check-links",
