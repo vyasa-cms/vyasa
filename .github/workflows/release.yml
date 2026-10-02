@@ -110,7 +110,7 @@ jobs:
       - name: Package
         if: ${{ !matrix.public_only || !github.event.repository.private }}
         run: scripts/package-release.sh "${{ needs.meta.outputs.version }}" "${{ matrix.target }}" target/release/vyasa admin-dist dist
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         # Artifact attestations need a public repository on GitHub's free plan.
         if: ${{ (!matrix.public_only || !github.event.repository.private) && needs.meta.outputs.publish == 'true' && !github.event.repository.private }}
         with:
@@ -219,7 +219,7 @@ jobs:
           echo "digest=$digest" >> "$GITHUB_OUTPUT"
         env:
           VERSION: ${{ needs.meta.outputs.version }}
-      - uses: actions/attest-build-provenance@v2
+      - uses: actions/attest-build-provenance@v4
         if: ${{ !github.event.repository.private }}
         with:
           subject-name: ${{ env.IMAGE }}
