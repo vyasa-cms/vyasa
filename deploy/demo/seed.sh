@@ -15,11 +15,13 @@ BASE="http://127.0.0.1:$PORT"
 mkdir -p seed
 
 docker compose down -v --remove-orphans
-docker compose up -d db
+docker compose up -d --wait db
 docker compose run --rm --no-deps app migrate
 docker compose run --rm --no-deps app admin create --email "$EMAIL" --password "$PASSWORD" --username demo
 # Twelve published posts so lists, archives and search have something in them.
 docker compose run --rm --no-deps app dev seed --count 12
+# Demo mode off while seeding (it refuses some of the setup below); the
+# variable feeds the compose file's ${VYASA_DEMO__ENABLED:-true}.
 VYASA_DEMO__ENABLED=false docker compose up -d app
 
 for _ in $(seq 1 90); do
@@ -49,8 +51,7 @@ for p in "Harbour redesign|Northwind|2025|https://example.com" "Field notes app|
 done
 api POST /posts "{\"type\":\"page\",\"title\":\"About this demo\",\"status\":\"published\",\"content\":$(doc "This site is a Vyasa demo. Sign in at /admin with the account shown at the top of the page. Everything you change is reset every hour.")}"
 
-docker compose stop app
 docker compose exec -T db pg_dump -U vyasa -Fc vyasa > seed/demo.dump
-docker compose run --rm --no-deps --entrypoint sh app -c 'tar -C /opt/vyasa -cf - media' > seed/media.tar
+docker compose exec -T app sh -c 'tar -C /opt/vyasa -cf - media' > seed/media.tar
 docker compose down
 echo "seed written: $(du -h seed/demo.dump | cut -f1) database, $(du -h seed/media.tar | cut -f1) media"

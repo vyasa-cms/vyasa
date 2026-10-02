@@ -643,6 +643,26 @@ fn demo_refusal(what: &str) -> AppError {
 pub const DEMO_REFUSED_ROUTES: &[(&str, &str, &str)] = &[
     ("POST", "/api/v1/updates/apply", "Updating the site"),
     (
+        "GET",
+        "/api/v1/setup/verify-url",
+        "Fetching other addresses",
+    ),
+    ("POST", "/api/v1/webhooks", "Webhooks"),
+    ("PATCH", "/api/v1/webhooks/{id}", "Webhooks"),
+    ("POST", "/api/v1/webhooks/{id}/test", "Webhooks"),
+    (
+        "POST",
+        "/api/v1/webhooks/{id}/deliveries/{delivery_id}/redeliver",
+        "Webhooks",
+    ),
+    ("POST", "/api/v1/webhooks/{id}/rotate-secret", "Webhooks"),
+    (
+        "POST",
+        "/api/v1/posts/{id}/check-links",
+        "Checking links on other sites",
+    ),
+    ("GET", "/api/v1/export", "Exporting the whole site"),
+    (
         "PUT",
         "/api/v1/ai/providers/{provider}",
         "Storing AI provider keys",
@@ -816,4 +836,43 @@ pub fn demo_upload(
             DEMO_UPLOAD_LIMIT / (1024 * 1024)
         ))),
     }
+}
+
+/// A demo's shared account cannot have its personal data erased (which
+/// would also remove the account).
+///
+/// # Errors
+/// `Forbidden` with the demo message when `email` is the shared account's.
+pub fn demo_erasure(state: &AppState, email: &str) -> Result<(), AppError> {
+    if state.config.demo.enabled && email.trim().eq_ignore_ascii_case(&state.config.demo.email) {
+        Err(demo_refusal("Erasing the demo account"))
+    } else {
+        Ok(())
+    }
+}
+
+/// A demo never creates or widens a custom role into account management:
+/// such a role, given to a new account, would be a private manager login.
+///
+/// # Errors
+/// `Forbidden` with the demo message when `capabilities` names
+/// `manage_users`.
+pub fn demo_role_capabilities(state: &AppState, capabilities: &[String]) -> Result<(), AppError> {
+    if state.config.demo.enabled
+        && capabilities
+            .iter()
+            .any(|c| c == cap_name(Capability::ManageUsers))
+    {
+        Err(demo_refusal("Granting account management"))
+    } else {
+        Ok(())
+    }
+}
+
+/// Whether background work that reaches other servers on its own (webhook
+/// delivery, the link-check sweep, IndexNow pings) should start. Off in a
+/// demo, where anyone can make the site point at anything.
+#[must_use]
+pub fn outbound_jobs_allowed(state: &AppState) -> bool {
+    !state.config.demo.enabled
 }

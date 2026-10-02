@@ -121,7 +121,46 @@ async fn a_demo_refuses_what_would_harm_the_site_or_the_next_visitor() {
             format!("/users/{}/reset-link", demo.id),
             Some(json!({})),
         ),
+        // Reaching other servers.
+        (
+            "GET",
+            "/setup/verify-url?url=http://127.0.0.1:1/".into(),
+            None,
+        ),
+        (
+            "POST",
+            "/webhooks".into(),
+            Some(json!({"url": "https://example.com/hook", "events": ["post.published"]})),
+        ),
+        (
+            "PATCH",
+            "/webhooks/1".into(),
+            Some(json!({"url": "https://example.com/other"})),
+        ),
+        ("POST", "/webhooks/1/test".into(), Some(json!({}))),
+        (
+            "POST",
+            "/webhooks/1/deliveries/1/redeliver".into(),
+            Some(json!({})),
+        ),
+        ("POST", "/webhooks/1/rotate-secret".into(), Some(json!({}))),
+        ("POST", "/posts/1/check-links".into(), Some(json!({}))),
+        // Copying the whole site out in memory.
+        ("GET", "/export".into(), None),
+        // Erasing the shared account's data (and the account).
+        (
+            "POST",
+            "/privacy/erase".into(),
+            Some(json!({"email": demo.email})),
+        ),
         // Escalation.
+        (
+            "POST",
+            "/roles".into(),
+            Some(
+                json!({"slug": "boss", "name": "Boss", "description": "", "capabilities": ["manage_users"]}),
+            ),
+        ),
         (
             "PUT",
             format!("/users/{}/role", other.id),
@@ -148,7 +187,7 @@ async fn a_demo_refuses_what_would_harm_the_site_or_the_next_visitor() {
         (
             "POST",
             format!("/users/{}/suspend", demo.id),
-            Some(json!({})),
+            Some(json!({"suspended": true})),
         ),
         (
             "PUT",
@@ -162,6 +201,58 @@ async fn a_demo_refuses_what_would_harm_the_site_or_the_next_visitor() {
             "{method} {path}: {status} {message}"
         );
     }
+    // Another manager (one that predates demo mode) cannot touch the shared
+    // account either: that is the demo rule, not the self-account rule.
+    let manager = common::seed_user(db.pool(), Role::Admin).await;
+    let theirs = common::login_cookie(base, &manager.email, &manager.password);
+    for (method, path, body) in [
+        ("DELETE", format!("/users/{}", demo.id), None),
+        (
+            "POST",
+            format!("/users/{}/suspend", demo.id),
+            Some(json!({"suspended": true})),
+        ),
+        (
+            "PUT",
+            format!("/users/{}/role", demo.id),
+            Some(json!({"role": "editor"})),
+        ),
+        (
+            "PATCH",
+            format!("/users/{}", demo.id),
+            Some(json!({"display_name": "Mine now"})),
+        ),
+    ] {
+        let (status, message) = outcome(call(base, &theirs, method, &path, body));
+        assert_eq!(status, 403, "{method} {path}: {message}");
+        assert!(message.contains("demo"), "{method} {path}: {message}");
+    }
+
+    // A custom role cannot be widened into account management later.
+    let made = call(
+        base,
+        &cookie,
+        "POST",
+        "/roles",
+        Some(
+            json!({"slug": "helper", "name": "Helper", "description": "", "capabilities": ["edit_posts"]}),
+        ),
+    );
+    assert!(
+        made.status() < 300,
+        "create ordinary role: {}",
+        made.status()
+    );
+    let (status, message) = outcome(call(
+        base,
+        &cookie,
+        "PATCH",
+        "/roles/helper",
+        Some(json!({"capabilities": ["edit_posts", "manage_users"]})),
+    ));
+    assert_eq!(status, 403, "widen role: {message}");
+    assert!(message.contains("demo"), "widen role: {message}");
+
     let me = common::login_cookie(base, &demo.email, &demo.password);
     let caps: Value = call(base, &me, "GET", "/auth/me/caps", None)
         .into_json()
@@ -232,6 +323,44 @@ async fn without_demo_mode_the_same_requests_are_not_refused_as_demo() {
         );
         assert!(status < 300, "{method} {path}: {status} {message}");
     }
+    // Every route a demo refuses answers for its own reasons here.
+    let routes = demo_refused_routes();
+    assert!(
+        routes.len() > 20,
+        "read the refusal table: {}",
+        routes.len()
+    );
+    for (method, path) in routes {
+        let path = path
+            .replace("{provider}", "openai")
+            .replace("{delivery_id}", "1")
+            .replace("{id}", "1");
+        let relative = path.strip_prefix("/api/v1").expect("an /api/v1 path");
+        let (status, message) = outcome(call(base, &cookie, &method, relative, Some(json!({}))));
+        assert!(
+            !message.contains("disabled in the demo"),
+            "{method} {path}: {status} {message}"
+        );
+    }
+}
+
+/// The demo refusal table, read from the source so this test cannot drift
+/// from it (the API crate is a binary and cannot be imported).
+fn demo_refused_routes() -> Vec<(String, String)> {
+    let source = include_str!("../src/policy.rs");
+    let start = source
+        .find("pub const DEMO_REFUSED_ROUTES")
+        .expect("the table");
+    let end = start + source[start..].find("];").expect("the end of the table");
+    // Formatting may split a row across lines: compare without whitespace.
+    let flat: String = source[start..end].split_whitespace().collect();
+    flat.split("(\"")
+        .skip(1)
+        .filter_map(|row| {
+            let mut parts = row.split("\",\"");
+            Some((parts.next()?.to_owned(), parts.next()?.to_owned()))
+        })
+        .collect()
 }
 
 #[tokio::test]

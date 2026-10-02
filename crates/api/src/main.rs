@@ -1260,7 +1260,9 @@ async fn cmd_serve(config: &VyasaConfig) -> ExitCode {
     // Spawn the scheduled-publisher worker (direct, phase 11).
     let _publisher = vyasa_jobs::publisher::spawn(pg_pool.clone(), state.publisher_notify.clone());
     // Outbound link sweep: a batch of published entries an hour.
-    let _link_sweep = seo::spawn_sweep(pg_pool.clone());
+    // Outbound work a visitor could aim anywhere stays off in a demo.
+    let outbound = policy::outbound_jobs_allowed(&state);
+    let _link_sweep = outbound.then(|| seo::spawn_sweep(pg_pool.clone()));
     // Accounts that registered and never confirmed their address go after
     // a week (phase 98).
     let _registration_purge = vyasa_jobs::registration::spawn(pg_pool.clone());
@@ -1319,13 +1321,17 @@ async fn cmd_serve(config: &VyasaConfig) -> ExitCode {
     event_bridge::spawn(&state.pool);
 
     // Fans post/comment lifecycle events out to subscribed webhooks.
-    webhook_dispatcher::spawn(&state);
+    if outbound {
+        webhook_dispatcher::spawn(&state);
+    }
 
     // Emails post authors when a comment lands on their post.
     comment_notifier::spawn(&state);
     // Announces publishes/updates to IndexNow-participating engines —
     // inert until site_url points at a public address.
-    indexnow::spawn(&state);
+    if outbound {
+        indexnow::spawn(&state);
+    }
     // Emails confirmed subscribers on publish; off by default.
     newsletter::spawn(&state);
     // AI integrations: embeddings, autofill, screening, read-aloud — all

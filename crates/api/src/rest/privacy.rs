@@ -63,6 +63,7 @@ pub async fn erase(
     principal: Principal,
     Json(q): Json<EmailQuery>,
 ) -> ApiResult<Json<Erasure>> {
+    crate::policy::demo_erasure(&state, &q.email)?;
     crate::policy::personal_data_within_reach(&state, &principal, &q.email).await?;
     let done = privacy::erase(&state, &q.email).await?;
     crate::audit::record(

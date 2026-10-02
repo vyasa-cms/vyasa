@@ -14,19 +14,29 @@ services:
       VYASA_DATABASE_URL: postgres://vyasa:vyasa@db:5432/vyasa
       VYASA_MEDIA_DIR: /opt/vyasa/media
       VYASA_INDEX_DIR: /opt/vyasa/index
-      VYASA_DEMO__ENABLED: "true"
+      # seed.sh turns it off while it builds the seed; always on otherwise.
+      VYASA_DEMO__ENABLED: ${VYASA_DEMO__ENABLED:-true}
       VYASA_DEMO__EMAIL: ${DEMO_EMAIL:-demo@vyasa.site}
       VYASA_DEMO__PASSWORD: ${DEMO_PASSWORD:-vyasademo}
-      # The tunnel connects from the host's loopback through Docker's NAT.
-      VYASA_TRUSTED_PROXIES: ${DEMO_TRUSTED_PROXIES:-172.16.0.0/12}
+      # The tunnel reaches the app through Docker's NAT, so requests come
+      # from this network's gateway; trust exactly that address.
+      VYASA_TRUSTED_PROXIES: 172.31.240.1
       VYASA_TRUST_CF_CONNECTING_IP: "true"
       VYASA_DB__MAX_CONNECTIONS: "8"
       VYASA_JOBS__WORKERS: "1"
     ports:
       - "127.0.0.1:${DEMO_PORT:-38400}:3000"
-    volumes:
-      - media:/opt/vyasa/media
-      - index:/opt/vyasa/index
+    # Uploads and the index live in memory with hard caps: a busy demo
+    # cannot fill the host's disk, and reset.sh restores both anyway.
+    tmpfs:
+      - /opt/vyasa/media:size=256m,uid=10001,gid=10001
+      - /opt/vyasa/index:size=128m,uid=10001,gid=10001
+      - /opt/vyasa/.run:size=1m,uid=10001,gid=10001
+      - /tmp:size=64m
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks: [demo]
     depends_on:
       db:
         condition: service_healthy
@@ -44,7 +54,10 @@ services:
     command: ["postgres", "-c", "max_connections=40", "-c", "shared_buffers=64MB"]
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./seed:/seed
+      - ./seed:/seed:ro
+    networks: [demo]
+    pids_limit: 256
+    security_opt: ["no-new-privileges:true"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U vyasa"]
       interval: 5s
@@ -54,7 +67,12 @@ services:
     mem_limit: 512m
     cpus: 0.5
 
+networks:
+  demo:
+    ipam:
+      config:
+        - subnet: 172.31.240.0/24
+          gateway: 172.31.240.1
+
 volumes:
-  media:
-  index:
   pgdata:

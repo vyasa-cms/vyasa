@@ -32,6 +32,52 @@ fn html_escape(s: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// Whether `path` is the public site: everything outside the `/admin` and
+/// `/api` segments.
+fn is_public_page(path: &str) -> bool {
+    let first = path.trim_start_matches('/').split('/').next().unwrap_or("");
+    first != "admin" && first != "api"
+}
+
+/// `html` with `banner` right after its `<body …>` tag. Comments and
+/// scripts are skipped, so a `<body>` written inside one is not taken for
+/// the real tag; a page without a body tag is returned unchanged.
+fn inject_banner(html: &str, banner: &str) -> String {
+    let lower = html.to_ascii_lowercase();
+    let bytes = lower.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        let rest = &lower[i..];
+        if rest.starts_with("<!--") {
+            match rest.find("-->") {
+                Some(end) => i += end + 3,
+                None => break,
+            }
+        } else if rest.starts_with("<script") {
+            match rest.find("</script") {
+                Some(end) => i += end + 8,
+                None => break,
+            }
+        } else if rest.starts_with("<body")
+            && rest[5..]
+                .chars()
+                .next()
+                .is_some_and(|c| c == '>' || c.is_ascii_whitespace())
+        {
+            return match rest.find('>') {
+                Some(end) => {
+                    let at = i + end + 1;
+                    format!("{}{banner}{}", &html[..at], &html[at..])
+                }
+                None => html.to_owned(),
+            };
+        } else {
+            i += rest.chars().next().map_or(1, char::len_utf8);
+        }
+    }
+    html.to_owned()
+}
+
 /// Largest page the banner is added to; anything bigger passes untouched.
 const MAX_BANNER_PAGE: usize = 8 * 1024 * 1024;
 
@@ -55,8 +101,7 @@ pub async fn demo(State(state): State<AppState>, req: Request<Body>, next: Next)
             return ApiError(e).into_response();
         }
     }
-    let public_page =
-        !req.uri().path().starts_with("/admin") && !req.uri().path().starts_with("/api");
+    let public_page = is_public_page(req.uri().path());
     let mut resp = next.run(req).await;
     resp.headers_mut().insert(
         header::HeaderName::from_static("x-robots-tag"),
@@ -67,25 +112,74 @@ pub async fn demo(State(state): State<AppState>, req: Request<Body>, next: Next)
         .get(header::CONTENT_TYPE)
         .and_then(|v| v.to_str().ok())
         .is_some_and(|v| v.starts_with("text/html"));
-    if !(public_page && is_html) || resp.headers().contains_key(header::CONTENT_ENCODING) {
+    let declared = resp
+        .headers()
+        .get(header::CONTENT_LENGTH)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<usize>().ok());
+    if !(public_page && is_html)
+        || resp.headers().contains_key(header::CONTENT_ENCODING)
+        || declared.is_some_and(|n| n > MAX_BANNER_PAGE)
+    {
         return resp;
     }
     let (mut parts, body) = resp.into_parts();
     let Ok(bytes) = axum::body::to_bytes(body, MAX_BANNER_PAGE).await else {
-        return Response::from_parts(parts, Body::empty());
+        // A streamed page that turned out too big: say so rather than
+        // sending a truncated document under its old length.
+        return ApiError(vyasa_common::AppError::internal_msg(
+            "page too large for the demo banner",
+        ))
+        .into_response();
     };
-    let html = String::from_utf8_lossy(&bytes);
-    let banner = banner(&state.config.demo.email, &state.config.demo.password);
-    let out = match html.find("<body") {
-        Some(start) => match html[start..].find('>') {
-            Some(end) => {
-                let at = start + end + 1;
-                format!("{}{banner}{}", &html[..at], &html[at..])
-            }
-            None => html.into_owned(),
-        },
-        None => format!("{banner}{html}"),
+    // Only UTF-8 pages are rewritten; anything else passes as it came.
+    let Ok(html) = std::str::from_utf8(&bytes) else {
+        return Response::from_parts(parts, Body::from(bytes));
     };
+    let out = inject_banner(
+        html,
+        &banner(&state.config.demo.email, &state.config.demo.password),
+    );
     parts.headers.remove(header::CONTENT_LENGTH);
+    // The validator described the page without the banner.
+    parts.headers.remove(header::ETAG);
     Response::from_parts(parts, Body::from(out))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{inject_banner, is_public_page};
+
+    #[test]
+    fn the_banner_goes_right_after_the_body_tag_whatever_its_case() {
+        assert_eq!(
+            inject_banner("<html><BODY class=x><p>hi", "[B]"),
+            "<html><BODY class=x>[B]<p>hi"
+        );
+        assert_eq!(inject_banner("<body><p>hi", "[B]"), "<body>[B]<p>hi");
+    }
+
+    #[test]
+    fn a_body_tag_inside_a_comment_or_script_is_not_the_body() {
+        let html = "<head><!-- <body> --><script>var s='<body>'</script></head><body>x";
+        assert_eq!(
+            inject_banner(html, "[B]"),
+            "<head><!-- <body> --><script>var s='<body>'</script></head><body>[B]x"
+        );
+    }
+
+    #[test]
+    fn a_page_without_a_body_tag_is_left_alone() {
+        assert_eq!(inject_banner("<p>fragment</p>", "[B]"), "<p>fragment</p>");
+    }
+
+    #[test]
+    fn only_the_admin_and_api_segments_count_as_not_public() {
+        assert!(!is_public_page("/admin"));
+        assert!(!is_public_page("/admin/posts"));
+        assert!(!is_public_page("/api/v1/posts"));
+        assert!(is_public_page("/administrator-tips"));
+        assert!(is_public_page("/apiary"));
+        assert!(is_public_page("/"));
+    }
 }
