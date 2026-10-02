@@ -43,7 +43,7 @@ utoipa-swagger-ui = { version = "9", features = ["axum"] }
 rpassword = "7"
 sha2 = "0.11"
 hmac = "0.13"
-base64 = "0.22"
+base64 = "0.23"
 rand = "0.8"
 toml = "1"
 totp-rs = { version = "6", features = ["gen_secret", "otpauth"] }

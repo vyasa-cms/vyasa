@@ -12,7 +12,7 @@ workspace = true
 
 [dependencies]
 reqwest = { version = "0.13.4", features = ["json", "multipart"] }
-base64 = "0.22"
+base64 = "0.23"
 vyasa-common = { version = "0.1.0", path = "../common" }
 vyasa-core = { version = "0.1.0", path = "../core" }
 vyasa-themes = { version = "0.1.0", path = "../themes" }
