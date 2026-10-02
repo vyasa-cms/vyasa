@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block body %}{% if sections %}{{ sections | safe }}{% else %}
+<article class="vy-single">
+  <header><h1 class="vy-title">{{ page.post_title }}</h1>
+  <p class="vy-meta">{% if page.post_author %}{{ page.post_author }} · {% endif %}
+  <time datetime="{{ page.post_iso_date | default(value="") }}">{{ page.post_date | default(value="") }}</time>
+  {% if page.post_updated %} · updated {{ page.post_updated }}{% endif %}</p>
+  {% if page.terms %}<p class="vy-terms">{% for term in page.terms %}<a class="vy-term vy-term--{{ term.taxonomy }}" href="{{ term.url }}" rel="tag">{{ term.name }}</a>{% endfor %}</p>{% endif %}</header>
+  {{ regions.content | default(value="") | safe }}
+  {{ regions.comments | default(value="") | safe }}
+</article>
+{% endif %}{% endblock %}

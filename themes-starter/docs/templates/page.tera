@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block body %}
+{% if sections %}{{ sections | safe }}{% else %}
+<div class="vy-docs">
+  <aside class="vy-docs__nav" aria-label="Documentation navigation">{{ regions.docsnav | default(value="") | safe }}</aside>
+  <article class="vy-docs__main">
+    {{ regions.breadcrumbs | default(value="") | safe }}
+    <header><h1 class="vy-title">{{ page.post_title }}</h1></header>
+    {% if regions.toc %}<div class="vy-docs__toc" aria-label="On this page">{{ regions.toc | safe }}</div>{% endif %}
+    {{ regions.content | default(value="") | safe }}
+  </article>
+</div>
+{% endif %}
+{% endblock %}

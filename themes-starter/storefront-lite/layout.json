@@ -1,0 +1,260 @@
+{
+  "index": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "intro",
+      "kind": "hero",
+      "settings": {
+        "eyebrow": "Objects for everyday living",
+        "headline": "Fewer things. Better things.",
+        "subhead": "Considered pieces with a purpose. Made in small batches, chosen to be used, and designed to stay.",
+        "primary_label": "Explore the collection",
+        "primary_url": "#arrivals",
+        "secondary_label": "Our philosophy",
+        "secondary_url": "#promises",
+        "image": "/theme-assets/images/objects.svg",
+        "image_alt": "Sculptural terracotta and cream vessels arranged on a warm stone plinth"
+      }
+    },
+    {
+      "id": "arrivals",
+      "kind": "collection",
+      "settings": {
+        "heading": "The latest collection",
+        "bind": {
+          "source": "post",
+          "sort": "newest",
+          "limit": 8
+        },
+        "columns": 4,
+        "show_image": true,
+        "show_excerpt": true
+      }
+    },
+    {
+      "id": "promises",
+      "kind": "feature-grid",
+      "settings": {
+        "heading": "A little more considered.",
+        "columns": 3,
+        "items": [
+          {
+            "eyebrow": "01 / Purpose",
+            "title": "Useful by nature.",
+            "body": "Simple forms, everyday functions. Objects that earn their place."
+          },
+          {
+            "eyebrow": "02 / Process",
+            "title": "Made with care.",
+            "body": "Thoughtful materials and small runs, with attention in every detail."
+          },
+          {
+            "eyebrow": "03 / Perspective",
+            "title": "Here for the long run.",
+            "body": "Less about what is new. More about what you want to keep."
+          }
+        ]
+      }
+    },
+    {
+      "id": "questions",
+      "kind": "faq",
+      "settings": {
+        "heading": "A few things to know.",
+        "items": [
+          {
+            "title": "Where can I learn more about a piece?",
+            "body": "Open an item in the collection for its story, materials, and availability."
+          },
+          {
+            "title": "How do I follow new releases?",
+            "body": "The feed includes every newly published piece and story."
+          }
+        ]
+      }
+    },
+    {
+      "id": "follow",
+      "kind": "cta-band",
+      "settings": {
+        "headline": "Good things, in their own time.",
+        "subhead": "Discover new pieces and the stories behind them in the journal feed.",
+        "label": "Stay in the loop",
+        "url": "/feed.xml"
+      },
+      "scope": {
+        "bg": "$text",
+        "text": "$bg",
+        "text_muted": "$bg",
+        "primary": "$bg",
+        "on_primary": "$text",
+        "contained": true
+      }
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "single": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "body",
+      "kind": "post-content"
+    },
+    {
+      "id": "more",
+      "kind": "related-posts",
+      "settings": {
+        "count": 4
+      }
+    },
+    {
+      "id": "thread",
+      "kind": "comments"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "archive": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "posts",
+      "kind": "latest-posts",
+      "settings": {
+        "count": 12
+      }
+    },
+    {
+      "id": "pages",
+      "kind": "pagination"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "page": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "body",
+      "kind": "post-content"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "search": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "find",
+      "kind": "search-box",
+      "settings": {
+        "placeholder": "Search the site"
+      }
+    },
+    {
+      "id": "posts",
+      "kind": "latest-posts",
+      "settings": {
+        "count": 12
+      }
+    },
+    {
+      "id": "pages",
+      "kind": "pagination"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "not-found": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "missing",
+      "kind": "hero",
+      "settings": {
+        "eyebrow": "404 / A small detour",
+        "headline": "This page has moved on.",
+        "subhead": "Try a search, or head back to the beginning.",
+        "primary_label": "Back to home",
+        "primary_url": "/"
+      }
+    },
+    {
+      "id": "find",
+      "kind": "search-box",
+      "settings": {
+        "placeholder": "Search for something else"
+      }
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ]
+}

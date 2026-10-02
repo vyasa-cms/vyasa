@@ -1,0 +1,5 @@
+{% extends "base.html" %}
+{% block body %}{% if sections %}{{ sections | safe }}{% else %}
+<section class="vy-404"><h1>404</h1><p>Nothing was found here.</p>
+<a href="/">{{ "back_home"|t }}</a>{{ regions.content | default(value="") | safe }}</section>
+{% endif %}{% endblock %}

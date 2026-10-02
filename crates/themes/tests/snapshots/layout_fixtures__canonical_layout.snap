@@ -1,0 +1,80 @@
+---
+source: crates/themes/tests/layout_fixtures.rs
+expression: canonical_layout_json(&layout)
+---
+{
+  "index": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "nav"
+    },
+    {
+      "id": "hero",
+      "kind": "latest-posts"
+    },
+    {
+      "id": "main",
+      "kind": "content"
+    },
+    {
+      "id": "aside",
+      "kind": "sidebar-right"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "single": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "trail",
+      "kind": "breadcrumbs"
+    },
+    {
+      "id": "body",
+      "kind": "post-content"
+    },
+    {
+      "id": "comments",
+      "kind": "comments"
+    }
+  ],
+  "archive": [
+    {
+      "id": "main",
+      "kind": "content"
+    }
+  ],
+  "page": [
+    {
+      "id": "main",
+      "kind": "content"
+    }
+  ],
+  "search": [
+    {
+      "id": "main",
+      "kind": "content",
+      "settings": {
+        "placeholder": "Search…"
+      }
+    }
+  ],
+  "not-found": [
+    {
+      "id": "nf",
+      "kind": "content",
+      "settings": {
+        "zzz": true
+      }
+    }
+  ]
+}

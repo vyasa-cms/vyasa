@@ -1,0 +1,20 @@
+Confirm your email address for {{ site }}
+Hello,
+
+Someone, hopefully you, created an account on {{ site }} with this email
+address. Open this link to confirm it and finish:
+
+    {{ url }}
+
+The link works once and expires in 24 hours.
+
+The page asks for the password you chose when you signed up. If you do not
+know it, you can confirm without it: any password typed when the account was
+created is then removed, and we will email you a link to choose your own.
+{% if password_cleared %}
+This address was registered more than once with different passwords, so
+neither was kept: confirm without a password, and we will email you a link
+to set a password.
+{% endif %}
+If you did not create an account, ignore this email — do not click the link.
+Without confirmation the account is deleted after a week.

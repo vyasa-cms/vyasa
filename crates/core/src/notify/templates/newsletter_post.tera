@@ -1,0 +1,14 @@
+{{ site }}: {{ post_title }}
+{{ post_title }}
+
+{{ excerpt }}
+
+Read it here:
+
+    {{ url }}
+
+—
+You get one email per new post on {{ site }}.
+Unsubscribe any time:
+
+    {{ unsubscribe_url }}

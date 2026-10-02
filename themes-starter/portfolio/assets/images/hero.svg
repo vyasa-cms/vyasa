@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="800" viewBox="0 0 720 800" role="img" aria-label="Modular shapes on a lime canvas">
+  <rect width="720" height="800" fill="#ccf583"/>
+  <g fill="none" stroke="#22342a" opacity=".12">
+    <path d="M0 160H720M0 320H720M0 480H720M0 640H720M180 0V800M360 0V800M540 0V800"/>
+  </g>
+  <g fill="#20392a">
+    <path d="M120 190H355V425H120Z"/>
+    <path d="M365 190A235 235 0 0 1 600 425H365Z"/>
+    <path d="M120 435H355V670A235 235 0 0 1 120 435Z"/>
+    <path d="M482 435L600 670H365Z"/>
+  </g>
+  <circle cx="238" cy="308" r="65" fill="#ccf583"/>
+  <circle cx="365" cy="425" r="32" fill="#f7f7e9"/>
+  <text x="45" y="63" fill="#20392a" font-family="sans-serif" font-size="12" letter-spacing="3">FORM / FUNCTION / FEELING</text>
+  <text x="45" y="751" fill="#20392a" font-family="sans-serif" font-size="11" letter-spacing="2">A STUDY IN POSSIBILITY</text>
+  <path d="M613 725H662V774M662 725L613 774" fill="none" stroke="#20392a" stroke-width="3"/>
+</svg>

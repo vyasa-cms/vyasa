@@ -1,0 +1,12 @@
+title = "vyasa gitleaks config"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures with deliberately fake credentials"
+regexes = [
+    # crates/api/tests/ai_models.rs: a made-up OpenAI key used to check that
+    # responses show only a hint of a stored key.
+    '''sk-test-abcdef-9876''',
+]

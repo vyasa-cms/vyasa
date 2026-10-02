@@ -1,0 +1,8 @@
+Confirm your subscription to {{ site }}
+You (or someone with your address) asked to get new posts from {{ site }} by email.
+
+Confirm with one click:
+
+    {{ url }}
+
+If this wasn't you, ignore this email and nothing will be sent.

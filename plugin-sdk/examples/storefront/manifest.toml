@@ -1,0 +1,12 @@
+name = "storefront"
+version = "0.1.0"
+description = "Products as a post type, designer sections with prices, a signed-in cart and order requests by mail"
+capabilities = [
+    "log:write",
+    "db:read:posts",
+    "db:write:meta",
+    "kv:read",
+    "kv:write",
+    "viewer:read",
+    "mail:send",
+]

@@ -1,0 +1,31 @@
+[package]
+publish = false
+name = "vyasa-db"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Vyasa db crate"
+
+[lints]
+workspace = true
+
+[dependencies]
+tracing = "0.1"
+vyasa-common = { path = "../common" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
+sqlx = { version = "0.8", default-features = false, features = [
+    "runtime-tokio",
+    "tls-rustls",
+    "postgres",
+    "migrate",
+    "macros",
+    "chrono",
+] }
+
+[dev-dependencies]
+vyasa-core = { path = "../core" }
+vyasa-testkit = { path = "../testkit" }
+tokio = { version = "1", features = ["macros", "rt", "sync"] }

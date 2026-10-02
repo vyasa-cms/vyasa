@@ -1,0 +1,308 @@
+{
+  "index": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "hero",
+      "kind": "hero",
+      "settings": {
+        "eyebrow": "Open foundations. Explicit control.",
+        "headline": "Build systems you can understand.",
+        "subhead": "Describe what your product does, show how it works, and make every capability\u2019s maturity clear.",
+        "primary_label": "See an example",
+        "primary_url": "#examples",
+        "secondary_label": "Explore the architecture",
+        "secondary_url": "#execution"
+      },
+      "scope": {
+        "motion": "rise",
+        "contained": true
+      }
+    },
+    {
+      "id": "execution",
+      "kind": "execution-flow",
+      "settings": {
+        "heading": "From request to result.",
+        "intro": "A visible execution path, with a clear responsibility at each step.",
+        "items": [
+          {
+            "title": "Public API",
+            "label": "Entry",
+            "body": "Receive a request through a documented interface."
+          },
+          {
+            "title": "Plan and execute",
+            "label": "Runtime",
+            "body": "Choose the operators and execute the workload."
+          },
+          {
+            "title": "Return the result",
+            "label": "Output",
+            "body": "Deliver structured results back to the caller."
+          }
+        ]
+      },
+      "scope": {
+        "motion": "fade",
+        "contained": true
+      }
+    },
+    {
+      "id": "products",
+      "kind": "feature-grid",
+      "settings": {
+        "heading": "Start small. Grow deliberately.",
+        "columns": 2,
+        "items": [
+          {
+            "title": "Engine",
+            "eyebrow": "Open foundation",
+            "body": "Explain the standalone product and its public contracts.",
+            "url": "#examples"
+          },
+          {
+            "title": "Workspace",
+            "eyebrow": "Product direction",
+            "body": "Describe the management experience without implying availability.",
+            "url": "#maturity"
+          }
+        ]
+      }
+    },
+    {
+      "id": "examples",
+      "kind": "code-tabs",
+      "settings": {
+        "heading": "Show the real interface.",
+        "intro": "Replace these editable examples with your product\u2019s documented API.",
+        "items": [
+          {
+            "title": "CLI",
+            "language": "sh",
+            "code": "echo \"Hello, world\""
+          },
+          {
+            "title": "Python",
+            "language": "python",
+            "code": "print(\"Hello, world\")"
+          },
+          {
+            "title": "Rust",
+            "language": "rust",
+            "code": "fn main() {\n    println!(\"Hello, world\");\n}"
+          }
+        ]
+      }
+    },
+    {
+      "id": "maturity",
+      "kind": "status-cards",
+      "settings": {
+        "heading": "Keep maturity visible.",
+        "intro": "Sample labels: update these to match your actual product.",
+        "items": [
+          {
+            "title": "Core runtime",
+            "status": "available",
+            "body": "Describe the supported operating contract."
+          },
+          {
+            "title": "Distributed execution",
+            "status": "preview",
+            "body": "Explain evaluation limits before users depend on it."
+          },
+          {
+            "title": "Incremental processing",
+            "status": "experimental",
+            "body": "State what is still changing."
+          },
+          {
+            "title": "Management workspace",
+            "status": "coming-soon",
+            "body": "Describe the direction without promising a release date."
+          }
+        ]
+      }
+    },
+    {
+      "id": "start",
+      "kind": "cta-band",
+      "settings": {
+        "headline": "Make your next step clear.",
+        "subhead": "Link to your actual quickstart or contact page.",
+        "label": "Review the examples",
+        "url": "#examples"
+      }
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "single": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "crumbs",
+      "kind": "breadcrumbs"
+    },
+    {
+      "id": "body",
+      "kind": "post-content"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "archive": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "posts",
+      "kind": "latest-posts",
+      "settings": {
+        "count": 12
+      }
+    },
+    {
+      "id": "pages",
+      "kind": "pagination"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "page": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "crumbs",
+      "kind": "breadcrumbs"
+    },
+    {
+      "id": "docsnav",
+      "kind": "docs-nav"
+    },
+    {
+      "id": "toc",
+      "kind": "toc"
+    },
+    {
+      "id": "body",
+      "kind": "post-content"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "search": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "find",
+      "kind": "search-box",
+      "settings": {
+        "placeholder": "Search the site"
+      }
+    },
+    {
+      "id": "posts",
+      "kind": "latest-posts",
+      "settings": {
+        "count": 12
+      }
+    },
+    {
+      "id": "pages",
+      "kind": "pagination"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "not-found": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "missing",
+      "kind": "hero",
+      "settings": {
+        "eyebrow": "404 / A small detour",
+        "headline": "This page has moved on.",
+        "subhead": "Try a search, or head back to the beginning.",
+        "primary_label": "Back to home",
+        "primary_url": "/"
+      }
+    },
+    {
+      "id": "find",
+      "kind": "search-box",
+      "settings": {
+        "placeholder": "Search for something else"
+      }
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ]
+}

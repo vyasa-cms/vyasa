@@ -1,0 +1,12 @@
+# cargo-audit policy. Everything not listed here fails the gate.
+#
+# cargo-audit reads the whole lockfile; cargo-deny (deny.toml) resolves the
+# real dependency graph, so an advisory for a crate that is locked but never
+# built appears here and not there.
+[advisories]
+ignore = [
+    # rsa 0.9 Marvin timing attack. Locked through sqlx-mysql, which this
+    # workspace never builds or connects with: Vyasa speaks Postgres only.
+    # No fixed rsa release exists yet; revisit when one does.
+    "RUSTSEC-2023-0071",
+]

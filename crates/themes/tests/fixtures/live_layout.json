@@ -1,0 +1,151 @@
+{
+  "page": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "body",
+      "kind": "post-content"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "index": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "posts",
+      "kind": "latest-posts",
+      "settings": {
+        "count": 10
+      }
+    },
+    {
+      "id": "aside",
+      "kind": "sidebar-right"
+    },
+    {
+      "id": "pages",
+      "kind": "pagination"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "search": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "search",
+      "kind": "search-box",
+      "settings": {
+        "placeholder": "Search this site\u2026"
+      }
+    },
+    {
+      "id": "results",
+      "kind": "latest-posts"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "single": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "trail",
+      "kind": "breadcrumbs"
+    },
+    {
+      "id": "body",
+      "kind": "post-content"
+    },
+    {
+      "id": "comments",
+      "kind": "comments"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "archive": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "listing",
+      "kind": "latest-posts"
+    },
+    {
+      "id": "pages",
+      "kind": "pagination"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "not-found": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "message",
+      "kind": "content"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ]
+}

@@ -1,0 +1,20 @@
+[package]
+publish = false
+name = "vyasa-search"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Vyasa full-text search (Tantivy)"
+
+[dependencies]
+tantivy = "0.25"
+tracing = "0.1"
+vyasa-common = { path = "../common" }
+vyasa-core = { version = "0.1.0", path = "../core" }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

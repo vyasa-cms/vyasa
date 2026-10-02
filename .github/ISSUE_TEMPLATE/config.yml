@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and help
+    url: https://github.com/vyasa-cms/vyasa/discussions/categories/q-a
+    about: Ask and answer questions in Discussions.
+  - name: Security vulnerability
+    url: https://github.com/vyasa-cms/vyasa/security/advisories/new
+    about: Report privately, never in a public issue.

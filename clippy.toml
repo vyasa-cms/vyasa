@@ -1,0 +1,5 @@
+# Clippy configuration.
+# Unwrap/expect stay banned in production code (workspace lints) but are
+# permitted inside #[cfg(test)] modules, where panicking is the point.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

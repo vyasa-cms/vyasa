@@ -1,0 +1,14 @@
+name = "bookshelf"
+version = "0.4.0"
+description = "Books as a custom post type, with a rating block, a stats endpoint and a nightly tally"
+capabilities = [
+    "log:write",
+    "db:read:posts",
+    "db:read:options",
+    "db:write:meta",
+    "kv:read",
+    "kv:write",
+    "viewer:read",
+    "mail:send",
+    "html:page",
+]

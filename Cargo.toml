@@ -1,0 +1,39 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+rust-version = "1.85"
+repository = "https://github.com/vyasa-cms/vyasa"
+homepage = "https://vyasa.site"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+unwrap_used = "warn"
+expect_used = "warn"
+dbg_macro = "warn"
+doc_markdown = "allow" # project name "Vyasa" trips this everywhere
+# `assert!(x.is_empty())` reads better than `assert_eq!(x, [] as [T; 0])`.
+assert_is_empty = "allow"
+# axum handlers and middleware return `Response` as their error; it is the
+# framework's idiom and only built on the failure path.
+result_large_err = "allow"
+# axum's extractor traits are declared `async fn`; an impl that needs no
+# await still has to match the trait.
+unused_async_trait_impl = "allow"
+
+[profile.release]
+lto = "thin"
+strip = true
+codegen-units = 1
+
+[profile.dev.package."*"]
+opt-level = 1

@@ -1,0 +1,18 @@
+---
+source: crates/themes/tests/resolver_tests.rs
+expression: text
+---
+<!-- latest-posts -->
+<div class="vy-latest-posts"><article class="vy-post-card"><a class="vy-post-card__link" href="/hello-welcome">Hello &amp; welcome</a><span class="vy-post-card__meta">Ada · Aug 23, 2026</span><img class="vy-post-card__thumb" src="https://cdn.example.com/t.jpg" alt="" loading="lazy" data-blurhash="LEHV6nWB2yk8pyo0adR*.7kCMdnj"><p class="vy-post-card__excerpt">First &quot;post&quot;</p></article><article class="vy-post-card"><a class="vy-post-card__link" href="/second">Second</a><span class="vy-post-card__meta">Ada · Aug 22, 2026</span></article></div>
+<!-- categories-list -->
+<ul class="vy-categories"><li style="--vy-weight:3.00"><a href="/category/rust">Rust</a> <span class="vy-term-count">(4)</span></li><li style="--vy-weight:1.50"><a href="/category/ops">Ops</a> <span class="vy-term-count">(1)</span></li></ul>
+<!-- tag-cloud -->
+<ul class="vy-tag-cloud"><li style="--vy-weight:3.00"><a href="/tag/tokio">tokio</a> <span class="vy-term-count">(9)</span></li><li style="--vy-weight:1.67"><a href="/tag/axum">axum</a> <span class="vy-term-count">(3)</span></li></ul>
+<!-- archives -->
+<ul class="vy-archives"><li><a href="/08-2026/">August 2026</a> <span class="vy-term-count">(3)</span></li><li><a href="/07-2026/">July 2026</a> <span class="vy-term-count">(5)</span></li></ul>
+<!-- search-box -->
+<form class="vy-search" action="/search" method="get" role="search"><input type="search" name="s" placeholder="Search…" aria-label="Search"><button type="submit">Go</button></form>
+<!-- menu -->
+<nav class="vy-nav"><label class="vy-nav-toggle" aria-label="Menu"><input type="checkbox" class="vy-nav-check"></label><ul class="vy-menu"><li><a href="/">Home</a></li><li><a href="/category/rust">Rust</a></li></ul></nav>
+<!-- breadcrumbs -->
+<nav class="vy-breadcrumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li></ol></nav>

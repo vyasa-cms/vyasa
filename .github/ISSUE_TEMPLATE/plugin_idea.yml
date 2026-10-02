@@ -1,0 +1,11 @@
+name: Plugin or theme idea
+description: Something that belongs in a plugin or theme rather than core
+labels: [plugin-idea]
+body:
+  - type: textarea
+    id: idea
+    attributes: { label: What it would do }
+    validations: { required: true }
+  - type: textarea
+    id: hooks
+    attributes: { label: What it needs from Vyasa, description: "Hooks, capabilities or APIs it would use, if you know." }

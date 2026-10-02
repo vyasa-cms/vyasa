@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block body %}{% if sections %}{{ sections | safe }}{% else %}
+<h1 class="vy-archive-title">{{ "search_results"|t }}: {{ page.archive_title }}</h1>
+<div class="vy-post-list">
+  {% for post in posts %}
+  <article class="vy-card">
+    <h2 class="vy-h"><a href="{{ post.url }}">{{ post.title }}</a></h2>
+    <p class="vy-meta">{{ post.date }}</p>
+    {# The snippet is produced by the search index, which escapes the source
+       text before wrapping matches in <mark>; the excerpt is author text and
+       stays escaped. #}
+    {% if post.snippet %}
+    <p class="vy-excerpt">{{ post.snippet | safe }}</p>
+    {% elif post.excerpt %}
+    <p class="vy-excerpt">{{ post.excerpt }}</p>
+    {% endif %}
+  </article>
+  {% endfor %}
+</div>
+{{ regions.content | default(value="") | safe }}
+{% if pagination.prev or pagination.next %}
+<nav class="vy-pagination">
+  {% if pagination.prev %}<a href="{{ pagination.prev }}" rel="prev">← Newer</a>{% endif %}
+  <span>{{ pagination.page }}</span>
+  {% if pagination.next %}<a href="{{ pagination.next }}" rel="next">Older →</a>{% endif %}
+</nav>
+{% endif %}
+{% endif %}{% endblock %}

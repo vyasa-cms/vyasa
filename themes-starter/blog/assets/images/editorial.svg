@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="720" height="800" viewBox="0 0 720 800" role="img" aria-label="Sun above layered hills">
+  <rect width="720" height="800" fill="#dedfd0"/>
+  <circle cx="445" cy="245" r="119" fill="#faf3dc"/>
+  <path d="M0 454 Q150 282 339 448 T720 372 V800 H0Z" fill="#9ca790"/>
+  <path d="M0 570 Q190 355 400 540 T720 469 V800 H0Z" fill="#647760"/>
+  <path d="M0 685 Q185 498 390 650 T720 595 V800 H0Z" fill="#384e41"/>
+  <path d="M0 760 Q253 583 480 755 T720 689 V800 H0Z" fill="#253a31"/>
+  <path d="M300 800 Q430 678 387 574 Q351 494 445 471" fill="none" stroke="#d3aa79" stroke-width="6"/>
+  <path d="M44 46H148 M44 46V150 M676 46H572 M676 46V150" fill="none" stroke="#faf3dc" stroke-width="1" opacity=".7"/>
+  <text x="44" y="732" fill="#faf3dc" font-family="Georgia, serif" font-size="23">A different point of view.</text>
+  <text x="44" y="763" fill="#d4dccd" font-family="sans-serif" font-size="10" letter-spacing="3">FIELD NOTES / VOL. 01</text>
+</svg>

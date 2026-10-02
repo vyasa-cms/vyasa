@@ -1,0 +1,27 @@
+<!doctype html>
+{# `default` fills in for a value that is *missing*, not one that is
+   empty, so every meaningful fallback below is written as a test on the
+   value itself. An empty site name rendered `<title> — </title>`, and an
+   untitled post rendered `<title> — Vyasa</title>`: a separator with
+   nothing in front of it, on every search result and browser tab. -#}
+<html lang="{% if page.lang %}{{ page.lang }}{% elif site.lang %}{{ site.lang }}{% else %}en{% endif %}" dir="{% if page.direction %}{{ page.direction }}{% else %}ltr{% endif %}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{% if page.title %}{{ page.title }}{% else %}Untitled{% endif %} — {% if site.name %}{{ site.name }}{% else %}Vyasa{% endif %}{% endblock %}</title>
+<style>{{ page.tokens_css | default(value="") | safe }}</style>
+<style>{{ page.base_css | default(value="") | safe }}</style>
+<link rel="stylesheet" href="/custom.css">{{ page.theme_assets | default(value="") | safe }}
+{{ page.head | default(value="") | safe }}
+<script src="/theme-assets/components.js" defer></script>
+</head>
+<body class="vy" data-template="{{ page.template | default(value="") }}">
+<div class="vy-masthead">{{ regions.header | default(value="") | safe }}{{ regions.nav | default(value="") | safe }}</div>
+<main class="vy-main">
+{% if page.notice %}<p class="vy-notice" role="status">{{ page.notice }}</p>{% endif %}
+{% block body %}{% endblock %}
+{{ page.extras | default(value="") | safe }}</main>
+{{ regions.sidebar_left | default(value="") | safe }}{{ regions.sidebar_right | default(value="") | safe }}
+<footer class="vy-footer">{{ regions.footer | default(value="") | safe }}</footer>
+</body>
+</html>

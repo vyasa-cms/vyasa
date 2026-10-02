@@ -1,0 +1,64 @@
+# Rust
+# Unanchored, so the nested target/ dirs under examples/plugins/* and
+# plugin-sdk/template are ignored too — anchoring to /target left ~1700 files
+# of build output tracked.
+target/
+**/*.rs.bk
+
+# Node / pnpm
+node_modules/
+dist/
+*.tsbuildinfo
+
+# Environment & secrets
+.env
+.env.*
+!.env.example
+
+# Runtime state (pid, logs, rollback binary)
+/.run/
+# Server log, written by `vyasa serve` when it is started with its output
+# redirected. Anchored: only the one the process at the repo root writes.
+/vyasa.log
+
+# Browser-automation session artifacts
+.playwright-mcp/
+
+# Databases & local state
+# NB: gitignore has no inline comments — a trailing "# note" becomes part of
+# the pattern and silently matches nothing.
+*.sqlite
+*.db
+/data/
+# Anchored: an unanchored `media/` also matches crates/core/src/media/,
+# which silently kept the media service out of version control.
+/media/
+# Tantivy search index. Unanchored: the index is created relative to the
+# process's working directory, so running the server or the tests from a
+# crate directory produced crates/api/index/ and committed it — locks and
+# temp files included.
+index/
+
+# A self-hosted marketplace's files (phase 67). Anchored, and it must
+# stay that way: unanchored, `registry/` also matches
+# crates/api/src/registry/ and would silently drop the marketplace source
+# from version control — the same trap `/media/` above documents.
+/registry/
+
+# Built admin bundle served from disk at runtime
+/admin-dist/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Coverage & benches
+/coverage
+tarpaulin-report.*
+benchmark_output/
+
+# first-run setup token, written by `vyasa serve`
+.run/

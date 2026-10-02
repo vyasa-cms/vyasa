@@ -1,0 +1,245 @@
+{
+  "index": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "intro",
+      "kind": "hero",
+      "settings": {
+        "eyebrow": "The knowledge base",
+        "headline": "Less searching. More building.",
+        "subhead": "Clear guides, practical examples, and the details you need to move from an idea to a working result.",
+        "align": "center"
+      }
+    },
+    {
+      "id": "find",
+      "kind": "search-box",
+      "settings": {
+        "placeholder": "What would you like to learn?"
+      }
+    },
+    {
+      "id": "areas",
+      "kind": "feature-grid",
+      "settings": {
+        "heading": "Find your starting point.",
+        "columns": 3,
+        "items": [
+          {
+            "eyebrow": "Start here",
+            "title": "The essentials",
+            "body": "Get oriented, learn the concepts, and take your first steps.",
+            "url": "/search?s=getting+started"
+          },
+          {
+            "eyebrow": "Step by step",
+            "title": "Guides & recipes",
+            "body": "Practical walkthroughs for the things you want to make.",
+            "url": "/search?s=guide"
+          },
+          {
+            "eyebrow": "Go deeper",
+            "title": "The reference",
+            "body": "Look up the details and understand how everything fits together.",
+            "url": "/search?s=reference"
+          }
+        ]
+      }
+    },
+    {
+      "id": "guides",
+      "kind": "collection",
+      "settings": {
+        "heading": "Fresh from the docs",
+        "bind": {
+          "source": "page",
+          "sort": "newest",
+          "limit": 4
+        },
+        "columns": 2,
+        "show_image": false,
+        "show_excerpt": true
+      }
+    },
+    {
+      "id": "help",
+      "kind": "cta-band",
+      "settings": {
+        "headline": "Your next answer is a search away.",
+        "subhead": "Explore the full library of guides and reference material.",
+        "label": "Browse the knowledge base",
+        "url": "/search"
+      }
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "single": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "crumbs",
+      "kind": "breadcrumbs"
+    },
+    {
+      "id": "body",
+      "kind": "post-content"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "archive": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "posts",
+      "kind": "latest-posts",
+      "settings": {
+        "count": 12
+      }
+    },
+    {
+      "id": "pages",
+      "kind": "pagination"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "page": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "crumbs",
+      "kind": "breadcrumbs"
+    },
+    {
+      "id": "docsnav",
+      "kind": "docs-nav"
+    },
+    {
+      "id": "toc",
+      "kind": "toc"
+    },
+    {
+      "id": "body",
+      "kind": "post-content"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "search": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "find",
+      "kind": "search-box",
+      "settings": {
+        "placeholder": "Search the site"
+      }
+    },
+    {
+      "id": "posts",
+      "kind": "latest-posts",
+      "settings": {
+        "count": 12
+      }
+    },
+    {
+      "id": "pages",
+      "kind": "pagination"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "not-found": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "missing",
+      "kind": "hero",
+      "settings": {
+        "eyebrow": "404 / A small detour",
+        "headline": "This page has moved on.",
+        "subhead": "Try a search, or head back to the beginning.",
+        "primary_label": "Back to home",
+        "primary_url": "/"
+      }
+    },
+    {
+      "id": "find",
+      "kind": "search-box",
+      "settings": {
+        "placeholder": "Search for something else"
+      }
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ]
+}

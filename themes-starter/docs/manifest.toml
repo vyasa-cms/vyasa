@@ -1,0 +1,4 @@
+name = "docs"
+version = 5
+author = "Vyasa Team"
+required_api = 1

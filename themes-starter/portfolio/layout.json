@@ -1,0 +1,239 @@
+{
+  "index": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "intro",
+      "kind": "hero",
+      "settings": {
+        "eyebrow": "Independent design & development",
+        "headline": "Thoughtful work. Lasting impact.",
+        "subhead": "A selection of digital experiences, identities, and ideas made with care. Built to feel right. Made to work.",
+        "primary_label": "Selected work",
+        "primary_url": "#work",
+        "secondary_label": "Our approach",
+        "secondary_url": "#approach",
+        "image": "/theme-assets/images/hero.svg",
+        "image_alt": "Graphic composition of modular black shapes on a vivid lime canvas"
+      }
+    },
+    {
+      "id": "work",
+      "kind": "collection",
+      "settings": {
+        "heading": "Selected work",
+        "bind": {
+          "source": "post",
+          "sort": "newest",
+          "limit": 6
+        },
+        "columns": 2,
+        "show_image": true,
+        "show_excerpt": true
+      }
+    },
+    {
+      "id": "approach",
+      "kind": "feature-grid",
+      "settings": {
+        "heading": "From a good question to a better outcome.",
+        "columns": 3,
+        "items": [
+          {
+            "eyebrow": "01 / Discover",
+            "title": "Start with the why.",
+            "body": "Listen closely, find the real problem, and make room for unexpected ideas."
+          },
+          {
+            "eyebrow": "02 / Design",
+            "title": "Make it feel right.",
+            "body": "Clear systems, purposeful details, and an experience people enjoy using."
+          },
+          {
+            "eyebrow": "03 / Build",
+            "title": "Bring it to life.",
+            "body": "Thoughtful implementation with performance and accessibility built in."
+          }
+        ]
+      }
+    },
+    {
+      "id": "ask",
+      "kind": "cta-band",
+      "settings": {
+        "headline": "See what comes next.",
+        "subhead": "Follow the work, from the first idea to the finished thing.",
+        "label": "Follow the work",
+        "url": "/feed.xml"
+      },
+      "scope": {
+        "bg": "$text",
+        "text": "$bg",
+        "text_muted": "$bg",
+        "primary": "$bg",
+        "on_primary": "$text",
+        "contained": true
+      }
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "single": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "body",
+      "kind": "post-content"
+    },
+    {
+      "id": "more",
+      "kind": "related-posts",
+      "settings": {
+        "count": 3
+      }
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "archive": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "posts",
+      "kind": "latest-posts",
+      "settings": {
+        "count": 12
+      }
+    },
+    {
+      "id": "pages",
+      "kind": "pagination"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "page": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "body",
+      "kind": "post-content"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "search": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "find",
+      "kind": "search-box",
+      "settings": {
+        "placeholder": "Search the site"
+      }
+    },
+    {
+      "id": "posts",
+      "kind": "latest-posts",
+      "settings": {
+        "count": 12
+      }
+    },
+    {
+      "id": "pages",
+      "kind": "pagination"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "not-found": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "missing",
+      "kind": "hero",
+      "settings": {
+        "eyebrow": "404 / A small detour",
+        "headline": "This page has moved on.",
+        "subhead": "Try a search, or head back to the beginning.",
+        "primary_label": "Back to home",
+        "primary_url": "/"
+      }
+    },
+    {
+      "id": "find",
+      "kind": "search-box",
+      "settings": {
+        "placeholder": "Search for something else"
+      }
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ]
+}

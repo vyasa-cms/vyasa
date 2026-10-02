@@ -1,0 +1,163 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * Palette: iron-oxide primary on neutral grounds.
+ *
+ * Two constraints shape the choices here.
+ *
+ * 1. The primary is a vermilion red (hue 6-8, the brand: warm enough that the
+ *    lighter dark-mode value stays red rather than drifting pink), and red is also the universal
+ *    destructive signal. Destructive therefore sits at hue ~352, a cooler
+ *    crimson, darker in light mode and paired with the warning icon, so
+ *    Publish and Delete never read as the same button.
+ * 2. The usual warning amber (~38) reads close to a red primary, so warning
+ *    stays a distinctly yellow gold (~45).
+ *
+ * Dark mode is true black — #000, not a tinted near-black — with strictly
+ * neutral greys (0% saturation). Structure comes from borders rather than
+ * from lifting the background.
+ */
+@layer base {
+  :root {
+    /* Warm-neutral grounds, so the light theme agrees with the rust accent
+       instead of fighting it with a blue-grey. */
+    --background: 30 25% 99%;
+    --foreground: 24 14% 10%;
+    --card: 0 0% 100%;
+    --card-foreground: 24 14% 10%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 24 14% 10%;
+
+    --primary: 6 72% 46%;
+    --primary-foreground: 0 0% 100%;
+
+    --secondary: 30 16% 95%;
+    --secondary-foreground: 24 12% 24%;
+
+    --muted: 30 16% 95%;
+    --muted-foreground: 25 8% 44%;
+
+    --accent: 28 20% 93%;
+    --accent-foreground: 24 14% 14%;
+
+    --destructive: 352 72% 42%;
+    --destructive-foreground: 0 0% 100%;
+
+    --success: 152 55% 30%;
+    --success-foreground: 0 0% 100%;
+    --warning: 45 93% 33%;
+    --warning-foreground: 0 0% 100%;
+
+    /* Tinted surfaces for chips and callouts. */
+    --primary-subtle: 6 80% 95%;
+    --success-subtle: 150 42% 93%;
+    --warning-subtle: 46 80% 91%;
+    --destructive-subtle: 6 72% 95%;
+
+    --border: 28 15% 89%;
+    --input: 28 14% 85%;
+    --ring: 6 72% 46%;
+    --radius: 0.5rem;
+  }
+
+  .dark {
+    /* True black. Cards and popovers lift by a few percent so panels remain
+       readable as distinct surfaces; the greys carry no hue at all. */
+    --background: 0 0% 0%;
+    --foreground: 0 0% 93%;
+    --card: 0 0% 5%;
+    --card-foreground: 0 0% 93%;
+    --popover: 0 0% 7%;
+    --popover-foreground: 0 0% 93%;
+
+    --primary: 8 80% 60%;
+    --primary-foreground: 0 40% 8%;
+
+    --secondary: 0 0% 12%;
+    --secondary-foreground: 0 0% 88%;
+
+    --muted: 0 0% 9%;
+    --muted-foreground: 0 0% 62%;
+
+    --accent: 0 0% 14%;
+    --accent-foreground: 0 0% 93%;
+
+    --destructive: 4 85% 72%;
+    --destructive-foreground: 0 0% 8%;
+
+    --success: 152 50% 55%;
+    --success-foreground: 0 0% 8%;
+    --warning: 45 85% 60%;
+    --warning-foreground: 0 0% 8%;
+
+    --primary-subtle: 8 40% 13%;
+    --success-subtle: 155 32% 11%;
+    --warning-subtle: 44 34% 12%;
+    --destructive-subtle: 6 40% 13%;
+
+    --border: 0 0% 16%;
+    --input: 0 0% 22%;
+    --ring: 8 80% 60%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+
+  html {
+    /* Prevent iOS auto-zoom on focus without shrinking desktop type. */
+    -webkit-text-size-adjust: 100%;
+  }
+
+  body {
+    @apply bg-background text-foreground;
+    /* No page-level sideways scroll on narrow screens; wide content scrolls
+       inside its own container instead. */
+    overflow-x: hidden;
+  }
+
+  /* Visible keyboard focus everywhere, including custom controls. */
+  :focus-visible {
+    @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background;
+  }
+
+  ::selection {
+    background: hsl(var(--primary-subtle));
+    color: hsl(var(--foreground));
+  }
+}
+
+@layer utilities {
+  /* Comfortable touch target on coarse pointers without bloating desktop. */
+  @media (pointer: coarse) {
+    .touch-target {
+      min-height: 44px;
+    }
+  }
+
+  .scrollbar-thin {
+    scrollbar-width: thin;
+  }
+  .scrollbar-thin::-webkit-scrollbar {
+    height: 8px;
+    width: 8px;
+  }
+  .scrollbar-thin::-webkit-scrollbar-thumb {
+    background: hsl(var(--border));
+    border-radius: 4px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

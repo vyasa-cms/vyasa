@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="800" height="850" viewBox="0 0 800 850" role="img" aria-label="Terracotta and cream vessels on a stone plinth">
+  <rect width="800" height="850" fill="#e7dfd1"/>
+  <path d="M800 0V635L222 850H0V772Z" fill="#ddd0ba"/>
+  <rect y="651" width="800" height="199" fill="#cabba3"/>
+  <ellipse cx="424" cy="670" rx="254" ry="31" fill="#b5a388"/>
+  <rect x="151" y="582" width="499" height="109" rx="3" fill="#f0e9db"/>
+  <path d="M151 691H650L700 726H203Z" fill="#a89275"/>
+  <path d="M650 582L700 617V726L650 691Z" fill="#d4c7b1"/>
+  <path d="M246 279H367V332C367 370 436 391 436 463V530C436 571 395 593 307 593C219 593 178 571 178 530V463C178 391 246 370 246 332Z" fill="#a76143"/>
+  <path d="M246 279H281V340C281 391 228 411 228 468V550C228 569 242 583 260 589C203 581 178 561 178 530V463C178 391 246 370 246 332Z" fill="#925039"/>
+  <ellipse cx="307" cy="279" rx="61" ry="14" fill="#6d3b2b"/>
+  <ellipse cx="307" cy="279" rx="48" ry="8" fill="#433127"/>
+  <path d="M486 392H558V425C558 451 604 465 604 512V555C604 588 577 603 522 603C467 603 440 588 440 555V512C440 465 486 451 486 425Z" fill="#f5eee0"/>
+  <path d="M486 392H502V434C502 466 465 477 465 527V563C465 585 478 595 494 600C458 594 440 580 440 555V512C440 465 486 451 486 425Z" fill="#d9cdb7"/>
+  <ellipse cx="522" cy="392" rx="36" ry="9" fill="#c1b299"/>
+  <path d="M522 389Q481 230 561 160M521 368Q570 262 630 259" fill="none" stroke="#53614a" stroke-width="5"/>
+  <g fill="#718062"><ellipse cx="550" cy="203" rx="14" ry="39" transform="rotate(31 550 203)"/><ellipse cx="518" cy="267" rx="12" ry="35" transform="rotate(-25 518 267)"/><ellipse cx="588" cy="283" rx="33" ry="11" transform="rotate(-21 588 283)"/></g>
+  <text x="47" y="799" fill="#675540" font-family="sans-serif" font-size="11" letter-spacing="3">THE EVERYDAY COLLECTION / 01</text>
+</svg>

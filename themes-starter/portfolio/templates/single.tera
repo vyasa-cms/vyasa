@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block body %}
+{% if sections %}{{ sections | safe }}{% else %}
+<article class="vy-single portfolio-case">
+  <header class="portfolio-case__hero"><h1 class="vy-title">{{ page.post_title }}</h1>
+  <p class="vy-meta">{{ page.post_date | default(value="") }}</p></header>
+  {% if regions.body %}{{ regions.body | safe }}{% else %}{{ regions.content | default(value="") | safe }}{% endif %}
+  {{ regions.comments | default(value="") | safe }}
+</article>
+{% endif %}
+{% endblock %}

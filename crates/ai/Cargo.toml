@@ -1,0 +1,25 @@
+[package]
+publish = false
+name = "vyasa-ai"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Vyasa ai crate"
+
+[lints]
+workspace = true
+
+[dependencies]
+reqwest = { version = "0.13.4", features = ["json", "multipart"] }
+base64 = "0.22"
+vyasa-common = { version = "0.1.0", path = "../common" }
+vyasa-core = { version = "0.1.0", path = "../core" }
+vyasa-themes = { version = "0.1.0", path = "../themes" }
+schemars = "1.2.2"
+serde = "1.0.229"
+serde_json = "1.0.151"
+tracing = "0.1"
+
+[dev-dependencies]
+tokio = "1.53.1"

@@ -1,0 +1,13 @@
+name = "forum-lite"
+version = "0.1.0"
+description = "Topics as entries, replies as the site's own comments, a topic-list designer section"
+capabilities = [
+    "log:write",
+    "db:read:posts",
+    "db:read:comments",
+    "db:write:posts",
+    "db:publish:posts",
+    "kv:read",
+    "kv:write",
+    "viewer:read",
+]

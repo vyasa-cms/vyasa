@@ -1,0 +1,8 @@
+You have been invited to {{ site }}
+Hi,
+
+{{ inviter }} invited you to {{ site }} as {{ role }}.
+
+Your username is {{ username }}. Set a password to get started:
+
+    {{ url }}

@@ -1,0 +1,83 @@
+package vyasa:plugin@1.0.0;
+
+/// Everything a plugin can see or do. Every function is an attack-surface
+/// decision: keep this surface minimal and capability-gated.
+interface host {
+    /// Structured log levels mirrored from tracing.
+    variant log-level {
+        trace,
+        debug,
+        info,
+        warn,
+        error,
+    }
+
+    /// Post summary handed to hooks and returned by get-post.
+    record post-summary {
+        id: u64,
+        post-type: string,
+        slug: string,
+        title: string,
+        excerpt: string,
+        author-id: u64,
+        published-at: option<u64>,
+    }
+
+    /// Render pipeline stages a filter can intercept.
+    enum filter-stage {
+        /// Post content before block rendering.
+        content,
+        /// Fully rendered page HTML before caching.
+        page-html,
+        /// Feed XML before delivery.
+        feed-item,
+        /// Comment body after sanitization, before storage.
+        comment-body,
+    }
+
+    /// Domain events v1.
+    enum event-kind {
+        post-published,
+        post-updated,
+        post-trashed,
+        comment-added,
+        request-render,
+    }
+
+    log: func(level: log-level, message: string);
+
+    get-post: func(id: u64) -> result<post-summary, string>;
+
+    query-posts: func(filter-post-type: option<string>, limit: u32) -> result<list<post-summary>, string>;
+
+    get-option: func(key: string) -> result<option<string>, string>;
+
+    emit-event: func(kind: event-kind, payload: string) -> result<_, string>;
+}
+
+/// What every Vyasa plugin must export.
+world vyasa-plugin {
+    use host.{filter-stage, event-kind};
+
+    /// Plugin metadata returned from init.
+    record plugin-info {
+        name: string,
+        version: string,
+    }
+
+    /// Initialize with serialized config (JSON object from the admin UI).
+    export init: func(config-json: string) -> result<plugin-info, string>;
+
+    /// Filter hook: transform content at a pipeline stage.
+    export filter: func(stage: filter-stage, content: string) -> string;
+
+    /// Action hook: react to a domain event (fire-and-forget).
+    export action: func(kind: event-kind, payload-json: string) -> result<_, string>;
+
+    /// Declare custom blocks contributed to the editor registry.
+    /// Returns JSON: [{ kind, title, icon?, attrs-schema }]
+    export register-blocks: func() -> string;
+
+    /// Declare extra public routes. JSON: [{ method, path }]
+    export register-routes: func() -> string;
+}

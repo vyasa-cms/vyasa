@@ -1,0 +1,38 @@
+[package]
+publish = false
+name = "vyasa-themes"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Vyasa themes crate"
+
+[lints]
+workspace = true
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+schemars = "0.8"
+serde_path_to_error = "0.1"
+tera = "1"
+ammonia = "4"
+vyasa-core = { version = "0.1.0", path = "../core" }
+thiserror = "2"
+futures = { version = "0.3", features = ["executor"] }
+moka = { version = "0.12", features = ["sync"] }
+zip = { version = "2", features = ["deflate"] }
+toml = "1"
+syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
+
+[dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+futures = "0.3"
+insta = { version = "1", features = ["json"] }
+tokio = { version = "1", features = ["sync"] }
+zip = { version = "2", features = ["deflate"] }
+
+[[bench]]
+name = "render"
+harness = false

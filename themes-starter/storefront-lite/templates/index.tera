@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block body %}
+{# A composed layout renders itself — hero, arrivals, promises, the dark
+   ask — and dragging sections in the studio reorders the real page. The
+   slot fallback keeps an older flat layout rendering exactly as before. #}
+{% if sections %}{{ sections | safe }}{% else %}
+<h1 class="shop-title">{{ site.name }}</h1>
+{{ regions.products | default(value="") | safe }}
+<aside class="shop-cats">{{ regions.cats | default(value="") | safe }}</aside>
+{% endif %}
+{% endblock %}

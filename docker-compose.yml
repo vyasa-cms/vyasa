@@ -1,0 +1,42 @@
+# Development and small single-node deployments.
+#
+# Migrations are not run automatically: `docker compose run --rm app migrate`
+# once before the first `up`, and again after an upgrade. Running them from
+# the entrypoint would mean every restarted replica races to migrate.
+
+services:
+  app:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      VYASA_DATABASE_URL: postgres://vyasa:vyasa@db:5432/vyasa
+      # Uploads and the search index live on volumes; see below.
+      VYASA_MEDIA_DIR: /opt/vyasa/media
+      VYASA_INDEX_DIR: /opt/vyasa/index
+    volumes:
+      - media:/opt/vyasa/media
+      - index:/opt/vyasa/index
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: unless-stopped
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: vyasa
+      POSTGRES_PASSWORD: vyasa
+      POSTGRES_DB: vyasa
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vyasa"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    restart: unless-stopped
+
+volumes:
+  media:
+  index:
+  pgdata:

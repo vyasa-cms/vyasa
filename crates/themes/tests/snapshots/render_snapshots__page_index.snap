@@ -1,0 +1,797 @@
+---
+source: crates/themes/tests/render_snapshots.rs
+expression: html
+---
+<!doctype html>
+<html lang="en" dir="ltr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Home — Vyasa</title>
+<style>/* Vyasa design tokens — generated; do not edit. */
+:root {
+  color-scheme: light;
+  --vy-color-bg: #ffffff;
+  --vy-color-surface: #f4f4f5;
+  --vy-color-text: #18181b;
+  --vy-color-text-muted: #52525b;
+  --vy-color-border: #e4e4e7;
+  --vy-color-primary: #2563eb;
+  --vy-color-on-primary: #ffffff;
+  --vy-radius: 8px;
+  --vy-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  --vy-space-unit: 4px;
+  --vy-section-scale:1 2 4 8;
+  --vy-content-width: 960px;
+  --vy-sidebar-width: 260px;
+  --vy-density: 1;
+  --vy-direction: ltr;
+  direction: ltr;
+  --vy-base-size: 16px;
+  --vy-scale-ratio: 1.25;
+  --vy-font-heading: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --vy-font-body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+:root:not([data-theme="light"]) {
+  --vy-color-bg: #101013;
+  --vy-color-surface: #1b1b1f;
+  --vy-color-text: #f4f4f5;
+  --vy-color-text-muted: #a1a1aa;
+  --vy-color-border: #27272a;
+  --vy-color-primary: #60a5fa;
+  --vy-color-on-primary: #0b1220;
+  color-scheme: dark;
+}
+}
+[data-theme="dark"] {
+  --vy-color-bg: #101013;
+  --vy-color-surface: #1b1b1f;
+  --vy-color-text: #f4f4f5;
+  --vy-color-text-muted: #a1a1aa;
+  --vy-color-border: #27272a;
+  --vy-color-primary: #60a5fa;
+  --vy-color-on-primary: #0b1220;
+  color-scheme: dark;
+}
+</style>
+<style>/* Vyasa base stylesheet — consumes the design tokens above. */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { -webkit-text-size-adjust: 100%; }
+
+body.vy {
+  margin: 0;
+  background: var(--vy-color-bg);
+  color: var(--vy-color-text);
+  font-family: var(--vy-font-body);
+  font-size: var(--vy-base-size);
+  line-height: calc(1.6 * var(--vy-density, 1));
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Layout ------------------------------------------------------------- */
+
+.vy-header, .vy-main, .vy-footer-inner, .vy-nav {
+  width: 100%;
+  max-width: var(--vy-content-width);
+  margin-inline: auto;
+  padding-inline: calc(var(--vy-space-unit) * 5);
+}
+
+.vy-header {
+  display: flex;
+  align-items: baseline;
+  gap: calc(var(--vy-space-unit) * 3);
+  flex-wrap: wrap;
+  padding-block: calc(var(--vy-space-unit) * 7);
+  border-bottom: 1px solid var(--vy-color-border);
+}
+
+.vy-main { padding-block: calc(var(--vy-space-unit) * 8); }
+
+.vy-footer {
+  border-top: 1px solid var(--vy-color-border);
+  margin-top: calc(var(--vy-space-unit) * 12);
+  padding-block: calc(var(--vy-space-unit) * 6);
+  color: var(--vy-color-text-muted);
+  font-size: 0.9em;
+}
+
+.vy-sidebar, .vy-sidebar-left, .vy-sidebar-right {
+  width: var(--vy-sidebar-width);
+  flex: none;
+}
+.vy-sidebar:empty, .vy-sidebar-left:empty, .vy-sidebar-right:empty { display: none; }
+
+/* Identity ----------------------------------------------------------- */
+
+.vy-site-name {
+  font-family: var(--vy-font-heading);
+  font-size: calc(var(--vy-base-size) * var(--vy-scale-ratio) * 1.1);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  color: var(--vy-color-text);
+  text-decoration: none;
+}
+.vy-tagline { margin: 0; color: var(--vy-color-text-muted); font-size: 0.95em; }
+.vy-tagline:empty { display: none; }
+
+/* Navigation --------------------------------------------------------- */
+
+.vy-nav, .vy-menu {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--vy-space-unit) * 4);
+  list-style: none;
+  margin-block: 0;
+  padding-block: calc(var(--vy-space-unit) * 3);
+}
+.vy-menu { margin-inline: 0; padding-inline: 0; }
+
+/* Masthead: brand on the left, navigation on the right, one row. The
+   header and nav keep their own rules for a template that places them
+   apart; inside the masthead the wrapper owns width and the rule. */
+.vy-masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: calc(var(--vy-space-unit) * 3) calc(var(--vy-space-unit) * 6);
+  width: 100%;
+  max-width: var(--vy-content-width);
+  margin-inline: auto;
+  padding-inline: calc(var(--vy-space-unit) * 5);
+  border-bottom: 1px solid var(--vy-color-border);
+}
+.vy-masthead > .vy-header, .vy-masthead > .vy-nav {
+  width: auto; max-width: none; margin: 0; padding-inline: 0; border: 0;
+}
+.vy-masthead > .vy-nav { padding-block: 0; margin-inline-start: auto; }
+.vy-masthead:not(:has(.vy-nav)) { display: block; }
+.vy-nav a, .vy-menu a {
+  color: var(--vy-color-text-muted);
+  text-decoration: none;
+}
+.vy-nav a:hover, .vy-menu a:hover { color: var(--vy-color-primary); }
+
+/* Typography --------------------------------------------------------- */
+
+.vy-h, .vy-title, .vy-archive-title {
+  font-family: var(--vy-font-heading);
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+  margin: 0 0 calc(var(--vy-space-unit) * 3);
+}
+/* Fluid rather than a single step at the breakpoint. The upper bound is
+   the previous fixed value, so wide screens render exactly as before and
+   only narrow ones change. */
+.vy-title, .vy-archive-title {
+  font-size: clamp(
+    calc(var(--vy-base-size) * var(--vy-scale-ratio) * 1.0),
+    calc(var(--vy-base-size) * var(--vy-scale-ratio) * 0.72 + 2.2vw),
+    calc(var(--vy-base-size) * var(--vy-scale-ratio) * 1.6)
+  );
+}
+.vy-h { font-size: calc(var(--vy-base-size) * var(--vy-scale-ratio) * 1.1); }
+.vy-h a, .vy-title a { color: inherit; text-decoration: none; }
+.vy-h a:hover, .vy-title a:hover { color: var(--vy-color-primary); }
+
+.vy-p, .vy-excerpt { margin: 0 0 calc(var(--vy-space-unit) * 4); }
+.vy-excerpt:empty { display: none; }
+.vy-meta, .vy-term-count {
+  color: var(--vy-color-text-muted);
+  font-size: 0.875em;
+  margin: 0 0 calc(var(--vy-space-unit) * 2);
+}
+
+a { color: var(--vy-color-primary); }
+
+/* Content blocks ----------------------------------------------------- */
+
+.vy-single, .vy-page { max-width: 68ch; }
+.vy-archive-header { display: grid; grid-template-columns: auto 1fr; column-gap: calc(var(--vy-space-unit) * 3); align-items: center; margin-block-end: calc(var(--vy-space-unit) * 5); }
+.vy-archive-header .vy-archive-title { grid-column: 2; margin: 0; }
+.vy-archive-image { grid-row: 1 / span 2; width: 72px; height: 72px; border-radius: 50%; object-fit: cover; }
+.vy-archive-description { grid-column: 2; margin: 0; color: var(--vy-color-text-muted); }
+.vy-single .vy-p, .vy-page .vy-p { line-height: calc(1.7 * var(--vy-density, 1)); }
+
+.vy-list { padding-inline-start: calc(var(--vy-space-unit) * 6); }
+.vy-list li { margin-block: calc(var(--vy-space-unit) * 1); }
+
+.vy-quote {
+  margin: calc(var(--vy-space-unit) * 6) 0;
+  padding-inline-start: calc(var(--vy-space-unit) * 4);
+  border-inline-start: 3px solid var(--vy-color-primary);
+  color: var(--vy-color-text-muted);
+  font-style: italic;
+}
+.vy-quote cite { display: block; margin-top: calc(var(--vy-space-unit) * 2); font-size: 0.875em; }
+
+.vy-code, pre {
+  background: var(--vy-color-surface);
+  border: 1px solid var(--vy-color-border);
+  border-radius: var(--vy-radius);
+  padding: calc(var(--vy-space-unit) * 4);
+  overflow-x: auto;
+  font-size: 0.875em;
+  line-height: 1.6;
+}
+code { font-size: 0.9em; }
+
+.vy-image, .vy-video, .vy-audio, .vy-embed, .vy-cover, .vy-gallery {
+  margin: calc(var(--vy-space-unit) * 6) 0;
+}
+.vy-image img, .vy-cover img, .vy-gallery img, .vy-media-text img, img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--vy-radius);
+}
+.vy-image figcaption, .vy-gallery figcaption {
+  margin-top: calc(var(--vy-space-unit) * 2);
+  color: var(--vy-color-text-muted);
+  font-size: 0.85em;
+  text-align: center;
+}
+
+.vy-separator {
+  border: 0;
+  border-top: 1px solid var(--vy-color-border);
+  margin: calc(var(--vy-space-unit) * 8) 0;
+}
+.vy-page-break { display: none; }
+
+/* The renderer wraps every table in a figure.vy-table, so the figure is
+   the scroll box. `width: 100%` on a table is a floor for table
+   layout, not a ceiling: past a certain number of columns the table is
+   wider than its container no matter what, and without this it pushed the
+   whole document sideways instead of scrolling on its own. */
+.vy-table {
+  max-width: 100%;
+  overflow-x: auto;
+  margin: calc(var(--vy-space-unit) * 6) 0;
+}
+/* The figure already carries the margin; the table inside must not add a
+   second one. */
+.vy-table > table { margin: 0; }
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: calc(var(--vy-space-unit) * 6) 0;
+  font-size: 0.95em;
+}
+.vy-table th, .vy-table td, table th, table td {
+  border: 1px solid var(--vy-color-border);
+  padding: calc(var(--vy-space-unit) * 2) calc(var(--vy-space-unit) * 3);
+  text-align: start;
+}
+.vy-table th, table th { background: var(--vy-color-surface); font-weight: 600; }
+
+.vy-button {
+  display: inline-block;
+  background: var(--vy-color-primary);
+  color: var(--vy-color-on-primary);
+  border-radius: var(--vy-radius);
+  padding: calc(var(--vy-space-unit) * 2.5) calc(var(--vy-space-unit) * 5);
+  text-decoration: none;
+  font-weight: 600;
+}
+.vy-buttons { display: flex; flex-wrap: wrap; gap: calc(var(--vy-space-unit) * 3); }
+
+.vy-details {
+  border: 1px solid var(--vy-color-border);
+  border-radius: var(--vy-radius);
+  padding: calc(var(--vy-space-unit) * 3) calc(var(--vy-space-unit) * 4);
+  margin: calc(var(--vy-space-unit) * 4) 0;
+}
+.vy-details summary { cursor: pointer; font-weight: 600; }
+
+/* Callouts: a tinted box with a left rule in the tone's colour. The tones
+   lean on the palette so they read in both modes. */
+.vy-callout {
+  border: 1px solid var(--vy-color-border);
+  border-left: 4px solid var(--vy-color-primary);
+  border-radius: var(--vy-radius);
+  background: var(--vy-color-surface);
+  padding: calc(var(--vy-space-unit) * 3) calc(var(--vy-space-unit) * 4);
+  margin: calc(var(--vy-space-unit) * 4) 0;
+}
+.vy-callout > :last-child { margin-bottom: 0; }
+.vy-callout__title { margin: 0 0 calc(var(--vy-space-unit) * 2); font-weight: 700; }
+.vy-callout--tip { border-left-color: #2e8b57; }
+.vy-callout--warning { border-left-color: #c8891a; }
+.vy-callout--danger { border-left-color: #c0392b; }
+.vy-toc { margin: calc(var(--vy-space-unit) * 4) 0; }
+.vy-toc ol { list-style: none; margin: 0; padding: 0; }
+.vy-toc li { margin: calc(var(--vy-space-unit) * 1) 0; }
+.vy-toc__l3 { padding-left: calc(var(--vy-space-unit) * 4); }
+.vy-toc__l4, .vy-toc__l5, .vy-toc__l6 { padding-left: calc(var(--vy-space-unit) * 8); }
+
+.vy-file, .vy-embed-link { color: var(--vy-color-primary); }
+.vy-footnotes { font-size: 0.85em; color: var(--vy-color-text-muted); }
+.vy-html { margin: calc(var(--vy-space-unit) * 4) 0; }
+
+/* Containers --------------------------------------------------------- */
+
+.vy-group { margin: calc(var(--vy-space-unit) * 4) 0; }
+.vy-row, .vy-columns, .vy-grid {
+  display: grid;
+  gap: calc(var(--vy-space-unit) * 5);
+}
+.vy-row, .vy-columns { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.vy-grid { grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); }
+.vy-media-text {
+  display: grid;
+  gap: calc(var(--vy-space-unit) * 5);
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: center;
+}
+.vy-gallery { display: grid; grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr)); }
+
+/* Cards and listings ------------------------------------------------- */
+
+.vy-post-list, .vy-latest-posts, .vy-archives, .vy-docs {
+  display: grid;
+  gap: calc(var(--vy-space-unit) * 6);
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+/* Documentation layout: the page tree beside the article. The docs
+   starter theme has always emitted these class names; nothing matched
+   them, so its two-column page rendered as one stacked column. */
+@media (min-width: 900px) {
+  .vy-docs {
+    grid-template-columns: 15rem minmax(0, 1fr);
+    align-items: start;
+  }
+}
+.vy-docs__nav {
+  font-size: 0.95em;
+}
+@media (min-width: 900px) {
+  .vy-docs__nav {
+    position: sticky;
+    top: calc(var(--vy-space-unit) * 6);
+    max-height: calc(100vh - var(--vy-space-unit) * 12);
+    overflow-y: auto;
+  }
+}
+.vy-docs__main { min-width: 0; }
+.vy-docs__toc:not(:empty) {
+  margin-bottom: calc(var(--vy-space-unit) * 6);
+  padding: calc(var(--vy-space-unit) * 3) calc(var(--vy-space-unit) * 4);
+  border-inline-start: 2px solid var(--vy-color-border);
+  background: var(--vy-color-surface);
+  border-radius: var(--vy-radius);
+}
+
+.vy-card, .vy-post-card {
+  background: var(--vy-color-surface);
+  border: 1px solid var(--vy-color-border);
+  border-radius: var(--vy-radius);
+  box-shadow: var(--vy-shadow);
+  padding: calc(var(--vy-space-unit) * 5);
+}
+
+.vy-pagination {
+  display: flex;
+  gap: calc(var(--vy-space-unit) * 3);
+  align-items: center;
+  margin-top: calc(var(--vy-space-unit) * 8);
+}
+.vy-pagination a {
+  border: 1px solid var(--vy-color-border);
+  border-radius: var(--vy-radius);
+  padding: calc(var(--vy-space-unit) * 2) calc(var(--vy-space-unit) * 4);
+  text-decoration: none;
+}
+
+/* Comments ----------------------------------------------------------- */
+
+.vy-comments { margin-top: calc(var(--vy-space-unit) * 10); }
+.vy-comment-list { list-style: none; margin: 0; padding: 0; }
+.vy-comment {
+  border-top: 1px solid var(--vy-color-border);
+  padding-block: calc(var(--vy-space-unit) * 4);
+}
+.vy-comment-children {
+  list-style: none;
+  margin-inline-start: calc(var(--vy-space-unit) * 6);
+  padding-inline-start: calc(var(--vy-space-unit) * 4);
+  border-inline-start: 1px solid var(--vy-color-border);
+}
+.vy-comments__title { margin-bottom: calc(var(--vy-space-unit) * 2); }
+.vy-comments__empty, .vy-comment__meta {
+  color: var(--vy-color-text-muted);
+  font-size: 0.9em;
+}
+.vy-comment__body { margin-block: calc(var(--vy-space-unit) * 2); }
+.vy-comment__actions { margin: 0; font-size: 0.85em; }
+
+/* Comment form. The honeypot must be invisible to people: a bot fills
+   every field it finds, a reader never sees this one. `display:none`
+   rather than off-screen positioning, because assistive technology
+   should not announce it either. */
+.vy-comment-form {
+  margin-top: calc(var(--vy-space-unit) * 8);
+  padding-top: calc(var(--vy-space-unit) * 6);
+  border-top: 1px solid var(--vy-color-border);
+  max-width: 40rem;
+}
+.vy-comment-form__title { margin-bottom: calc(var(--vy-space-unit) * 3); }
+.vy-comment-form__replying {
+  color: var(--vy-color-text-muted);
+  font-size: 0.9em;
+}
+.vy-field { display: block; margin-bottom: calc(var(--vy-space-unit) * 4); }
+.vy-field label {
+  display: block;
+  margin-bottom: calc(var(--vy-space-unit) * 1);
+  font-weight: 600;
+  font-size: 0.9em;
+}
+.vy-field input, .vy-field textarea {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  background: var(--vy-color-surface);
+  color: var(--vy-color-text);
+  border: 1px solid var(--vy-color-border);
+  border-radius: var(--vy-radius);
+  padding: calc(var(--vy-space-unit) * 2) calc(var(--vy-space-unit) * 3);
+  font: inherit;
+}
+.vy-field input:focus-visible, .vy-field textarea:focus-visible {
+  outline: 2px solid var(--vy-color-primary);
+  outline-offset: 1px;
+}
+.vy-field textarea { resize: vertical; min-height: 8em; }
+.vy-field__hint {
+  display: block;
+  margin-top: calc(var(--vy-space-unit) * 1);
+  color: var(--vy-color-text-muted);
+  font-size: 0.85em;
+}
+.vy-field--trap { display: none !important; }
+.vy-comment-form button {
+  background: var(--vy-color-primary);
+  color: var(--vy-color-on-primary);
+  border: 0;
+  border-radius: var(--vy-radius);
+  padding: calc(var(--vy-space-unit) * 2.5) calc(var(--vy-space-unit) * 5);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+.vy-comment-form button:hover { filter: brightness(1.08); }
+
+/* The outcome of posting a comment, above the entry. */
+.vy-notice {
+  margin-bottom: calc(var(--vy-space-unit) * 5);
+  padding: calc(var(--vy-space-unit) * 3) calc(var(--vy-space-unit) * 4);
+  border: 1px solid var(--vy-color-border);
+  border-inline-start: 3px solid var(--vy-color-primary);
+  border-radius: var(--vy-radius);
+  background: var(--vy-color-surface);
+}
+
+/* A post's categories and tags. */
+.vy-terms {
+  display: flex;
+  flex-wrap: wrap;
+  gap: calc(var(--vy-space-unit) * 2);
+  margin-block: calc(var(--vy-space-unit) * 2);
+}
+.vy-term {
+  font-size: 0.85em;
+  padding: calc(var(--vy-space-unit) * 0.5) calc(var(--vy-space-unit) * 2);
+  border: 1px solid var(--vy-color-border);
+  border-radius: 999px;
+  color: var(--vy-color-text-muted);
+  text-decoration: none;
+}
+.vy-term:hover { color: var(--vy-color-primary); border-color: currentColor; }
+
+/* Site logo in the header. */
+.vy-logo { display: block; max-height: 3rem; width: auto; }
+.vy-site-name { display: inline-flex; align-items: center; gap: .45em; }
+.vy-logo-mark { height: 1.15em; width: auto; }
+
+/* Supporting pages --------------------------------------------------- */
+
+.vy-breadcrumbs, .vy-toc, .vy-docs-nav, .vy-categories, .vy-tag-cloud {
+  color: var(--vy-color-text-muted);
+  font-size: 0.9em;
+}
+.vy-toc, .vy-docs-nav { list-style: none; padding: 0; }
+.vy-search input, .vy-password input {
+  background: var(--vy-color-surface);
+  color: var(--vy-color-text);
+  border: 1px solid var(--vy-color-border);
+  border-radius: var(--vy-radius);
+  padding: calc(var(--vy-space-unit) * 2) calc(var(--vy-space-unit) * 3);
+  font: inherit;
+}
+.vy-404 { text-align: center; padding-block: calc(var(--vy-space-unit) * 16); }
+
+/* Search-result highlights. Derived from the theme's own primary rather
+   than the browser default (black text on yellow), which is unreadable on a
+   dark page. A browser without color-mix drops the declaration and falls
+   back to that default, which is legible if not pretty. */
+mark {
+  background: color-mix(in srgb, var(--vy-color-primary) 20%, transparent);
+  color: inherit;
+  font-weight: 600;
+  border-radius: 2px;
+  padding: 0 0.15em;
+}
+
+/* Narrow screens ----------------------------------------------------- */
+
+@media (max-width: 640px) {
+  .vy-row, .vy-columns, .vy-media-text { grid-template-columns: 1fr; }
+  .vy-header { padding-block: calc(var(--vy-space-unit) * 5); }
+  .vy-main { padding-block: calc(var(--vy-space-unit) * 6); }
+  /* On a phone the nav dissolves into the masthead so the Menu button
+     sits beside the brand and the opened list drops under both. */
+  .vy-masthead > .vy-nav { display: contents; }
+  .vy-masthead > .vy-nav > .vy-menu { flex-basis: 100%; }
+
+  /* Touch targets, WCAG 2.5.8. Bare text links are the height of their
+     line box -- 19px for body copy -- which is a coin-flip to hit with a
+     thumb. Scoped to links that act as controls: navigation, list titles,
+     cards, terms, pagination. Links inside prose are deliberately left
+     alone; the guideline exempts them, and padding them would wreck the
+     rhythm of a paragraph. */
+  .vy-nav a, .vy-menu a, .vy-term, .vy-pagination a,
+  .vy-comment__actions a, .vy-toc a, .vy-docs-nav a, .vy-file, .vy-embed-link,
+  .vy-site-name, .vy-breadcrumbs a, .vy-categories a, .vy-tag-cloud a {
+    display: inline-flex;
+    align-items: center;
+    min-height: 44px;
+  }
+  /* Titles wrap, so these grow by padding rather than by a line box: a
+     fixed line-height would push the second line out of the box. */
+  .vy-h a, .vy-title a, .vy-post-card__link {
+    display: inline-block;
+    min-height: 44px;
+    padding-block: calc(var(--vy-space-unit) * 2);
+  }
+  .vy-search input, .vy-search button, .vy-comment-form button, .vy-btn, .vy-button {
+    min-height: 44px;
+  }
+  .vy-search button { padding-inline: calc(var(--vy-space-unit) * 4); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition-duration: 0.01ms !important; }
+}
+
+.vy-section { display: block; }
+.vy-columns {
+  display: grid;
+  grid-template-columns: var(--vy-tracks, repeat(var(--vy-cols, 2), minmax(0, 1fr)));
+  gap: var(--vy-gap, 1.5rem);
+  align-items: var(--vy-align, start);
+}
+.vy-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(var(--vy-grid-min, 220px), 1fr));
+  gap: var(--vy-gap, 1.5rem);
+}
+/* A band is a stripe across the page, but it renders inside .vy-main,
+   which is centred at the reading width. Without this escape a full-width
+   band is a rectangle in the middle of the column, which is what it was.
+   Nested inside an already-bled parent the margin resolves to zero, so
+   this is safe at any depth. */
+.vy-bleed {
+  width: 100vw;
+  max-width: 100vw;
+  margin-inline: calc(50% - 50vw);
+}
+.vy-band { padding-block: calc(var(--vy-space-unit) * 6); }
+.vy-bleed > * {
+  max-width: var(--vy-content-width);
+  margin-inline: auto;
+  padding-inline: calc(var(--vy-space-unit) * 5);
+}
+.vy-hero { padding-block: calc(var(--vy-space-unit) * 8); }
+/* Section headings are headings: they take the theme's heading face,
+   or a serif brand sits over a sans headline. */
+.vy-hero-title, .vy-section-title, .vy-cta-title { font-family: var(--vy-font-heading); }
+.vy-hero-title {
+  font-size: clamp(calc(var(--vy-base-size) * 1.7),
+                   calc(var(--vy-base-size) * 1.15 + 3.2vw),
+                   calc(var(--vy-base-size) * 2.6));
+  line-height: 1.1; margin: 0 0 .4em;
+}
+.vy-hero-sub { font-size: calc(var(--vy-base-size) * 1.15); color: var(--vy-color-text-muted); max-width: 46ch; }
+.vy-eyebrow {
+  text-transform: uppercase; letter-spacing: .1em;
+  font-size: calc(var(--vy-base-size) * .75); color: var(--vy-color-primary);
+  margin: 0 0 .6em; font-weight: 600;
+}
+.vy-actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1.4rem; }
+.vy-btn {
+  display: inline-block; padding: .6em 1.2em; border-radius: var(--vy-radius);
+  text-decoration: none; font-weight: 600;
+}
+.vy-btn-primary { background: var(--vy-color-primary); color: var(--vy-color-on-primary); }
+.vy-btn-ghost { border: 1px solid var(--vy-color-border); color: var(--vy-color-text); }
+.vy-cards { list-style: none; padding: 0; margin: 1.5rem 0 0; display: grid; gap: 1.2rem;
+  grid-template-columns: repeat(var(--vy-cards, 3), minmax(0, 1fr)); }
+.vy-cards[data-columns='1'] { --vy-cards: 1; }
+.vy-cards[data-columns='2'] { --vy-cards: 2; }
+.vy-cards[data-columns='4'] { --vy-cards: 4; }
+.vy-card { background: var(--vy-color-surface); border: 1px solid var(--vy-color-border);
+  border-radius: var(--vy-radius); padding: 1.1rem 1.2rem; }
+.vy-card-title { margin: 0 0 .35em; font-size: calc(var(--vy-base-size) * 1.05); }
+.vy-card-body { margin: 0; color: var(--vy-color-text-muted); }
+.vy-section-title { margin: 0;
+  font-size: clamp(calc(var(--vy-base-size) * 1.25),
+                   calc(var(--vy-base-size) * 0.95 + 1.6vw),
+                   calc(var(--vy-base-size) * 1.7)); }
+.vy-section-intro { color: var(--vy-color-text-muted); max-width: 56ch; }
+.vy-stats { list-style: none; display: flex; flex-wrap: wrap; gap: 2.4rem; padding: 0; margin: 0; }
+.vy-stat { display: flex; flex-direction: column; }
+.vy-stat-value { font-size: calc(var(--vy-base-size) * 2.2); font-weight: 700; line-height: 1; }
+.vy-stat-label { color: var(--vy-color-text-muted); font-size: calc(var(--vy-base-size) * .85); }
+.vy-cta { padding-block: calc(var(--vy-space-unit) * 4); }
+.vy-cta-title { margin: 0 0 .3em;
+  font-size: clamp(calc(var(--vy-base-size) * 1.35),
+                   calc(var(--vy-base-size) * 1.0 + 1.9vw),
+                   calc(var(--vy-base-size) * 1.9)); }
+.vy-cta-sub { color: var(--vy-color-text-muted); margin: 0; }
+.vy-faq-item { border-bottom: 1px solid var(--vy-color-border); padding: .8rem 0; }
+.vy-faq-item summary { cursor: pointer; font-weight: 600;
+  display: flex; align-items: center; min-height: 44px; }
+.vy-signup-form { display: grid; gap: .8rem; max-width: 28rem; }
+.vy-signup-field { display: grid; gap: .25rem; font-size: .9rem; }
+.vy-signup-field input, .vy-signup-field textarea {
+  padding: .55rem .7rem; border: 1px solid var(--vy-color-border);
+  border-radius: var(--vy-radius); background: var(--vy-color-surface);
+  color: var(--vy-color-text); font: inherit;
+}
+.vy-signup-subhead { color: var(--vy-color-text-muted); }
+/* The honeypot: parked off-screen so people never see it and bots do. */
+.vy-hp { position: absolute !important; left: -9999px !important; width: 1px; height: 1px; }
+/* Explicit widths. Narrow keeps prose readable; wide and full carry the
+   vy-bleed escape, so their children caps are relaxed here. */
+.vy-w-narrow { max-width: 42rem; margin-inline: auto; }
+.vy-w-wide.vy-bleed > * { max-width: min(92rem, 100%); }
+.vy-w-full.vy-bleed > * { max-width: none; }
+.vy-image { margin: 0; }
+.vy-image img { width: 100%; height: auto; border-radius: var(--vy-radius); display: block; }
+.vy-image figcaption, .vy-video figcaption {
+  color: var(--vy-color-text-muted); font-size: calc(var(--vy-base-size) * .85);
+  margin-top: .5rem; }
+.vy-video { margin: 0; }
+.vy-video video { width: 100%; border-radius: var(--vy-radius); display: block; }
+.vy-hero--split { display: grid; grid-template-columns: 1.05fr .95fr; gap: 3rem; align-items: center; }
+.vy-hero-media { width: 100%; height: auto; border-radius: var(--vy-radius); }
+.vy-hero--center { text-align: center; }
+.vy-hero--center .vy-hero-sub { margin-inline: auto; }
+.vy-hero--center .vy-actions { justify-content: center; }
+.vy-hero--media-start .vy-hero-media { order: -1; }
+.vy-card-title a { color: inherit; text-decoration: none; }
+.vy-card-title a:hover { color: var(--vy-color-primary); text-decoration: underline; }
+.vy-section[id] { scroll-margin-top: 2rem; }
+.vy-nav-toggle { display: none; }
+.vy-nav-check { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
+.vy-nav .vy-menu { display: flex; flex-wrap: wrap; gap: 1.4rem; list-style: none; padding: 0; margin: 0; }
+.vy-nav .vy-menu a { text-decoration: none; color: var(--vy-color-text); font-weight: 500; }
+.vy-nav .vy-menu .vy-menu { display: none; }
+.vy-collection { display: grid; gap: 1.2rem; margin-top: 1.2rem;
+  grid-template-columns: repeat(var(--vy-cols, 3), minmax(0, 1fr)); }
+.vy-collection .vy-post-card { background: var(--vy-color-surface);
+  border: 1px solid var(--vy-color-border); border-radius: var(--vy-radius);
+  padding: 1.1rem 1.2rem; display: flex; flex-direction: column; gap: .35rem; }
+.vy-collection .vy-post-card__link { font-weight: 600; text-decoration: none;
+  color: var(--vy-color-text); font-size: calc(var(--vy-base-size) * 1.05); }
+.vy-collection .vy-post-card__meta { color: var(--vy-color-text-muted);
+  font-size: calc(var(--vy-base-size) * .8); }
+.vy-collection .vy-post-card__thumb { width: 100%; border-radius: var(--vy-radius);
+  order: -1; aspect-ratio: 16 / 10; object-fit: cover; }
+.vy-collection .vy-post-card__excerpt { margin: 0; color: var(--vy-color-text-muted);
+  font-size: calc(var(--vy-base-size) * .9); }
+/* Withholding a section from one screen size. `!important` because the
+   thing being hidden may be a grid or a flex container with a display of
+   its own, and `not all and (...)` is the exact complement of the mobile
+   query — no off-by-one pixel where both or neither apply. */
+@media (max-width: 640px) { .vy-hide-mobile { display: none !important; } }
+@media not all and (max-width: 640px) { .vy-hide-desktop { display: none !important; } }
+@media (max-width: 900px) {
+  .vy-columns { grid-template-columns: repeat(var(--vy-cols-tablet, 2), minmax(0, 1fr)); }
+}
+@media (max-width: 900px) {
+  .vy-collection { grid-template-columns: repeat(min(var(--vy-cols, 3), 2), minmax(0, 1fr)); }
+  .vy-cards { grid-template-columns: repeat(min(var(--vy-cards, 3), 2), minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .vy-columns { grid-template-columns: repeat(var(--vy-cols-mobile, 1), minmax(0, 1fr)); }
+  .vy-cards { grid-template-columns: 1fr; }
+  .vy-collection { grid-template-columns: 1fr; }
+  .vy-hero--split { grid-template-columns: 1fr; gap: 1.5rem; }
+  /* The menu folds into a no-JS drawer: the label becomes the button and
+     the checkbox it toggles decides whether the list shows. */
+  .vy-nav-toggle {
+    /* The primary navigation control on a phone, so a full tap target. */
+    min-height: 44px;
+    display: inline-flex; align-items: center; gap: .5rem; cursor: pointer;
+    font-weight: 600; padding: .4rem .2rem; }
+  .vy-nav-toggle:has(.vy-nav-check:not(:checked)) ~ .vy-menu { display: none; }
+  .vy-nav-toggle:has(.vy-nav-check:focus-visible) { outline: 2px solid var(--vy-color-primary); outline-offset: 2px; }
+  .vy-nav-toggle::before {
+    content: ''; width: 1.1rem; height: .8rem;
+    background: linear-gradient(var(--vy-color-text) 0 2px, transparent 2px 5px,
+      var(--vy-color-text) 5px 7px, transparent 7px 10px, var(--vy-color-text) 10px 12px);
+  }
+  .vy-nav-toggle::after { content: 'Menu'; }
+  .vy-nav .vy-menu { flex-direction: column; gap: .3rem; padding: .5rem 0; flex-basis: 100%; }
+  .vy-nav .vy-menu a { display: block; padding: .45rem .2rem; }
+}
+.vy-product { min-width: 0; padding-block: 2rem; }
+.vy-product-items { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 16rem), 1fr)); gap: 1rem; padding: 0; list-style: none; }
+.vy-product-items > li { min-width: 0; border: 1px solid var(--vy-color-border); padding: 1.5rem; border-radius: .75rem; background: var(--vy-color-surface); overflow-wrap: anywhere; }
+.vy-product-items h3 { margin-block: 1rem .5rem; }
+.vy-step-number, .vy-flow-label, .vy-code-language { font-family: monospace; font-size: .8rem; color: var(--vy-color-text-muted); }
+.vy-step-number { margin-inline-end: 1rem; }
+.vy-status { display: inline-block; border: 1px solid var(--vy-color-border); border-radius: 2rem; padding: .2rem .65rem; font-size: .8rem; }
+.vy-execution-flow .vy-product-items { gap: 1.5rem; }
+.vy-execution-flow .vy-product-items > li { position: relative; }
+.vy-execution-flow .vy-product-items > li + li::before { content: '→'; position: absolute; inset-inline-start: -1.35rem; top: 45%; color: var(--vy-color-primary); font-size: 1.25rem; }
+.vy-code-examples { min-width: 0; border: 1px solid var(--vy-color-border); border-radius: .75rem; overflow: hidden; background: var(--vy-color-surface); }
+.vy-code-example { min-width: 0; padding: 1.25rem; }
+.vy-code-example pre { max-width: 100%; overflow-x: auto; padding: 1rem; line-height: 1.6; background: var(--vy-color-bg); }
+.vy-code-example code { white-space: pre; }
+.vy-code-tabs [role=tablist] { display: flex; gap: .25rem; padding: .5rem; overflow-x: auto; border-bottom: 1px solid var(--vy-color-border); }
+.vy-code-tabs button { border: 1px solid var(--vy-color-border); border-radius: .35rem; padding: .5rem .8rem; background: var(--vy-color-bg); color: var(--vy-color-text); cursor: pointer; font: inherit; }
+.vy-code-tabs [role=tab][aria-selected=true] { background: var(--vy-color-primary); color: var(--vy-color-on-primary); }
+.vy-code-tabs button:focus-visible, .vy-code-tabs pre:focus-visible { outline: 2px solid var(--vy-color-primary); outline-offset: 3px; }
+.vy-code-example[hidden] { display: none; }
+.vy-code-feedback { font-size: .85rem; margin-inline-start: .75rem; }
+@media (max-width: 640px) {
+  .vy-execution-flow .vy-product-items { grid-template-columns: 1fr; }
+  .vy-execution-flow .vy-product-items > li + li::before { content: '↓'; top: -1.6rem; inset-inline-start: 50%; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .vy-motion-fade.vy-motion-enter { animation: vy-enter-fade .45s ease-out both; }
+  .vy-motion-rise.vy-motion-enter { animation: vy-enter-rise .45s ease-out both; }
+}
+@keyframes vy-enter-fade { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vy-enter-rise { from { opacity: 0; transform: translateY(1rem); } to { opacity: 1; transform: translateY(0); } }
+</style>
+<link rel="stylesheet" href="/custom.css">
+
+<script src="/theme-assets/components.js" defer></script>
+</head>
+<body class="vy" data-template="index">
+<div class="vy-masthead"><header class="vy-header"><a class="vy-site-name" href="/"><img class="vy-logo-mark" src="/brand/mark.svg" alt="" width="64" height="64">Vyasa</a></header><nav class="vy-nav"><ul><li><a href="/">Home</a></li></ul></nav></div>
+<main class="vy-main">
+
+
+<div class="vy-post-list">
+  
+  <article class="vy-card vy-post-card">
+    <h2 class="vy-h"><a href="&#x2F;2026&#x2F;first-post">First post</a></h2>
+    <p class="vy-meta">Ada · Aug 23, 2026</p>
+    <div class="vy-excerpt">Hello <em>world</em></div>
+  </article>
+  
+</div>
+
+
+<nav class="vy-pagination">
+  
+  <span>1</span>
+  <a href="&#x2F;page&#x2F;2" rel="next">Older →</a>
+</nav>
+
+
+</main>
+
+<footer class="vy-footer"><div class="vy-footer-inner">© Vyasa</div></footer>
+</body>
+</html>

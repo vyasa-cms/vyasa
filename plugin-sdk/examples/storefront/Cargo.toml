@@ -1,0 +1,20 @@
+[workspace]
+
+[package]
+name = "vyasa-plugin-storefront"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Reference commerce plugin: products, designer sections, a cart and order requests"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wit-bindgen = "0.30"
+serde_json = "1"
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "s"

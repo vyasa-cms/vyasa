@@ -1,0 +1,16 @@
+---
+source: crates/themes/tests/render_snapshots.rs
+expression: "render_blocks(&doc).expect(\"renders\")"
+---
+<p class="vy-p">Hello <em>world</em> &amp; friends</p>
+<h3 class="vy-h" id="vy-h-1">A heading</h3>
+<ol class="vy-list"><li>one<ul class="vy-list"><li>one point one</li>
+</ul></li>
+<li>two</li>
+</ol>
+<blockquote class="vy-quote" cite="https://example.com/q"><p><strong>Stay</strong> hungry</p></blockquote>
+<blockquote class="vy-quote"><p>Attributed</p><footer><cite>Ada <em>L</em></cite></footer></blockquote>
+<p class="vy-p"><s>struck</s> <u>under</u> <mark>lit</mark> H<sub>2</sub>O x<sup>2</sup> gone</p>
+<pre class="vy-code"><code class="language-rust"><span class="vy-hl-source vy-hl-rust"><span class="vy-hl-meta vy-hl-function vy-hl-rust"><span class="vy-hl-meta vy-hl-function vy-hl-rust"><span class="vy-hl-storage vy-hl-type vy-hl-function vy-hl-rust">fn</span> </span><span class="vy-hl-entity vy-hl-name vy-hl-function vy-hl-rust">main</span></span><span class="vy-hl-meta vy-hl-function vy-hl-rust"><span class="vy-hl-meta vy-hl-function vy-hl-parameters vy-hl-rust"><span class="vy-hl-punctuation vy-hl-section vy-hl-parameters vy-hl-begin vy-hl-rust">(</span></span><span class="vy-hl-meta vy-hl-function vy-hl-rust"><span class="vy-hl-meta vy-hl-function vy-hl-parameters vy-hl-rust"><span class="vy-hl-punctuation vy-hl-section vy-hl-parameters vy-hl-end vy-hl-rust">)</span></span></span></span><span class="vy-hl-meta vy-hl-function vy-hl-rust"> </span><span class="vy-hl-meta vy-hl-function vy-hl-rust"><span class="vy-hl-meta vy-hl-block vy-hl-rust"><span class="vy-hl-punctuation vy-hl-section vy-hl-block vy-hl-begin vy-hl-rust">{</span></span><span class="vy-hl-meta vy-hl-block vy-hl-rust"><span class="vy-hl-punctuation vy-hl-section vy-hl-block vy-hl-end vy-hl-rust">}</span></span></span>
+</span></code></pre>
+<figure class="vy-table"><table><thead><tr><th>Name</th><th>Note</th></tr></thead><tbody><tr><td>a</td><td><em>rich</em> </td></tr><tr><td>b</td><td></td></tr></tbody></table><figcaption>Two rows</figcaption></figure>

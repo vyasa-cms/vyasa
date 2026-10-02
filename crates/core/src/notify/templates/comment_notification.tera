@@ -1,0 +1,10 @@
+New comment on "{{ post_title }}"
+Hi {{ name }},
+
+{{ author }} commented on "{{ post_title }}":
+
+{{ comment_excerpt }}
+
+Review it here:
+
+    {{ url }}

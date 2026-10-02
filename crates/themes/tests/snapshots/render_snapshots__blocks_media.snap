@@ -1,0 +1,15 @@
+---
+source: crates/themes/tests/render_snapshots.rs
+expression: "render_blocks(&doc).expect(\"renders\")"
+---
+<figure class="vy-image"><img src="https://cdn.example.com/a.png" alt="An &lt;a&gt; image" loading="lazy"></figure>
+<div class="vy-gallery"><img src="https://cdn.example.com/a.png" alt="An &lt;a&gt; image" loading="lazy"><img src="https://cdn.example.com/a.png" alt="An &lt;a&gt; image" loading="lazy"></div>
+<figure class="vy-video"><video controls preload="metadata" src="/api/v1/media/42/raw"></video><figcaption>clip</figcaption></figure>
+<figure class="vy-audio"><audio controls src="/api/v1/media/7/raw"></audio></figure>
+<p class="vy-file"><a href="https://example.com/f.pdf" rel="noopener">doc</a></p>
+<p class="vy-file"><a href="/api/v1/media/9/raw" rel="noopener">Download</a></p>
+<figure class="vy-image"><img src="/api/v1/media/3/raw" alt="uploaded" loading="lazy" srcset="/api/v1/media/3/raw?variant=thumb 320w, /api/v1/media/3/raw?variant=medium 768w, /api/v1/media/3/raw?variant=large 1280w" sizes="(min-width: 1100px) 780px, 100vw"><figcaption>from the library</figcaption></figure>
+<section class="vy-cover" style="background-image:url('https://cdn.example.com/bg.jpg')"><h2>Cover</h2></section>
+<div class="vy-media-text"><img src="/api/v1/media/5/raw" alt=""><div>side text</div></div>
+<hr class="vy-separator">
+<span class="vy-page-break" data-pagebreak></span>

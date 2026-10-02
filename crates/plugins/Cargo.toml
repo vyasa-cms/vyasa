@@ -1,0 +1,36 @@
+[package]
+publish = false
+name = "vyasa-plugins"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Vyasa plugins crate"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+toml = "1"
+zip = { version = "2", features = ["deflate"] }
+ammonia = "4"
+wasmtime = { version = "36", features = ["component-model", "async", "runtime"] }
+tracing = "0.1"
+tokio = { version = "1", features = ["sync", "time", "macros", "rt"] }
+sha2 = "0.11"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+vyasa-common = { path = "../common" }
+vyasa-db = { path = "../db" }
+wasmtime-wasi = "36"
+
+serde_json = "1"
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio"] }
+vyasa-core = { version = "0.1.0", path = "../core" }
+ed25519-dalek = "2"
+hex = "0.4.3"
+url = "2"
+
+[lints]
+workspace = true
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+vyasa-testkit = { path = "../testkit" }

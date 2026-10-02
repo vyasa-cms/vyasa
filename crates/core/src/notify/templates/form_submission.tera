@@ -1,0 +1,6 @@
+{{ site }}: new "{{ form }}" submission
+Someone filled in the "{{ form }}" form on {{ site }}.
+
+{% for field in fields %}{{ field.label }}: {{ field.value }}
+{% endfor %}
+Sent from {{ path }}. Read and reply under Forms in the admin.

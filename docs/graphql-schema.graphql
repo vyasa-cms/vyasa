@@ -1,0 +1,624 @@
+type CommentConnection {
+	"""
+	Edges.
+	"""
+	edges: [CommentEdge!]!
+	"""
+	Page info.
+	"""
+	pageInfo: CommentPageInfo!
+	"""
+	Total count.
+	"""
+	totalCount: Int!
+}
+
+"""
+Cursor connection for comments.
+"""
+type CommentEdge {
+	"""
+	Cursor.
+	"""
+	cursor: String!
+	"""
+	Node.
+	"""
+	node: GqlComment!
+}
+
+type CommentPageInfo {
+	"""
+	Whether there is a next page.
+	"""
+	hasNextPage: Boolean!
+	"""
+	Last cursor.
+	"""
+	endCursor: String
+}
+
+"""
+Input for creating a post via GraphQL.
+"""
+input CreatePostInput {
+	"""
+	Content type (`post`, `page`, `block`). Defaults to `post`.
+	"""
+	postType: String
+	"""
+	Initial status (`draft`, `scheduled`, `published`, `private`, `trash`).
+	"""
+	status: String
+	"""
+	Title.
+	"""
+	title: String!
+	"""
+	Desired slug; derived from title when absent.
+	"""
+	slug: String
+	"""
+	Block document (`{schema_version, blocks}`).
+	"""
+	content: JSON!
+	"""
+	Optional excerpt.
+	"""
+	excerpt: String
+	"""
+	Optional parent id.
+	"""
+	parentId: Int
+	"""
+	Scheduled time (required when status is `scheduled`).
+	"""
+	scheduledFor: DateTime
+	"""
+	Optional password for private posts.
+	"""
+	password: String
+	"""
+	Optional term ids to assign (replace-set).
+	"""
+	termIds: [Int!]
+	"""
+	Field values keyed by field key, checked against the type's fields.
+	"""
+	fields: JSON
+}
+
+"""
+Input for creating a term.
+"""
+input CreateTermInput {
+	"""
+	Taxonomy (`category` or `tag`).
+	"""
+	taxonomy: String!
+	"""
+	Human name.
+	"""
+	name: String!
+	"""
+	Optional slug.
+	"""
+	slug: String
+	"""
+	Optional parent id.
+	"""
+	parentId: Int
+	"""
+	Optional meta JSON.
+	"""
+	meta: JSON
+}
+
+"""
+Implement the DateTime<Utc> scalar
+
+The input/output is a string in RFC3339 format.
+"""
+scalar DateTime
+
+"""
+Payload for deletion / merge.
+"""
+type DeletePayload {
+	"""
+	Whether the operation succeeded.
+	"""
+	success: Boolean!
+}
+
+type GqlComment {
+	id: Int!
+	postId: Int!
+	authorName: String!
+	content: String!
+	parentId: Int
+	status: String!
+	createdAt: DateTime!
+}
+
+type GqlMedia {
+	id: Int!
+	ownerId: Int!
+	fileName: String!
+	mime: String!
+	byteSize: Int!
+	storage: String!
+	path: String!
+	width: Int
+	height: Int
+	blurhash: String
+	alt: String
+	caption: String
+	derivatives: JSON!
+	createdAt: DateTime!
+}
+
+type GqlPost {
+	id: Int!
+	url: String!
+	slug: String!
+	title: String!
+	status: String!
+	type: String!
+	excerpt: String
+	content: JSON!
+	"""
+	Extension metadata. Field values are not in here: they are `fields`.
+	"""
+	meta: JSON!
+	"""
+	The entry's field values keyed by field key — only fields its type
+	still defines. Media and entry references are ids as strings; one
+	whose target is gone is still served (see `fieldsMissing`).
+	"""
+	fields: JSON!
+	"""
+	Keys of media and entry fields whose stored id names nothing that
+	exists outside the trash any more. Only for a caller who may edit
+	the entry (`null` otherwise): to anyone else it would say which
+	drafts exist.
+	"""
+	fieldsMissing: [String!]
+	authorId: Int!
+	parentId: Int
+	createdAt: DateTime!
+	updatedAt: DateTime!
+	publishedAt: DateTime
+	scheduledFor: DateTime
+	"""
+	Author resolved via batched loader.
+	"""
+	author: GqlUser
+	"""
+	Terms for this post via batched loader.
+	"""
+	terms: [GqlTerm!]!
+	"""
+	Featured media derived from `meta.featured_media_id` via batched loader.
+	"""
+	featuredMedia: GqlMedia
+}
+
+"""
+One search hit: the post, plus why it matched.
+"""
+type GqlSearchHit {
+	"""
+	Highlighted body fragment with `<mark>` around the matched terms.
+	
+	The index escapes the source text before inserting its own markup,
+	so this is safe to render — but it is HTML, not plain text.
+	"""
+	snippet: String!
+	"""
+	The matching post.
+	"""
+	post: GqlPost!
+}
+
+type GqlTerm {
+	id: Int!
+	taxonomy: String!
+	name: String!
+	slug: String!
+	parentId: Int
+	meta: JSON!
+	createdAt: DateTime!
+}
+
+"""
+Term with post count (for `terms` query with counts).
+"""
+type GqlTermWithCount {
+	"""
+	Term.
+	"""
+	term: GqlTermWrapper!
+	"""
+	Number of posts assigned.
+	"""
+	postCount: Int!
+}
+
+type GqlTermWrapper {
+	id: Int!
+	taxonomy: String!
+	name: String!
+	slug: String!
+	parentId: Int
+	createdAt: DateTime!
+}
+
+type GqlUser {
+	id: Int!
+	email: String!
+	username: String!
+	displayName: String!
+	"""
+	The built-in role. Under a custom role this is `subscriber`, and
+	`customRole` says which role the user really holds.
+	"""
+	role: String!
+	"""
+	The slug of the user's custom role, or null on a built-in role.
+	"""
+	customRole: String
+	"""
+	What the user's role is called: the custom role's name, or the
+	built-in role's.
+	"""
+	roleName: String!
+	bio: String!
+	createdAt: DateTime!
+	avatarMediaId: Int
+}
+
+"""
+A scalar that can represent any JSON value.
+"""
+scalar JSON
+
+type MutationRoot {
+	"""
+	Create a post — requires `edit_posts`. Mirrors `POST /api/v1/posts`.
+	"""
+	createPost(input: CreatePostInput!): GqlPost!
+	"""
+	Update a post — requires `edit_posts` + `edit_others` if not owner. Mirrors `PUT /api/v1/posts/{id}`.
+	"""
+	updatePost(id: Int!, input: UpdatePostInput!): GqlPost!
+	"""
+	Trash a post — requires `edit_posts` (+ `edit_others` if not owner). Mirrors `DELETE /api/v1/posts/{id}`.
+	"""
+	trashPost(id: Int!): GqlPost!
+	"""
+	Restore a trashed post to draft — requires `edit_posts` (+ `edit_others` if not owner).
+	"""
+	restorePost(id: Int!): GqlPost!
+	"""
+	Hard-delete a post — requires `delete_posts`. Mirrors `DELETE /api/v1/posts/{id}?force=true`.
+	"""
+	deletePost(id: Int!): DeletePayload!
+	"""
+	Publish a post (convenience over `updatePost` with `status: "published"`).
+	"""
+	publishPost(id: Int!): GqlPost!
+	"""
+	Create a term — requires `manage_categories`.
+	"""
+	createTerm(input: CreateTermInput!): GqlTerm!
+	"""
+	Update a term — requires `manage_categories`.
+	"""
+	updateTerm(id: Int!, input: UpdateTermInput!): GqlTerm!
+	"""
+	Delete a term, optionally reassigning posts/children — requires `manage_categories`.
+	"""
+	deleteTerm(id: Int!, reassignTo: Int): DeletePayload!
+	"""
+	Merge `from` into `into` — requires `manage_categories`.
+	"""
+	mergeTerms(from: Int!, intoTerm: Int!): DeletePayload!
+	"""
+	Submit a comment — public (MaybePrincipal), mirrors `POST /posts/{id}/comments`.
+	"""
+	submitComment(input: SubmitCommentInput!): GqlComment!
+	"""
+	Moderate a comment — requires `moderate_comments`.
+	"""
+	moderateComment(id: Int!, status: String!): GqlComment!
+	"""
+	Upload media — **REST-only** (documented deviation). Returns an error directing to REST.
+	"""
+	uploadMedia(file: String): GqlMedia!
+}
+
+type OptionEntry {
+	key: String!
+	value: JSON!
+}
+
+"""
+Page info.
+"""
+type PageInfo {
+	"""
+	Whether there is a next page.
+	"""
+	hasNextPage: Boolean!
+	"""
+	Cursor of last item.
+	"""
+	endCursor: String
+	"""
+	Whether there is a previous page (always false for forward paging).
+	"""
+	hasPreviousPage: Boolean!
+}
+
+"""
+Paginated post connection (cursor pagination).
+"""
+type PostConnection {
+	"""
+	Edges.
+	"""
+	edges: [PostEdge!]!
+	"""
+	Page info.
+	"""
+	pageInfo: PageInfo!
+	"""
+	Total matching (visible) count.
+	"""
+	totalCount: Int!
+}
+
+"""
+Pagination edge.
+"""
+type PostEdge {
+	"""
+	Opaque cursor.
+	"""
+	cursor: String!
+	"""
+	Post node.
+	"""
+	node: GqlPost!
+}
+
+"""
+Payload for `postPublished`.
+"""
+type PostPublishedPayload {
+	"""
+	Published post id.
+	"""
+	postId: Int!
+	"""
+	Author id.
+	"""
+	authorId: Int!
+}
+
+"""
+Payload for `postUpdated` — clients re-query the post.
+"""
+type PostUpdatedPayload {
+	"""
+	Updated post id.
+	"""
+	postId: Int!
+}
+
+type QueryRoot {
+	"""
+	Current authenticated user (`null` when unauthenticated — errors when not logged in).
+	"""
+	me: GqlUser!
+	"""
+	Listing users — requires `manage_users` capability. Paginated.
+	"""
+	users(first: Int, after: String): [GqlUser!]!
+	"""
+	Fetch a single user by id — requires ManageUsers or self.
+	"""
+	user(id: Int!): GqlUser!
+	"""
+	Paged posts with optional filters, cursor pagination.
+	"""
+	posts(first: Int, after: String, status: String, postType: String, authorId: Int, termId: Int, search: String): PostConnection!
+	"""
+	Fetch a single post by id — respects draft/private visibility.
+	"""
+	post(id: Int!): GqlPost
+	"""
+	Full-text search over published posts.
+	
+	Published-only regardless of who is asking: the index holds nothing
+	else, and every hit is re-read through the repository so an entry
+	left behind by an unpublish cannot leak.
+	"""
+	search(query: String!, limit: Int): [GqlSearchHit!]!
+	"""
+	Fetch a post by type + slug — respects visibility.
+	"""
+	postBySlug(postType: String!, slug: String!): GqlPost
+	"""
+	List terms, optionally filtered by taxonomy.
+	"""
+	terms(taxonomy: String, withCounts: Boolean): [GqlTermWithCount!]!
+	"""
+	Fetch a term by id.
+	"""
+	term(id: Int!): GqlTerm
+	"""
+	List media (paginated via cursor — simple wrapper over offset).
+	"""
+	media(first: Int, after: String): [GqlMedia!]!
+	"""
+	Fetch a single media by id.
+	"""
+	mediaById(id: Int!): GqlMedia
+	"""
+	Approved threaded comments for a post, with cursor pagination.
+	"""
+	comments(postId: Int!, first: Int, after: String): CommentConnection!
+	"""
+	Fetch a single option value (public subset only unless authenticated with ManageOptions).
+	"""
+	option(key: String!): JSON
+	"""
+	Headless `site` query: identity + public settings in one call.
+	"""
+	site: SiteObject!
+	"""
+	All public options as key/value pairs.
+	"""
+	options: [OptionEntry!]!
+}
+
+"""
+Public site identity for headless consumers.
+"""
+type SiteObject {
+	"""
+	Site title.
+	"""
+	title: String!
+	"""
+	Tagline.
+	"""
+	tagline: String!
+	"""
+	Effective listing page size.
+	"""
+	postsPerPage: Int!
+}
+
+"""
+Input for submitting a comment.
+"""
+input SubmitCommentInput {
+	"""
+	Post id.
+	"""
+	postId: Int!
+	"""
+	Display name (for guests; if authenticated and omitted, uses user's display_name).
+	"""
+	authorName: String
+	"""
+	Email (for guests; if authenticated and omitted, uses user's email).
+	"""
+	authorEmail: String
+	"""
+	Body.
+	"""
+	content: String!
+	"""
+	Parent comment id, if reply.
+	"""
+	parentId: Int
+}
+
+type SubscriptionRoot {
+	"""
+	Subscribes to updates for a single post (any `Updated`/`Published`/`Trashed`/`Restored`/`Deleted` for that id).
+	Emits the post id; clients re-query `post(id)`.
+	"""
+	postUpdated(postId: Int!): PostUpdatedPayload!
+	"""
+	Subscribes to all `postPublished` events (headless live feed).
+	"""
+	postPublished: PostPublishedPayload!
+}
+
+"""
+Input for updating a post.
+"""
+input UpdatePostInput {
+	"""
+	New status.
+	"""
+	status: String
+	"""
+	New title.
+	"""
+	title: String
+	"""
+	New slug.
+	"""
+	slug: String
+	"""
+	New block document.
+	"""
+	content: JSON
+	"""
+	New excerpt.
+	"""
+	excerpt: String
+	"""
+	New scheduled time.
+	"""
+	scheduledFor: DateTime
+	"""
+	New password (`""` clears).
+	"""
+	password: String
+	"""
+	New term ids (`None` keeps, `Some(ids)` replaces).
+	"""
+	termIds: [Int!]
+	"""
+	Field values replacing the stored ones (`{}` clears); omit to keep.
+	"""
+	fields: JSON
+}
+
+"""
+Input for updating a term.
+"""
+input UpdateTermInput {
+	"""
+	New name.
+	"""
+	name: String
+	"""
+	New slug.
+	"""
+	slug: String
+	"""
+	New parent id (`None` keeps, `Some(None)` clears, `Some(Some(id))` sets).
+	"""
+	parentId: Int
+	"""
+	New meta.
+	"""
+	meta: JSON
+}
+
+"""
+Directs the executor to include this field or fragment only when the `if` argument is true.
+"""
+directive @include(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Directs the executor to skip this field or fragment when the `if` argument is true.
+"""
+directive @skip(if: Boolean!) on FIELD | FRAGMENT_SPREAD | INLINE_FRAGMENT
+"""
+Provides a scalar specification URL for specifying the behavior of custom scalar types.
+"""
+directive @specifiedBy(url: String!) on SCALAR
+schema {
+	query: QueryRoot
+	mutation: MutationRoot
+	subscription: SubscriptionRoot
+}
+

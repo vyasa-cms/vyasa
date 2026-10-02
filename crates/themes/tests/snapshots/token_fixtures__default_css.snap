@@ -1,0 +1,50 @@
+---
+source: crates/themes/tests/token_fixtures.rs
+expression: "tokens_to_css(&Default::default())"
+---
+/* Vyasa design tokens — generated; do not edit. */
+:root {
+  color-scheme: light;
+  --vy-color-bg: #ffffff;
+  --vy-color-surface: #f4f4f5;
+  --vy-color-text: #18181b;
+  --vy-color-text-muted: #52525b;
+  --vy-color-border: #e4e4e7;
+  --vy-color-primary: #2563eb;
+  --vy-color-on-primary: #ffffff;
+  --vy-radius: 8px;
+  --vy-shadow: 0 1px 2px rgb(0 0 0 / 0.05);
+  --vy-space-unit: 4px;
+  --vy-section-scale:1 2 4 8;
+  --vy-content-width: 960px;
+  --vy-sidebar-width: 260px;
+  --vy-density: 1;
+  --vy-direction: ltr;
+  direction: ltr;
+  --vy-base-size: 16px;
+  --vy-scale-ratio: 1.25;
+  --vy-font-heading: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --vy-font-body: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+:root:not([data-theme="light"]) {
+  --vy-color-bg: #101013;
+  --vy-color-surface: #1b1b1f;
+  --vy-color-text: #f4f4f5;
+  --vy-color-text-muted: #a1a1aa;
+  --vy-color-border: #27272a;
+  --vy-color-primary: #60a5fa;
+  --vy-color-on-primary: #0b1220;
+  color-scheme: dark;
+}
+}
+[data-theme="dark"] {
+  --vy-color-bg: #101013;
+  --vy-color-surface: #1b1b1f;
+  --vy-color-text: #f4f4f5;
+  --vy-color-text-muted: #a1a1aa;
+  --vy-color-border: #27272a;
+  --vy-color-primary: #60a5fa;
+  --vy-color-on-primary: #0b1220;
+  color-scheme: dark;
+}

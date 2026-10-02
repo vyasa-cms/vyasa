@@ -1,0 +1,210 @@
+{
+  "index": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "intro",
+      "kind": "hero",
+      "settings": {
+        "eyebrow": "A journal for the curious",
+        "headline": "Good ideas deserve a little space.",
+        "subhead": "Thoughtful stories, useful discoveries, and a closer look at the everyday. Take your time. Stay curious.",
+        "primary_label": "Explore the journal",
+        "primary_url": "#stories",
+        "secondary_label": "Follow the feed",
+        "secondary_url": "/feed.xml",
+        "image": "/theme-assets/images/editorial.svg",
+        "image_alt": "A sun above layered hills in a warm editorial illustration"
+      }
+    },
+    {
+      "id": "stories",
+      "kind": "collection",
+      "settings": {
+        "heading": "The latest, worth your time.",
+        "bind": {
+          "source": "post",
+          "sort": "newest",
+          "limit": 6
+        },
+        "columns": 3,
+        "show_image": true,
+        "show_excerpt": true
+      }
+    },
+    {
+      "id": "follow",
+      "kind": "cta-band",
+      "settings": {
+        "headline": "A quieter corner of the internet.",
+        "subhead": "Keep up with new stories through the feed. No algorithm, just the latest writing.",
+        "label": "Follow the journal",
+        "url": "/feed.xml"
+      }
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "single": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "body",
+      "kind": "post-content"
+    },
+    {
+      "id": "related",
+      "kind": "related-posts",
+      "settings": {
+        "count": 3
+      }
+    },
+    {
+      "id": "thread",
+      "kind": "comments"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "archive": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "posts",
+      "kind": "latest-posts",
+      "settings": {
+        "count": 12
+      }
+    },
+    {
+      "id": "pages",
+      "kind": "pagination"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "page": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "body",
+      "kind": "post-content"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "search": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "find",
+      "kind": "search-box",
+      "settings": {
+        "placeholder": "Search the site"
+      }
+    },
+    {
+      "id": "posts",
+      "kind": "latest-posts",
+      "settings": {
+        "count": 12
+      }
+    },
+    {
+      "id": "pages",
+      "kind": "pagination"
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ],
+  "not-found": [
+    {
+      "id": "header",
+      "kind": "header"
+    },
+    {
+      "id": "nav",
+      "kind": "menu",
+      "settings": {
+        "slug": "main"
+      }
+    },
+    {
+      "id": "missing",
+      "kind": "hero",
+      "settings": {
+        "eyebrow": "404 / A small detour",
+        "headline": "This page has moved on.",
+        "subhead": "Try a search, or head back to the beginning.",
+        "primary_label": "Back to home",
+        "primary_url": "/"
+      }
+    },
+    {
+      "id": "find",
+      "kind": "search-box",
+      "settings": {
+        "placeholder": "Search for something else"
+      }
+    },
+    {
+      "id": "footer",
+      "kind": "footer"
+    }
+  ]
+}

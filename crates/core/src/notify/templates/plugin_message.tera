@@ -1,0 +1,5 @@
+{{ subject }}
+{{ body }}
+
+—
+Sent by the "{{ plugin }}" plugin on your site.

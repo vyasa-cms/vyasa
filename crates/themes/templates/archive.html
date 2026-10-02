@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% block body %}{% if sections %}{{ sections | safe }}{% else %}
+<header class="vy-archive-header">
+  {% if page.archive_image %}<img class="vy-archive-image" src="{{ page.archive_image }}" alt="" width="72" height="72">{% endif %}
+  <h1 class="vy-archive-title">{{ page.archive_title }}</h1>
+  {% if page.archive_description %}<p class="vy-archive-description">{{ page.archive_description }}</p>{% endif %}
+</header>
+<div class="vy-post-list">
+  {% for post in posts %}
+  <article class="vy-card vy-post-card">
+    <h2 class="vy-h"><a href="{{ post.url }}">{{ post.title }}</a></h2>
+    <p class="vy-meta">{% if post.author %}{{ post.author }} · {% endif %}{{ post.date }}</p>
+    {% if post.excerpt %}<div class="vy-excerpt">{{ post.excerpt | safe }}</div>{% endif %}
+  </article>
+  {% endfor %}
+</div>
+{{ regions.content | default(value="") | safe }}
+{% if pagination.prev or pagination.next %}
+<nav class="vy-pagination">
+  {% if pagination.prev %}<a href="{{ pagination.prev }}" rel="prev">← Newer</a>{% endif %}
+  <span>{{ pagination.page }}</span>
+  {% if pagination.next %}<a href="{{ pagination.next }}" rel="next">Older →</a>{% endif %}
+</nav>
+{% endif %}
+{% endif %}{% endblock %}

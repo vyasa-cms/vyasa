@@ -1,0 +1,15 @@
+Your account on {{ site }}
+Hello,
+
+Someone, hopefully you, tried to create an account on {{ site }} with this
+email address. You already have one, so nothing was changed.
+
+To sign in:
+
+    {{ sign_in_url }}
+
+If you have forgotten your password, you can set a new one here:
+
+    {{ forgot_url }}
+
+If this was not you, you can ignore this email.

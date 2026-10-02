@@ -1,0 +1,14 @@
+/* Product-site styling; content and diagrams remain native editable sections. */
+.vy-masthead { border-bottom: 1px solid var(--vy-color-border); }
+.vy-hero { max-width: 64rem; }
+.vy-hero-title { letter-spacing: -.045em; line-height: 1.08; }
+.vy-hero-subhead { max-width: 46rem; }
+.vy-product { border-top: 1px solid var(--vy-color-border); padding-block: 3rem; }
+.vy-section-title { letter-spacing: -.025em; }
+.vy-card, .vy-product-items > li { box-shadow: 0 12px 32px #0002; }
+.vy-code-examples { box-shadow: 0 20px 70px #0004; }
+.vy-main { overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: no-preference) {
+  .vy-btn { transition: transform .15s ease; }
+  .vy-btn:hover { transform: translateY(-2px); }
+}

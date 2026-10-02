@@ -1,0 +1,14 @@
+name: Feature request
+description: Suggest an improvement to Vyasa itself
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes: { label: The problem, description: "What are you trying to do that is hard today?" }
+    validations: { required: true }
+  - type: textarea
+    id: idea
+    attributes: { label: Your idea }
+  - type: textarea
+    id: alternatives
+    attributes: { label: Could a plugin or theme do this instead? }

@@ -1,0 +1,69 @@
+/* Versioned theme styling. Colours and type follow the Studio tokens. */
+.vy { overflow-wrap: anywhere; }
+.vy-main { padding-block: 0; }
+.vy-main > .vy-section { margin-block: clamp(2.5rem, 6vw, 5.5rem); }
+.vy-main > .vy-section:first-child { margin-top: 0; }
+.vy-masthead { min-height: 88px; }
+.vy-header { padding-block: 1.5rem; align-items: center; }
+.vy-site-name { font-size: 1.2rem; letter-spacing: -.045em; }
+.vy-tagline { font-size: .75rem; max-width: 25ch; }
+.vy-nav .vy-menu a { font-size: .8rem; letter-spacing: .01em; }
+.vy-hero { padding-block: clamp(3rem, 7vw, 6rem); }
+.vy-hero-title { font-size: clamp(2.75rem, 5.8vw, 5.8rem); letter-spacing: -.065em; line-height: 1.03; font-weight: 500; text-wrap: balance; }
+.vy-hero-sub { font-size: 1.05rem; line-height: 1.75; margin-block: 1.5rem; }
+.vy-eyebrow { font-size: .68rem; letter-spacing: .16em; font-weight: 650; margin-bottom: 1.5rem; }
+.vy-actions { margin-block: 2rem 0; gap: .8rem; }
+.vy-btn { min-height: 48px; display: inline-flex; align-items: center; justify-content: center; gap: .7em; padding: .8rem 1.3rem; font-size: .8rem; }
+.vy-btn-primary::after { content: '↗'; font-size: 1.2em; }
+.vy-hero-media { display: block; aspect-ratio: 1 / 1.06; object-fit: cover; }
+.vy-section-title { font-size: clamp(1.6rem, 3vw, 2.5rem); letter-spacing: -.045em; font-weight: 500; line-height: 1.2; }
+.vy-section-intro { margin-block: .8rem 2rem; font-size: .95rem; }
+.vy-cards { gap: 1rem; margin-top: 2rem; }
+.vy-card { padding: 1.8rem; }
+.vy-card-title { font-family: var(--vy-font-heading); font-size: 1.2rem; letter-spacing: -.025em; }
+.vy-card-title a { display: flex; justify-content: space-between; gap: 1rem; }
+.vy-card-title a::after { content: '↗'; color: var(--vy-color-primary); }
+.vy-card-body { font-size: .85rem; line-height: 1.8; margin-top: .8rem; }
+.vy-collection { gap: 1.5rem; margin-top: 2rem; }
+.vy-collection .vy-post-card { min-width: 0; box-shadow: none; }
+.vy-collection .vy-post-card__thumb { margin-bottom: .8rem; }
+.vy-collection .vy-post-card__link { font-family: var(--vy-font-heading); font-size: 1.35rem; line-height: 1.3; letter-spacing: -.03em; }
+.vy-collection .vy-post-card__meta { font-size: .7rem; text-transform: uppercase; letter-spacing: .09em; }
+.vy-cta { padding-block: clamp(2.5rem, 5vw, 4.5rem); }
+.vy-cta-title { line-height: 1.15; font-size: clamp(2rem, 4vw, 3.5rem); letter-spacing: -.045em; max-width: 18ch; }
+.vy-cta-sub { max-width: 45ch; margin-top: 1rem; font-size: .95rem; }
+.vy-footer { margin-top: 4rem; padding-block: 2rem; font-size: .75rem; }
+.vy-faq-item { padding-block: 1.4rem; }
+.vy-faq-item summary { font-size: 1rem; }
+.vy-search { display: flex; gap: .75rem; width: 100%; }
+.vy-search input { min-height: 54px; min-width: 0; flex: 1; width: 100%; }
+.vy-search button { border: 0; border-radius: var(--vy-radius); padding: .8rem 1.2rem; background: var(--vy-color-primary); color: var(--vy-color-on-primary); font: inherit; font-weight: 600; cursor: pointer; }
+.vy-post-body, .vy-single { max-width: 760px; margin-inline: auto; }
+a, button, input, summary { -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: 2px solid var(--vy-color-primary); outline-offset: 5px; }
+@media (prefers-reduced-motion: no-preference) {
+  .vy-btn, .vy-card { transition: transform .18s ease, border-color .18s ease; }
+  .vy-btn:hover { transform: translateY(-2px); }
+  .vy-card:has(a):hover { border-color: var(--vy-color-primary); }
+}
+@media (max-width: 700px) {
+  .vy-masthead { min-height: 74px; }
+  .vy-tagline { display: none; }
+  .vy-hero-title { font-size: clamp(2.5rem, 10vw, 4rem); }
+  .vy-hero--split { gap: 2.5rem; }
+  .vy-hero--media-start .vy-hero-media { order: 0; }
+  .vy-hero-media { max-height: 410px; aspect-ratio: 1.2; }
+  .vy-card { padding: 1.4rem; }
+  .vy-main > .vy-section { margin-block: 3rem; }
+}
+/* A studio portfolio: large statements and a vivid work surface. */
+.vy-hero-title { max-width: 10ch; font-weight: 600; }
+.vy-hero-media { transform: rotate(-3deg); border-radius: 8px; }
+.vy-collection .vy-post-card { background: transparent; border: 0; padding: 0 0 1.5rem; border-bottom: 1px solid var(--vy-color-border); }
+.vy-collection .vy-post-card__thumb { aspect-ratio: 4 / 3; }
+.vy-card { border: 0; border-top: 1px solid var(--vy-color-border); padding-inline: 0; background: transparent; border-radius: 0; }
+.vy-stats { justify-content: space-between; padding-block: 2rem; border-block: 1px solid var(--vy-color-border); }
+.vy-stat-value { font-weight: 500; font-size: clamp(2.5rem, 5vw, 4.5rem); letter-spacing: -.07em; }
+.vy-stat-label { margin-top: .6rem; font-size: .75rem; }
+.vy-section--cta-band { padding-inline: 2rem; border-radius: 8px; }
+@media (max-width: 700px) { .vy-hero-media { transform: none; } .vy-stats { gap: 2rem; } }

@@ -1,0 +1,13 @@
+---
+source: crates/themes/tests/render_snapshots.rs
+expression: "render_blocks(&doc).expect(\"renders\")"
+---
+<div class="vy-group"><p class="vy-p">inside</p>
+</div>
+<div class="vy-columns"><div class="vy-col"><p class="vy-p">l</p></div><div class="vy-col"><p class="vy-p">r</p></div></div>
+<div class="vy-buttons"><a class="vy-button" href="https://docs.example.com" rel="noopener">Docs</a><a class="vy-button" href="/" rel="noopener">Home</a></div>
+<details class="vy-details"><summary>More</summary><p class="vy-p">hidden</p>
+</details>
+<section class="vy-footnotes"><ol><li>source</li></ol></section>
+<figure class="vy-embed vy-embed-youtube"><iframe src="https://www.youtube-nocookie.com/embed/dQw4w9WgXcQ" title="Video" frameborder="0" allowfullscreen loading="lazy" referrerpolicy="strict-origin-when-cross-origin" sandbox="allow-scripts allow-same-origin allow-presentation"></iframe><figcaption></figcaption></figure>
+<div class="vy-html"><p>ok</p><img src="x"></div>

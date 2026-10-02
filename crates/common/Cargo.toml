@@ -1,0 +1,26 @@
+[package]
+publish = false
+name = "vyasa-common"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Vyasa common crate"
+
+[lints]
+workspace = true
+
+[dependencies]
+config = { version = "0.15", default-features = false, features = ["toml"] }
+deunicode = "1.6"
+serde = { version = "1", features = ["derive"] }
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter", "json"] }
+
+[dev-dependencies]
+criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
+
+[[bench]]
+name = "slug"
+harness = false

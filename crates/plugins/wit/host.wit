@@ -1,0 +1,296 @@
+package vyasa:plugin@1.0.0;
+
+/// Everything a plugin can see or do. Every function is an attack-surface
+/// decision: keep this surface minimal and capability-gated.
+///
+/// This interface only ever grows. A component built against an earlier
+/// revision imports a subset of these functions, and a host that offers
+/// more than a guest asks for still satisfies it — which is why new host
+/// capabilities land here rather than in a new interface version that
+/// would strand every plugin already in the field.
+interface host {
+    /// Structured log levels mirrored from tracing.
+    variant log-level {
+        trace,
+        debug,
+        info,
+        warn,
+        error,
+    }
+
+    /// Post summary handed to hooks and returned by get-post.
+    record post-summary {
+        id: u64,
+        post-type: string,
+        slug: string,
+        title: string,
+        excerpt: string,
+        author-id: u64,
+        published-at: option<u64>,
+    }
+
+    /// Render pipeline stages a filter can intercept.
+    enum filter-stage {
+        /// Post content before block rendering.
+        content,
+        /// Fully rendered page HTML before caching.
+        page-html,
+        /// Feed XML before delivery.
+        feed-item,
+        /// Comment body after sanitization, before storage.
+        comment-body,
+    }
+
+    /// Domain events v1.
+    enum event-kind {
+        post-published,
+        post-updated,
+        post-trashed,
+        comment-added,
+        request-render,
+    }
+
+    /// An approved comment, as plugins see it.
+    record comment-summary {
+        id: u64,
+        post-id: u64,
+        author-name: string,
+        body-html: string,
+        created-at: u64,
+    }
+
+    /// A post a plugin wants to create.
+    ///
+    /// The body is HTML, not the block format: a plugin should not have to
+    /// know the editor's document schema to publish a paragraph, and the
+    /// host sanitizes whatever arrives before storing it.
+    record new-post {
+        post-type: string,
+        title: string,
+        /// Empty to derive one from the title.
+        slug: string,
+        body-html: string,
+        excerpt: string,
+        /// `draft` always allowed; `published` needs `db:publish:posts`.
+        status: string,
+    }
+
+    /// Fields of an existing post to change; absent fields are left alone.
+    record post-patch {
+        title: option<string>,
+        body-html: option<string>,
+        excerpt: option<string>,
+        status: option<string>,
+    }
+
+    /// Who is looking at the page this call is serving.
+    ///
+    /// Never carries an email address or a session token: a plugin gets
+    /// enough to personalise, not enough to impersonate.
+    record viewer {
+        id: u64,
+        display-name: string,
+        /// `admin`, `editor`, `author`, `contributor` or `subscriber`, or
+        /// the slug of a custom role the site defines when the viewer
+        /// holds one (never a built-in name).
+        role: string,
+    }
+
+    /// One inbound request delegated to a plugin route.
+    record http-request {
+        method: string,
+        /// Path below the plugin's own mount point, without a leading `/`.
+        path: string,
+        /// Raw query string, without the `?`.
+        query: string,
+        /// Request headers, lowercased, minus cookies and authorization.
+        headers: list<tuple<string, string>>,
+        body: string,
+    }
+
+    /// What a plugin route answers with.
+    record http-response {
+        status: u16,
+        headers: list<tuple<string, string>>,
+        body: string,
+    }
+
+    log: func(level: log-level, message: string);
+
+    get-post: func(id: u64) -> result<post-summary, string>;
+
+    query-posts: func(filter-post-type: option<string>, limit: u32) -> result<list<post-summary>, string>;
+
+    get-option: func(key: string) -> result<option<string>, string>;
+
+    emit-event: func(kind: event-kind, payload: string) -> result<_, string>;
+
+    /// Outbound HTTPS GET, restricted to hosts the plugin was granted
+    /// through `net:fetch:<pattern>`. Returns the response body as text;
+    /// a non-2xx status, an oversized body or a denied host is an error.
+    /// Counts against the plugin's fetch and byte quotas.
+    fetch: func(url: string) -> result<string, string>;
+
+    /// Ask the site's default text model (from the Models page) for a plain
+    /// text reply. Needs the `ai:text` capability; budgeted and logged like
+    /// every other AI call, under the plugin's name.
+    ai-complete: func(system: string, user: string) -> result<string, string>;
+
+    /// Private key/value storage. Every key is scoped to the calling
+    /// plugin, so two plugins using the same key never see each other's
+    /// value and no key can reach a site option. Needs `kv:read`.
+    kv-get: func(key: string) -> result<option<string>, string>;
+
+    /// Stores a value. Needs `kv:write`.
+    kv-set: func(key: string, value: string) -> result<_, string>;
+
+    /// Removes a key. Needs `kv:write`.
+    kv-delete: func(key: string) -> result<_, string>;
+
+    /// Keys beginning with `prefix`, sorted. Needs `kv:read`.
+    kv-list: func(prefix: string, limit: u32) -> result<list<string>, string>;
+
+    /// Approved comments on a post, newest first. Needs `db:read:comments`.
+    list-comments: func(post-id: u64, limit: u32) -> result<list<comment-summary>, string>;
+
+    /// Creates a post, returning its id. Needs `db:write:posts`; creating
+    /// it already published additionally needs `db:publish:posts`.
+    create-post: func(input: new-post) -> result<u64, string>;
+
+    /// Edits a post the plugin created. Needs `db:write:posts`; moving it
+    /// to `published` additionally needs `db:publish:posts`.
+    update-post: func(id: u64, patch: post-patch) -> result<_, string>;
+
+    /// The signed-in visitor. Needs `viewer:read`.
+    ///
+    /// Populated only inside `handle-request`, and `none` everywhere else.
+    /// That is a correctness rule, not an omission: page renders are
+    /// cached and the cached HTML is served to every visitor, so a filter
+    /// or a block that personalised on the viewer would show one person's
+    /// page to the next. A plugin route is rendered per request and cached
+    /// by nobody, which is why it is the one place this can be honest.
+    ///
+    /// An import rather than a field on `http-request` so that adding it
+    /// invalidated no existing component.
+    current-viewer: func() -> result<option<viewer>, string>;
+
+    /// Reads one of this plugin's meta values on a post. Needs
+    /// `db:read:posts`.
+    ///
+    /// Unlike `kv`, this travels with the post: it is stored in the post's
+    /// own `meta` column, so it appears in the REST payload, survives an
+    /// export, and is deleted with the post.
+    get-post-meta: func(post-id: u64, key: string) -> result<option<string>, string>;
+
+    /// Writes one of this plugin's meta values on a post. Needs
+    /// `db:write:meta`. Keys are namespaced per plugin, so two plugins
+    /// using `rating` never collide.
+    set-post-meta: func(post-id: u64, key: string, value: string) -> result<_, string>;
+
+    /// Queues a plain-text message. Needs `mail:send`.
+    ///
+    /// `to` must be an address the site already knows: a registered user's,
+    /// or the literal `site-admin`, which the host resolves to whoever runs
+    /// the site without ever telling the plugin the address. A plugin may
+    /// notify the people running or using the site; it is not an open relay.
+    send-mail: func(to: string, subject: string, body: string) -> result<_, string>;
+}
+
+/// What every Vyasa plugin must export.
+world vyasa-plugin {
+    use host.{filter-stage, event-kind};
+
+    /// Plugin metadata returned from init.
+    record plugin-info {
+        name: string,
+        version: string,
+    }
+
+    /// Initialize with serialized config (JSON object from the admin UI).
+    export init: func(config-json: string) -> result<plugin-info, string>;
+
+    /// Filter hook: transform content at a pipeline stage.
+    export filter: func(stage: filter-stage, content: string) -> string;
+
+    /// Action hook: react to a domain event (fire-and-forget).
+    export action: func(kind: event-kind, payload-json: string) -> result<_, string>;
+
+    /// Declare custom blocks contributed to the editor registry.
+    /// Returns JSON: [{ kind, title, icon?, attrs-schema }]
+    export register-blocks: func() -> string;
+
+    /// Declare extra public routes. JSON: [{ method, path }]
+    export register-routes: func() -> string;
+}
+
+/// The base world plus everything a plugin needs to look like a WordPress
+/// plugin: its own routes, its own blocks, scheduled work, admin settings,
+/// front-end assets and custom post types.
+///
+/// This is a superset of `vyasa-plugin`, so implementing it is the only
+/// thing an author has to choose. The host detects which world a component
+/// implements by looking the extra exports up at instantiation: a plugin
+/// built against `vyasa-plugin` keeps running untouched, and one built
+/// against this world gets the extra surface. That is why these are extra
+/// exports on a superset world rather than a version bump — a bump would
+/// have invalidated every plugin binary already installed.
+world vyasa-plugin-v2 {
+    use host.{filter-stage, event-kind, http-request, http-response};
+
+    /// Plugin metadata returned from init.
+    record plugin-info {
+        name: string,
+        version: string,
+    }
+
+    export init: func(config-json: string) -> result<plugin-info, string>;
+    export filter: func(stage: filter-stage, content: string) -> string;
+    export action: func(kind: event-kind, payload-json: string) -> result<_, string>;
+    export register-blocks: func() -> string;
+    export register-routes: func() -> string;
+
+    /// Serves one request to a route this plugin declared.
+    export handle-request: func(req: http-request) -> result<http-response, string>;
+
+    /// Renders one instance of a block this plugin declared. `attrs-json`
+    /// is the block's stored attributes; the returned HTML is sanitized by
+    /// the host before it reaches a page.
+    export render-block: func(kind: string, attrs-json: string) -> result<string, string>;
+
+    /// Runs one scheduled task by the name given in register-schedule.
+    export run-task: func(name: string) -> result<_, string>;
+
+    /// Declare periodic work. JSON: [{ name, every-seconds }]
+    export register-schedule: func() -> string;
+
+    /// Declare an admin settings form.
+    /// JSON: { title?, description?, fields: [{ key, label, type, help?,
+    /// options?, default? }] }
+    export register-admin: func() -> string;
+
+    /// Declare front-end assets injected into every page.
+    /// JSON: { css?: string, js?: string }
+    export register-assets: func() -> string;
+
+    /// Declare custom post types.
+    /// JSON: [{ slug, singular, plural, public?, has-archive?, icon? }]
+    export register-post-types: func() -> string;
+
+    /// Declare custom taxonomies.
+    /// JSON: [{ slug, singular, plural, hierarchical?, public? }]
+    export register-taxonomies: func() -> string;
+
+    /// Transform a value at a named point in the pipeline.
+    ///
+    /// Keyed by string rather than by an enum on purpose: a new hook point
+    /// is then additive, and adding one never changes a type or invalidates
+    /// a component. `filter` above is the closed-enum version, kept because
+    /// base-world plugins export it; everything new arrives here.
+    ///
+    /// A point the plugin does not handle must return `payload` unchanged.
+    /// See `docs/plugin-api.md` for the list and each payload's shape.
+    export filter-at: func(point: string, payload: string) -> string;
+
+    /// React to a named event. Fire-and-forget, same string-keyed reason.
+    export on-event: func(name: string, payload-json: string) -> result<_, string>;
+}

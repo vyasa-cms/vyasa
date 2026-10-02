@@ -1,0 +1,103 @@
+# Sample alerting rules for Vyasa.
+#
+# These are starting points, not a tuned policy: the thresholds assume a
+# single-node install serving a modest site. Adjust `for` durations before
+# putting them on a pager — every one of these can fire briefly during a
+# deploy.
+
+groups:
+  - name: vyasa
+    rules:
+      - alert: VyasaDown
+        expr: up{job="vyasa"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Vyasa is not being scraped"
+          description: >-
+            The exporter has been unreachable for two minutes. Check the
+            process is running and that /metrics is reachable with an admin
+            session.
+
+      - alert: VyasaHighErrorRate
+        # 5xx as a share of all responses. Ignores 4xx: a scanner probing
+        # for /wp-admin is not an incident.
+        expr: |
+          sum(rate(vyasa_http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(vyasa_http_requests_total[5m])) > 0.05
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "More than 5% of responses are server errors"
+
+      - alert: VyasaSlowRequests
+        # p99 over a five-minute window. The buckets top out at 5s, so a
+        # sustained breach here means requests are landing in +Inf.
+        expr: |
+          histogram_quantile(
+            0.99,
+            sum by (le) (rate(vyasa_http_request_duration_seconds_bucket[5m]))
+          ) > 1
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "p99 request latency above one second"
+
+      - alert: VyasaDeadLetterJobs
+        # Dead jobs never retry on their own; they need someone to look.
+        expr: vyasa_jobs_queue_depth{status="dead"} > 0
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Jobs have exhausted their retries"
+          description: >-
+            Webhook deliveries and emails dead-letter after five attempts.
+            Inspect `SELECT id, kind, last_error FROM jobs WHERE status =
+            'dead'`.
+
+      - alert: VyasaQueueBacklog
+        expr: vyasa_jobs_queue_depth{status="queued"} > 500
+        for: 15m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Job queue is not draining"
+
+      - alert: VyasaRenderCacheIneffective
+        # Below 50% on a site with steady traffic usually means something is
+        # purging the cache on every request, not that traffic is unusual.
+        expr: |
+          sum(rate(vyasa_render_cache_hits_total[15m]))
+            / clamp_min(
+                sum(rate(vyasa_render_cache_hits_total[15m]))
+                  + sum(rate(vyasa_render_cache_misses_total[15m])),
+                0.001
+              ) < 0.5
+        for: 30m
+        labels:
+          severity: info
+        annotations:
+          summary: "Render cache hit rate below 50%"
+
+      - alert: VyasaDbPoolExhausted
+        expr: vyasa_db_pool_connections{state="idle"} == 0
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: "No idle database connections for ten minutes"
+
+      - alert: VyasaPluginFailures
+        expr: increase(vyasa_plugin_dispatch_failures_total[15m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Plugins are failing their hooks"
+          description: >-
+            A failing plugin is marked degraded and skipped. Check the
+            Plugins page in the admin for which one.
