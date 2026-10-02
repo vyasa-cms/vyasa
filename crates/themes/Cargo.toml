@@ -18,7 +18,7 @@ schemars = "0.8"
 serde_path_to_error = "0.1"
 tera = "1"
 ammonia = "4"
-vyasa-core = { version = "0.1.0", path = "../core" }
+vyasa-core = { path = "../core" }
 thiserror = "2"
 futures = { version = "0.3", features = ["executor"] }
 moka = { version = "0.12", features = ["sync"] }

@@ -23,7 +23,7 @@ trap cleanup EXIT
 start=$(date +%s)
 # --no-build: the point is the published image, not a local build.
 docker compose pull app
-docker compose run --rm --no-build app migrate
+docker compose run --rm --pull never app migrate
 docker compose up -d --no-build
 
 code=000

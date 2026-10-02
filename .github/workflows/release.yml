@@ -42,9 +42,12 @@ jobs:
             echo "prerelease=$prerelease"
             echo "publish=$publish"
           } >> "$GITHUB_OUTPUT"
-      # Fail before building anything when the tag has no changelog entry.
+      # Fail before building anything when the tag has no changelog entry,
+      # or names a version the binary would not report as its own.
       - if: steps.v.outputs.publish == 'true'
-        run: scripts/release-notes.sh "${{ steps.v.outputs.version }}" > /dev/null
+        run: |
+          scripts/release-notes.sh "${{ steps.v.outputs.version }}" > /dev/null
+          scripts/check-release-version.sh "${{ steps.v.outputs.version }}"
 
   admin:
     name: Admin bundle
@@ -73,11 +76,16 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - { target: x86_64-unknown-linux-gnu, os: ubuntu-latest, public_only: false }
+          # Ubuntu 22.04 runners: glibc 2.35, so the archives start on
+          # Debian 12, Ubuntu 22.04 and newer.
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04, public_only: false }
           # Free arm64 Linux runners exist only for public repositories.
-          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04-arm, public_only: true }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm, public_only: true }
           - { target: aarch64-apple-darwin, os: macos-14, public_only: false }
-    runs-on: ${{ matrix.os }}
+    # A public-only entry on a private repository lands on an ordinary
+    # runner where every step is skipped, instead of waiting for an arm64
+    # runner that never comes.
+    runs-on: ${{ (matrix.public_only && github.event.repository.private) && 'ubuntu-latest' || matrix.os }}
     permissions:
       contents: read
       id-token: write
@@ -103,7 +111,8 @@ jobs:
         if: ${{ !matrix.public_only || !github.event.repository.private }}
         run: scripts/package-release.sh "${{ needs.meta.outputs.version }}" "${{ matrix.target }}" target/release/vyasa admin-dist dist
       - uses: actions/attest-build-provenance@v2
-        if: ${{ (!matrix.public_only || !github.event.repository.private) && needs.meta.outputs.publish == 'true' }}
+        # Artifact attestations need a public repository on GitHub's free plan.
+        if: ${{ (!matrix.public_only || !github.event.repository.private) && needs.meta.outputs.publish == 'true' && !github.event.repository.private }}
         with:
           subject-path: dist/*.tar.gz
       - uses: actions/upload-artifact@v4
@@ -121,7 +130,7 @@ jobs:
         include:
           - { platform: linux/amd64, os: ubuntu-latest, public_only: false }
           - { platform: linux/arm64, os: ubuntu-24.04-arm, public_only: true }
-    runs-on: ${{ matrix.os }}
+    runs-on: ${{ (matrix.public_only && github.event.repository.private) && 'ubuntu-latest' || matrix.os }}
     permissions:
       contents: read
       packages: write
@@ -211,6 +220,7 @@ jobs:
         env:
           VERSION: ${{ needs.meta.outputs.version }}
       - uses: actions/attest-build-provenance@v2
+        if: ${{ !github.event.repository.private }}
         with:
           subject-name: ${{ env.IMAGE }}
           subject-digest: ${{ steps.inspect.outputs.digest }}

@@ -48,3 +48,12 @@ expected=$'First public release.\n\n- One thing.'
 if CHANGELOG_FILE="$T/CHANGELOG.md" "$ROOT/scripts/release-notes.sh" 9.9.9 >/dev/null 2>&1; then fail "missing version accepted"; fi
 if CHANGELOG_FILE="$T/CHANGELOG.md" "$ROOT/scripts/release-notes.sh" 0.2.0 >/dev/null 2>&1; then fail "empty section accepted"; fi
 echo "release-notes: ok"
+
+# --- check-release-version.sh ---------------------------------------------
+cat > "$T/Cargo.toml" <<'TOML'
+[workspace.package]
+version = "0.1.0-rc.1"
+TOML
+CARGO_TOML="$T/Cargo.toml" "$ROOT/scripts/check-release-version.sh" 0.1.0-rc.1 >/dev/null || fail "matching version refused"
+if CARGO_TOML="$T/Cargo.toml" "$ROOT/scripts/check-release-version.sh" 0.1.0 >/dev/null 2>&1; then fail "mismatched version accepted"; fi
+echo "check-release-version: ok"

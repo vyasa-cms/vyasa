@@ -56,16 +56,16 @@ async-graphql = { version = "7", features = ["dataloader", "chrono", "tracing"] 
 async-graphql-axum = "7"
 tokio-stream = { version = "0.1", features = ["sync"] }
 futures-util = "0.3"
-vyasa-themes = { version = "0.1.0", path = "../themes" }
+vyasa-themes = { path = "../themes" }
 rss = "2"
 atom_syndication = "0.12"
 zip = { version = "2", features = ["deflate"] }
 html5ever = { version = "0.39", optional = true }
 markup5ever_rcdom = { version = "0.39", optional = true }
 ureq = { version = "2", optional = true }
-vyasa-plugins = { version = "0.1.0", path = "../plugins" }
+vyasa-plugins = { path = "../plugins" }
 ed25519-dalek = "2"
-vyasa-ai = { version = "0.1.0", path = "../ai" }
+vyasa-ai = { path = "../ai" }
 schemars = "1.2.2"
 reqwest = "0.13.4"
 url = "2"

@@ -120,7 +120,8 @@ preserve them would silently discard every uploaded file.
 Pin a version with `VYASA_VERSION=0.1.0 docker compose up -d`. Back up the
 database before moving to a newer version: migrations are forward-only.
 
-Every image and release archive carries a build provenance attestation:
+Every image and release archive published from the public repository carries a
+build provenance attestation:
 
 ```bash
 gh attestation verify oci://ghcr.io/vyasa-cms/vyasa:0.1.0 --owner vyasa-cms
