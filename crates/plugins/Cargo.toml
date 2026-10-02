@@ -12,7 +12,7 @@ serde = { version = "1", features = ["derive"] }
 toml = "1"
 zip = { version = "2", features = ["deflate"] }
 ammonia = "4"
-wasmtime = { version = "36", features = ["component-model", "async", "runtime"] }
+wasmtime = { version = "49", features = ["component-model", "async", "runtime"] }
 tracing = "0.1"
 tokio = { version = "1", features = ["sync", "time", "macros", "rt"] }
 sha2 = "0.11"
