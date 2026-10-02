@@ -129,7 +129,7 @@ CDN offers. Nothing in the format assumes a single registry.
 
 ## A reference registry
 
-`vyasa-cms/directory` is a working one, and the shortest path to
+`vyasa-cms/marketplace` is a working one, and the shortest path to
 running your own is to fork it. It carries the listing format, a
 standard-library-only `tools/registry.py` that builds `index.json` from
 one file per listing and cross-checks every package against its listing,

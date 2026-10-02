@@ -97,7 +97,7 @@ migrations are forward-only.
 ## Plugins and themes
 
 Find and publish plugins and themes in the
-[Vyasa directory](https://github.com/vyasa-cms/directory).
+[Vyasa marketplace](https://github.com/vyasa-cms/marketplace).
 
 ## Contributing
 

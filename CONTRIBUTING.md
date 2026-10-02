@@ -10,7 +10,7 @@ themes they wish existed.
 - **Improve the docs** — if something took you a while to work out, write it
   down for the next person.
 - **Build plugins and themes** and list them in the
-  [directory](https://github.com/vyasa-cms/directory).
+  [marketplace](https://github.com/vyasa-cms/marketplace).
 - **Write code** — fixes and features in the core.
 
 ## Before you start
