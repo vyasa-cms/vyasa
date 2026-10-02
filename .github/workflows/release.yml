@@ -94,7 +94,7 @@ jobs:
             type=ref,event=tag
             type=semver,pattern={{major}}.{{minor}}
 
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           push: ${{ startsWith(github.ref, 'refs/tags/') }}
