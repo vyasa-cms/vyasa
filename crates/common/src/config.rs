@@ -126,7 +126,7 @@ impl Default for DemoConfig {
         Self {
             enabled: false,
             email: "demo@vyasa.site".to_string(),
-            password: "demo".to_string(),
+            password: "vyasademo".to_string(),
         }
     }
 }
@@ -622,7 +622,7 @@ mod tests {
         let demo = VyasaConfig::load_from_file(&path).expect("load with demo");
         assert!(demo.demo.enabled);
         assert_eq!(demo.demo.email, "demo@vyasa.site");
-        assert_eq!(demo.demo.password, "demo");
+        assert_eq!(demo.demo.password, "vyasademo");
         std::env::remove_var("VYASA_DEMO__ENABLED");
 
         // 3. Environment overrides the file; `__` reaches nested fields.
