@@ -12,7 +12,9 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 COPY Cargo.toml Cargo.lock ./
 COPY crates ./crates
+# Compiled into the binary: the starter themes and the logo marks.
 COPY themes-starter ./themes-starter
+COPY assets ./assets
 RUN cargo build --release --bin vyasa
 
 FROM node:22-slim AS admin-builder
