@@ -71,7 +71,7 @@ function usePageOptions(): { value: string; label: string }[] {
  * 1280px wide. A media query cannot answer this: the pane is the window
  * minus the admin's navigation minus the two rails beside it.
  */
-function useFieldSize(): [React.RefObject<HTMLDivElement>, { w: number; h: number } | null] {
+function useFieldSize(): [React.RefObject<HTMLDivElement | null>, { w: number; h: number } | null] {
   const ref = React.useRef<HTMLDivElement>(null);
   const [size, setSize] = React.useState<{ w: number; h: number } | null>(null);
   React.useLayoutEffect(() => {

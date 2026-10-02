@@ -69,7 +69,7 @@ export function useCanvasBridge({
   onDelete,
   onInsertKind,
 }: {
-  frameRef: React.RefObject<HTMLIFrameElement>;
+  frameRef: React.RefObject<HTMLIFrameElement | null>;
   /** The srcDoc content; a change means a fresh document to wire. */
   html: string | null | undefined;
   dark: boolean;

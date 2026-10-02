@@ -43,7 +43,7 @@ export function DragHandle({
   container,
 }: {
   editor: Editor;
-  container: React.RefObject<HTMLDivElement>;
+  container: React.RefObject<HTMLDivElement | null>;
 }) {
   const [placed, setPlaced] = React.useState<Placed | null>(null);
   const hover = React.useRef<BlockTarget | null>(null);
