@@ -7,6 +7,8 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+- The website moved to its own repository, [vyasa-cms/website](https://github.com/vyasa-cms/website); it still builds its docs from `docs/` here.
+
 ## [0.1.0-rc.2] - 2026-10-03
 
 Second release candidate.

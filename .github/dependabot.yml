@@ -18,9 +18,3 @@ updates:
     ignore:
       # Pinned to the Rust version in rust-toolchain.toml; bumped by hand.
       - dependency-name: dtolnay/rust-toolchain
-  - package-ecosystem: npm
-    directory: /website
-    schedule: { interval: weekly }
-    open-pull-requests-limit: 5
-    groups:
-      website-minor: { update-types: [minor, patch] }
