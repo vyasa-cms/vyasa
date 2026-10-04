@@ -59,7 +59,7 @@ pub async fn install(
     multipart: Multipart,
 ) -> ApiResult<(StatusCode, Json<PluginResponse>)> {
     let bytes = package_bytes(multipart).await?;
-    let keys = trusted_keys(&state).await;
+    let keys = trusted_keys(&state);
     if keys.is_empty() {
         return Err(ApiError(AppError::validation(
             "no trusted signing keys are configured, so no package can be verified; \
@@ -204,23 +204,11 @@ pub(crate) async fn refresh(
     refused
 }
 
-pub(crate) async fn trusted_keys(state: &AppState) -> Vec<VerifyingKey> {
-    // The environment and the Settings page both count. Uploads used to
-    // read the environment only, so a key pasted under Settings let the
-    // marketplace verify a package that the upload form then refused.
-    let mut raws: Vec<String> = state.config.package_trusted_keys.clone();
-    raws.extend(crate::registry::trusted_keys(state).await);
-    let mut out = Vec::new();
-    for raw in raws {
-        if let Ok(bytes) = hex::decode(raw.trim()) {
-            if let Ok(arr) = <[u8; 32]>::try_from(bytes.as_slice()) {
-                if let Ok(k) = VerifyingKey::from_bytes(&arr) {
-                    out.push(k);
-                }
-            }
-        }
-    }
-    out
+/// Keys a hand-uploaded plugin may be signed by: the operator's
+/// `package_trusted_keys`. Marketplace installs check the listing's
+/// author key instead (`registry::install`).
+pub(crate) fn trusted_keys(state: &AppState) -> Vec<VerifyingKey> {
+    crate::signing::parse_keys(&state.config.package_trusted_keys)
 }
 
 /// Reads the package out of a multipart upload.
@@ -277,7 +265,7 @@ pub async fn inspect(
     multipart: Multipart,
 ) -> ApiResult<Json<Inspection>> {
     let bytes = package_bytes(multipart).await?;
-    let keys = trusted_keys(&state).await;
+    let keys = trusted_keys(&state);
     let seen = vyasa_plugins::package::inspect_rpplugin(&bytes, &keys).map_err(ApiError)?;
     let caps: Vec<String> = seen.capabilities.iter().map(ToString::to_string).collect();
     let existing = state

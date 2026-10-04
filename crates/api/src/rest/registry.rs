@@ -42,6 +42,8 @@ pub struct BrowseQuery {
 pub struct BrowseResponse {
     /// Whether a marketplace is configured at all.
     pub configured: bool,
+    /// Official, an operator's mirror, or off.
+    pub state: crate::official::SourceState,
     /// Why the marketplace could not be read, when it could not.
     pub error: Option<String>,
     /// Matching listings.
@@ -108,19 +110,21 @@ pub async fn browse(
     State(state): State<AppState>,
     Query(query): Query<BrowseQuery>,
 ) -> ApiResult<Json<BrowseResponse>> {
-    let url = crate::registry::url(&state).await;
-    if url.trim().is_empty() {
+    let source = crate::registry::source(&state);
+    if source.state == crate::official::SourceState::Off {
         return Ok(Json(BrowseResponse {
             configured: false,
+            state: source.state,
             error: None,
             entries: Vec::new(),
         }));
     }
-    let doc = match index::fetch(&url).await {
+    let doc = match index::fetch(&source.url).await {
         Ok(doc) => doc,
         Err(err) => {
             return Ok(Json(BrowseResponse {
                 configured: true,
+                state: source.state,
                 error: Some(err.to_string()),
                 entries: Vec::new(),
             }))
@@ -191,6 +195,7 @@ pub async fn browse(
 
     Ok(Json(BrowseResponse {
         configured: true,
+        state: source.state,
         error: None,
         entries,
     }))
@@ -257,8 +262,13 @@ pub async fn install(
         )));
     }
 
-    let url = crate::registry::url(&state).await;
-    let doc = index::fetch(&url).await?;
+    let source = crate::registry::source(&state);
+    if source.state == crate::official::SourceState::Off {
+        return Err(ApiError(AppError::validation(
+            "the marketplace is turned off on this server",
+        )));
+    }
+    let doc = index::fetch(&source.url).await?;
     let listing = doc.find(kind, &body.name).ok_or_else(|| {
         ApiError(AppError::validation(format!(
             "the marketplace lists no {} called \"{}\"",

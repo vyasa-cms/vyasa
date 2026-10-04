@@ -46,6 +46,18 @@ pub fn verify_download(
     }
 }
 
+/// Hex keys to verifying keys, skipping anything that is not one.
+#[must_use]
+pub fn parse_keys(raws: &[String]) -> Vec<VerifyingKey> {
+    raws.iter()
+        .filter_map(|raw| {
+            let bytes = hex::decode(raw.trim()).ok()?;
+            let arr: [u8; 32] = bytes.as_slice().try_into().ok()?;
+            VerifyingKey::from_bytes(&arr).ok()
+        })
+        .collect()
+}
+
 /// [`verify_download`] for a marketplace package, where silence is never
 /// trust *for code*.
 ///
@@ -76,8 +88,7 @@ pub fn verify_registry_download(
     if !is_code_free_theme(bytes) {
         return Err(AppError::validation(
             "this marketplace package carries code (a plugin, or a theme with a script) \
-             and is unsigned; add the registry's key to registry_trusted_keys to install \
-             signed packages",
+             and is unsigned; every such package must be signed by the marketplace key",
         ));
     }
     if !url.starts_with("https://") {

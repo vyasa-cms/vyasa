@@ -12,5 +12,6 @@
 mod db;
 mod server;
 
+pub mod fixtures;
 pub use db::{template_name, validate_admin_url, with_database, TestDb};
 pub use server::{TestServer, TestServerBuilder};

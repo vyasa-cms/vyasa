@@ -75,6 +75,11 @@ pub struct Listing {
     /// Project or documentation URL.
     #[serde(default)]
     pub homepage: Option<String>,
+    /// Hex ed25519 key the plugin's author signs with. The marketplace
+    /// signature over the bytes vouches for it; absent, the package must
+    /// be author-signed by a marketplace key.
+    #[serde(default)]
+    pub author_key: Option<String>,
     /// Versions, newest first after [`Listing::sorted`].
     #[serde(default)]
     pub versions: Vec<Version>,
@@ -204,12 +209,10 @@ const MAX_INDEX_BYTES: usize = 4 * 1024 * 1024;
 pub async fn fetch(url: &str) -> Result<Index, AppError> {
     if url.trim().is_empty() {
         return Err(AppError::validation(
-            "no marketplace is configured (set registry_url)",
+            "the marketplace is turned off on this server",
         ));
     }
-    // The option is validated as https when it is saved; this holds even
-    // for a value written some other way (an import, an older build).
-    if !url.trim_start().starts_with("https://") {
+    if !crate::official::transport_ok(url.trim_start()) {
         return Err(AppError::validation(
             "the marketplace index must be an https URL",
         ));
@@ -275,6 +278,7 @@ mod tests {
             summary: String::new(),
             author: String::new(),
             homepage: None,
+            author_key: None,
             versions,
         }
     }

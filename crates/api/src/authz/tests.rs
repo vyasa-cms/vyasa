@@ -59,8 +59,8 @@ fn dummy_config(dir: &Path) -> VyasaConfig {
         registry_dir: dir.join("registry"),
         debug: true,
         package_trusted_keys: Vec::new(),
-        marketplace: Default::default(),
-        updates: Default::default(),
+        marketplace: vyasa_common::config::SourceConfig::default(),
+        updates: vyasa_common::config::SourceConfig::default(),
         db: DbConfig {
             max_connections: 4,
             acquire_timeout_secs: 5,

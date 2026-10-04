@@ -35,7 +35,7 @@ pub struct Installed {
 /// [`AppError::Validation`] when the digest or signature does not match;
 /// [`AppError::Internal`] on transport failure.
 pub async fn download(state: &AppState, version: &Version) -> Result<Vec<u8>, AppError> {
-    if !version.url.starts_with("https://") {
+    if !crate::official::transport_ok(&version.url) {
         return Err(AppError::validation(
             "marketplace packages must be served over https",
         ));
@@ -63,7 +63,7 @@ pub async fn download(state: &AppState, version: &Version) -> Result<Vec<u8>, Ap
                 AppError::internal_msg(format!("download truncated: {e}"))
             }
         })?;
-    let keys = super::trusted_keys(state).await;
+    let keys = super::source(state).keys;
     crate::signing::verify_registry_download(
         &bytes,
         &version.sha256,
@@ -108,17 +108,17 @@ async fn install_plugin(
     bytes: &[u8],
     accepted: &[String],
 ) -> Result<Installed, AppError> {
-    // The plugin's own author signature is checked here, by the same
-    // parser an uploaded file goes through. Registry trust and author
-    // trust are separate claims and both must hold.
-    let keys = crate::rest::plugins::trusted_keys(state).await;
-    if keys.is_empty() {
-        return Err(AppError::validation(
-            "no trusted plugin signing keys are configured; marketplace plugins are \
-             refused rather than installed unverified",
-        ));
-    }
-    let parsed = vyasa_plugins::package::parse_rpplugin(bytes, &keys)?;
+    // The author signature is checked against the key the listing names;
+    // the marketplace signature already vouched for the bytes, so no key
+    // of the author's needs to be on this site.
+    let author_keys: Vec<String> = listing
+        .author_key
+        .clone()
+        .map_or_else(|| super::source(state).keys, |k| vec![k]);
+    let keys = crate::signing::parse_keys(&author_keys);
+    let parsed = vyasa_plugins::package::parse_rpplugin(bytes, &keys).map_err(|e| {
+        AppError::validation(format!("the plugin's author signature did not verify: {e}"))
+    })?;
     if parsed.manifest.name != listing.name {
         return Err(AppError::validation(format!(
             "the marketplace lists this as \"{}\" but the package is \"{}\"",

@@ -11,12 +11,17 @@ publish = false
 workspace = true
 
 [dependencies]
+ed25519-dalek = "3"
+hex = "0.4"
 rand = "0.8"
 sha2 = "0.11"
 socket2 = "0.6"
 sqlx = { version = "0.9", default-features = false, features = ["runtime-tokio", "tls-rustls", "postgres", "migrate", "macros"] }
 tokio = { version = "1", features = ["rt", "sync", "macros", "time"] }
 url = "2"
+zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [dev-dependencies]
+vyasa-plugins = { path = "../plugins" }
+vyasa-themes = { path = "../themes" }
 tokio = { version = "1", features = ["rt", "rt-multi-thread", "macros"] }
