@@ -74,6 +74,7 @@ mod theme_assets;
 mod theme_assistant;
 mod theme_defaults;
 mod theme_studio;
+mod theme_tool;
 mod update;
 mod webhook_dispatcher;
 
@@ -154,6 +155,11 @@ enum Command {
         #[command(subcommand)]
         command: PluginCommand,
     },
+    /// Theme packaging: zip and sign a theme source tree.
+    Theme {
+        #[command(subcommand)]
+        command: ThemeCommand,
+    },
     /// GraphQL schema tooling.
     Graphql {
         #[command(subcommand)]
@@ -163,6 +169,23 @@ enum Command {
     ///
     /// Needs no database: the document is built from types, not data.
     Openapi,
+}
+
+/// Theme authoring subcommands. None touches the database.
+#[derive(Subcommand)]
+enum ThemeCommand {
+    /// Pack a theme source tree into a `.vytheme`, signed when a key is
+    /// given (needed for a theme that carries a script).
+    Pack {
+        /// Directory holding manifest.toml, tokens.json and layout.json.
+        dir: std::path::PathBuf,
+        /// Output path; defaults to `<name>-<version>.vytheme`.
+        #[arg(long)]
+        out: Option<std::path::PathBuf>,
+        /// Signing key as 64 hex characters; defaults to VYASA_SIGNING_KEY.
+        #[arg(long)]
+        key: Option<String>,
+    },
 }
 
 /// Plugin authoring subcommands. Neither touches the database.
@@ -308,6 +331,18 @@ enum AdminCommand {
     },
 }
 
+/// `vyasa theme …`: no database, no configuration file.
+fn run_theme_command(command: &ThemeCommand) -> ExitCode {
+    let ThemeCommand::Pack { dir, out, key } = command;
+    match theme_tool::pack(dir, out.clone(), key.clone()) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(err) => {
+            eprintln!("error: {err}");
+            ExitCode::FAILURE
+        }
+    }
+}
+
 fn main() -> ExitCode {
     let cli = Cli::parse();
 
@@ -339,6 +374,11 @@ fn main() -> ExitCode {
     // it needs an API key and a URL, never the database or the config.
     if let Command::Mcp = &cli.command {
         return mcp::run();
+    }
+
+    // Theme packaging is an author's tool as well: files on disk only.
+    if let Command::Theme { command } = &cli.command {
+        return run_theme_command(command);
     }
 
     // Plugin packaging is an author's tool: it signs files on disk and
@@ -398,7 +438,7 @@ fn main() -> ExitCode {
             Command::Setup { answers, print } => cmd_setup(&config, answers, print).await,
             Command::Export { format, out } => cmd_export(&config, &format, out).await,
             Command::Dev { command } => cmd_dev(&config, command).await,
-            Command::Mcp => unreachable!("handled before config load"),
+            Command::Mcp | Command::Theme { .. } => unreachable!("handled before config load"),
             Command::Update { command } => cmd_update(&config, command).await,
             Command::Plugin { command } => match command {
                 PluginCommand::Install { package, enable } => {

@@ -262,3 +262,59 @@ async fn updates_off_is_reported_not_an_error() {
         "{doc}"
     );
 }
+
+// ---- hand-uploaded themes --------------------------------------------------
+
+fn upload_theme(base: &str, cookie: &str, bytes: &[u8], signature: Option<&str>) -> ureq::Response {
+    let boundary = "----vyasatheme";
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; \
+             filename=\"t.vytheme\"\r\nContent-Type: application/zip\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(bytes);
+    if let Some(sig) = signature {
+        body.extend_from_slice(
+            format!(
+                "\r\n--{boundary}\r\nContent-Disposition: form-data; name=\"signature\"\r\n\r\n{sig}"
+            )
+            .as_bytes(),
+        );
+    }
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    http(
+        ureq::post(format!("{base}/api/v1/themes").as_str())
+            .set("Cookie", cookie)
+            .set(
+                "Content-Type",
+                &format!("multipart/form-data; boundary={boundary}"),
+            )
+            .send_bytes(&body),
+    )
+}
+
+#[tokio::test]
+async fn scripted_theme_upload_needs_a_trusted_signature() {
+    let db = TestDb::new().await;
+    let (secret, public) = fixtures::keypair();
+    let server = TestServer::builder(common::BIN, &db)
+        .env("VYASA_PACKAGE_TRUSTED_KEYS", public)
+        .start();
+    let cookie = admin_cookie(&db, server.base()).await;
+    let scripted = fixtures::theme_package("scripted", 1, &[("assets/theme.js", b"x()")]);
+
+    let refused = upload_theme(server.base(), &cookie, &scripted, None);
+    assert_eq!(refused.status(), 400);
+    assert!(body(refused).to_string().contains("carries a script"));
+
+    let sig = fixtures::sign_hex(&secret, &scripted);
+    let accepted = upload_theme(server.base(), &cookie, &scripted, Some(&sig));
+    assert_eq!(accepted.status(), 201, "{}", body(accepted));
+
+    let plain = fixtures::data_theme_package("plain", 1);
+    let fine = upload_theme(server.base(), &cookie, &plain, None);
+    assert_eq!(fine.status(), 201, "{}", body(fine));
+}

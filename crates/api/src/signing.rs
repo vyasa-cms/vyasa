@@ -99,6 +99,33 @@ pub fn verify_registry_download(
     Ok(())
 }
 
+/// The rule for a theme an administrator uploads by hand, the same one
+/// the marketplace applies: a theme that is only data needs nothing; a
+/// theme that can run script in visitors' browsers needs a signature over
+/// the exact package bytes from a trusted key.
+///
+/// # Errors
+/// [`AppError::Validation`] when a scripted theme is unsigned or signed by
+/// a key not in `keys`.
+pub fn verify_theme_upload(
+    bytes: &[u8],
+    signature_hex: Option<&str>,
+    keys: &[String],
+) -> Result<(), AppError> {
+    if is_code_free_theme(bytes) {
+        return Ok(());
+    }
+    let refuse = || {
+        AppError::validation(
+            "this theme carries a script (assets/theme.js or a template that writes \
+             one), so it must be signed by the official marketplace key or a key in \
+             package_trusted_keys",
+        )
+    };
+    let signature = signature_hex.ok_or_else(refuse)?;
+    verify_signature(bytes, signature.trim(), keys).map_err(|_| refuse())
+}
+
 /// Whether `bytes` are a valid theme package that cannot run code: no
 /// `assets/theme.js`, and no template that writes a script tag, a
 /// `javascript:` URL or an inline event handler.
@@ -225,6 +252,38 @@ mod tests {
         ];
         entries.extend_from_slice(extra);
         zip(&entries)
+    }
+
+    #[test]
+    fn a_data_only_theme_uploads_unsigned() {
+        assert!(super::verify_theme_upload(&theme(&[]), None, &[]).is_ok());
+    }
+
+    #[test]
+    fn scripted_theme_unsigned_is_refused() {
+        let err = super::verify_theme_upload(&theme(&[("assets/theme.js", "x()")]), None, &[])
+            .unwrap_err();
+        assert!(err.to_string().contains("carries a script"), "{err}");
+    }
+
+    #[test]
+    fn scripted_theme_signed_by_unknown_key_is_refused() {
+        use ed25519_dalek::{Signer as _, SigningKey};
+        let bytes = theme(&[("assets/theme.js", "x()")]);
+        let sig = hex::encode(SigningKey::from_bytes(&[7; 32]).sign(&bytes).to_bytes());
+        let trusted = hex::encode(SigningKey::from_bytes(&[8; 32]).verifying_key().to_bytes());
+        let err = super::verify_theme_upload(&bytes, Some(&sig), &[trusted]).unwrap_err();
+        assert!(err.to_string().contains("carries a script"), "{err}");
+    }
+
+    #[test]
+    fn scripted_theme_signed_by_a_trusted_key_uploads() {
+        use ed25519_dalek::{Signer as _, SigningKey};
+        let bytes = theme(&[("assets/theme.js", "x()")]);
+        let key = SigningKey::from_bytes(&[9; 32]);
+        let sig = hex::encode(key.sign(&bytes).to_bytes());
+        let trusted = hex::encode(key.verifying_key().to_bytes());
+        assert!(super::verify_theme_upload(&bytes, Some(&sig), &[trusted]).is_ok());
     }
 
     #[test]
