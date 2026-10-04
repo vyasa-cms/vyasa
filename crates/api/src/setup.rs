@@ -286,7 +286,8 @@ pub async fn check_site_url(state: &AppState, site_url: &str) -> SiteUrlCheck {
     let Ok(body) = response.json::<serde_json::Value>().await else {
         return SiteUrlCheck::DoesNotReach;
     };
-    if body.get("instance").and_then(serde_json::Value::as_str) == Some(state.instance_nonce.as_str())
+    if body.get("instance").and_then(serde_json::Value::as_str)
+        == Some(state.instance_nonce.as_str())
     {
         SiteUrlCheck::Reaches
     } else {
@@ -307,7 +308,7 @@ async fn is_local(url: &url::Url) -> bool {
                 return true;
             }
             let port = url.port_or_known_default().unwrap_or(80);
-            match tokio::net::lookup_host((name.as_str(), port)).await {
+            match tokio::net::lookup_host(format!("{name}:{port}")).await {
                 Ok(addrs) => {
                     let ips: Vec<_> = addrs.map(|a| a.ip()).collect();
                     !ips.is_empty() && ips.into_iter().all(|ip| !public(ip))
