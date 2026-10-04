@@ -82,9 +82,9 @@ fn check(input: &PatternInput) -> Result<(), AppError> {
 /// # Errors
 /// Database errors.
 pub async fn list(state: &AppState) -> Result<Vec<PatternRow>, AppError> {
-    sqlx::query_as::<_, PatternRow>(&format!(
+    sqlx::query_as::<_, PatternRow>(sqlx::AssertSqlSafe(format!(
         "SELECT {COLS} FROM patterns ORDER BY category, name"
-    ))
+    )))
     .fetch_all(&state.pool)
     .await
     .map_err(|e| AppError::db(format!("patterns: {e}")))
@@ -93,12 +93,14 @@ pub async fn list(state: &AppState) -> Result<Vec<PatternRow>, AppError> {
 /// # Errors
 /// [`AppError::NotFound`] when missing.
 pub async fn get(state: &AppState, id: i64) -> Result<PatternRow, AppError> {
-    sqlx::query_as::<_, PatternRow>(&format!("SELECT {COLS} FROM patterns WHERE id = $1"))
-        .bind(id)
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(|e| AppError::db(format!("pattern: {e}")))?
-        .ok_or_else(|| AppError::not_found("pattern", id))
+    sqlx::query_as::<_, PatternRow>(sqlx::AssertSqlSafe(format!(
+        "SELECT {COLS} FROM patterns WHERE id = $1"
+    )))
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| AppError::db(format!("pattern: {e}")))?
+    .ok_or_else(|| AppError::not_found("pattern", id))
 }
 
 /// # Errors
@@ -123,10 +125,10 @@ pub async fn create(
         }
         slug = format!("{}-{n}", slugify(&input.name));
     }
-    sqlx::query_as::<_, PatternRow>(&format!(
+    sqlx::query_as::<_, PatternRow>(sqlx::AssertSqlSafe(format!(
         "INSERT INTO patterns (id, name, slug, category, synced, blocks, created_by)
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING {COLS}"
-    ))
+    )))
     .bind(vyasa_common::next_id_i64())
     .bind(input.name.trim())
     .bind(&slug)
@@ -147,10 +149,10 @@ pub async fn update(
     input: PatternInput,
 ) -> Result<PatternRow, AppError> {
     check(&input)?;
-    sqlx::query_as::<_, PatternRow>(&format!(
+    sqlx::query_as::<_, PatternRow>(sqlx::AssertSqlSafe(format!(
         "UPDATE patterns SET name = $2, category = $3, synced = $4, blocks = $5, updated_at = now()
          WHERE id = $1 RETURNING {COLS}"
-    ))
+    )))
     .bind(id)
     .bind(input.name.trim())
     .bind(input.category.trim())

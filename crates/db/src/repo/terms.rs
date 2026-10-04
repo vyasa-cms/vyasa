@@ -26,11 +26,11 @@ impl TermsRepo {
     ///
     /// Returns [`AppError::Db`] on database failure (e.g. duplicate slug).
     pub async fn insert(&self, term: &NewTerm<'_>) -> Result<TermRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "INSERT INTO terms (id, taxonomy, name, slug, parent_id, meta)
              VALUES ($1, $2, $3, $4, $5, $6)
              RETURNING {TERM_COLUMNS}"
-        ))
+        )))
         .bind(term.id)
         .bind(term.taxonomy.as_str())
         .bind(term.name)
@@ -48,12 +48,14 @@ impl TermsRepo {
     ///
     /// Returns [`AppError::NotFound`] when missing.
     pub async fn get(&self, id: i64) -> Result<TermRow, AppError> {
-        sqlx::query_as(&format!("SELECT {TERM_COLUMNS} FROM terms WHERE id = $1"))
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|err| AppError::db(format!("term lookup failed: {err}")))?
-            .ok_or_else(|| AppError::not_found("term", id))
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {TERM_COLUMNS} FROM terms WHERE id = $1"
+        )))
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| AppError::db(format!("term lookup failed: {err}")))?
+        .ok_or_else(|| AppError::not_found("term", id))
     }
 
     /// Fetches a term by taxonomy + slug.
@@ -62,9 +64,9 @@ impl TermsRepo {
     ///
     /// Returns [`AppError::NotFound`] when missing.
     pub async fn get_by_slug(&self, taxonomy: Taxonomy, slug: &str) -> Result<TermRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {TERM_COLUMNS} FROM terms WHERE taxonomy = $1 AND slug = $2"
-        ))
+        )))
         .bind(taxonomy.as_str())
         .bind(slug)
         .fetch_optional(&self.pool)
@@ -99,11 +101,11 @@ impl TermsRepo {
             .map_err(|err| AppError::db(format!("term list failed: {err}")))?;
             Ok(rows.into_iter().map(TermWithCount::from).collect())
         } else {
-            let terms = sqlx::query_as(&format!(
+            let terms = sqlx::query_as(sqlx::AssertSqlSafe(format!(
                 "SELECT {TERM_COLUMNS} FROM terms
                  WHERE ($1::text IS NULL OR taxonomy = $1)
                  ORDER BY name ASC"
-            ))
+            )))
             .bind(taxonomy.map(Taxonomy::as_str))
             .fetch_all(&self.pool)
             .await
@@ -124,14 +126,14 @@ impl TermsRepo {
     ///
     /// Returns [`AppError::Db`] on database failure.
     pub async fn update(&self, id: i64, update: &TermUpdate<'_>) -> Result<TermRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "UPDATE terms SET
                 name = COALESCE($2, name),
                 slug = COALESCE($3, slug),
                 meta = COALESCE($4, meta)
              WHERE id = $1
              RETURNING {TERM_COLUMNS}"
-        ))
+        )))
         .bind(id)
         .bind(update.name)
         .bind(update.slug)
@@ -148,9 +150,9 @@ impl TermsRepo {
     ///
     /// Returns [`AppError::Db`] on database failure.
     pub async fn set_parent(&self, id: i64, parent_id: Option<i64>) -> Result<TermRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "UPDATE terms SET parent_id = $2 WHERE id = $1 RETURNING {TERM_COLUMNS}"
-        ))
+        )))
         .bind(id)
         .bind(parent_id)
         .fetch_optional(&self.pool)
@@ -198,14 +200,14 @@ impl TermsRepo {
                 .await
                 .map_err(|err| AppError::db(format!("term parent update failed: {err}")))?;
         }
-        let row: TermRow = sqlx::query_as(&format!(
+        let row: TermRow = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "UPDATE terms SET
                 name = COALESCE($2, name),
                 slug = COALESCE($3, slug),
                 meta = COALESCE($4, meta)
              WHERE id = $1
              RETURNING {TERM_COLUMNS}"
-        ))
+        )))
         .bind(id)
         .bind(update.name)
         .bind(update.slug)

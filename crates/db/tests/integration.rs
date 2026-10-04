@@ -45,12 +45,12 @@ async fn identity_tables_round_trip() {
 
     // --- users ---------------------------------------------------------
     let user_id: i64 = 9001;
-    let inserted = sqlx::query(&format!(
+    let inserted = sqlx::query(sqlx::AssertSqlSafe(format!(
         "INSERT INTO users (id, email, username, display_name, password_hash, role, bio)
          VALUES ($1, $2, $3, $4, $5, $6, $7)
          RETURNING {}",
         vyasa_db::repo::users::USER_COLUMNS
-    ))
+    )))
     .bind(user_id)
     .bind("Ada@Example.COM")
     .bind("AdaL")

@@ -69,19 +69,19 @@ pub async fn claim(pool: &PgPool, batch: i64) -> Result<Vec<Claimed>, AppError> 
         .await
         .map_err(|err| AppError::db(format!("tx begin failed: {err}")))?;
     // Abandoned with no attempts left: dead, not claimable.
-    sqlx::query(&format!(
+    sqlx::query(sqlx::AssertSqlSafe(format!(
         "UPDATE jobs SET status = 'dead',
              last_error = COALESCE(last_error || '; ', '') || 'abandoned by its worker'
          WHERE status = 'running' AND claimed_at < now() - interval '{LEASE}'
            AND attempts >= $1"
-    ))
+    )))
     .bind(MAX_ATTEMPTS)
     .execute(&mut *tx)
     .await
     .map_err(|err| AppError::db(format!("dead-letter abandoned failed: {err}")))?;
     // clock_timestamp(), not now(): the token must differ between two
     // claims of the same job even within one transaction's timestamp.
-    let rows: Vec<(i64, DateTime<Utc>)> = sqlx::query_as(&format!(
+    let rows: Vec<(i64, DateTime<Utc>)> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE jobs SET status = 'running', attempts = attempts + 1,
                          claimed_at = clock_timestamp()
          WHERE id IN (
@@ -92,7 +92,7 @@ pub async fn claim(pool: &PgPool, batch: i64) -> Result<Vec<Claimed>, AppError> 
              LIMIT $1
              FOR UPDATE SKIP LOCKED)
          RETURNING id, claimed_at"
-    ))
+    )))
     .bind(batch)
     .fetch_all(&mut *tx)
     .await

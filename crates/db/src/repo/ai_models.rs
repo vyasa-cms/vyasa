@@ -189,9 +189,9 @@ impl AiModelsRepo {
     /// # Errors
     /// [`AppError::Db`] on failure.
     pub async fn list_models(&self) -> Result<Vec<AiModelRow>, AppError> {
-        sqlx::query_as::<_, AiModelRow>(&format!(
+        sqlx::query_as::<_, AiModelRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {MODEL_COLS} FROM ai_models ORDER BY kind, is_default DESC, sort_order, created_at"
-        ))
+        )))
         .fetch_all(&self.pool)
         .await
         .map_err(|e| db_err(&e))
@@ -242,12 +242,12 @@ impl AiModelsRepo {
     /// # Errors
     /// [`AppError::Db`] on failure.
     pub async fn list_enabled_by_kind(&self, kind: &str) -> Result<Vec<AiModelRow>, AppError> {
-        sqlx::query_as::<_, AiModelRow>(&format!(
+        sqlx::query_as::<_, AiModelRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {MODEL_COLS} FROM ai_models m \
              WHERE kind = $1 AND enabled \
                AND EXISTS (SELECT 1 FROM ai_providers p WHERE p.provider = m.provider AND p.enabled) \
              ORDER BY is_default DESC, sort_order, created_at"
-        ))
+        )))
         .bind(kind)
         .fetch_all(&self.pool)
         .await
@@ -259,9 +259,9 @@ impl AiModelsRepo {
     /// # Errors
     /// [`AppError::NotFound`] when missing; [`AppError::Db`] on failure.
     pub async fn get_model(&self, id: i64) -> Result<AiModelRow, AppError> {
-        sqlx::query_as::<_, AiModelRow>(&format!(
+        sqlx::query_as::<_, AiModelRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {MODEL_COLS} FROM ai_models WHERE id = $1"
-        ))
+        )))
         .bind(id)
         .fetch_optional(&self.pool)
         .await
@@ -275,13 +275,13 @@ impl AiModelsRepo {
     /// [`AppError::Conflict`] when the same model is already registered for
     /// that kind; [`AppError::Db`] on failure.
     pub async fn insert_model(&self, new: &NewAiModel<'_>) -> Result<AiModelRow, AppError> {
-        let result = sqlx::query_as::<_, AiModelRow>(&format!(
+        let result = sqlx::query_as::<_, AiModelRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO ai_models (id, provider, model, kind, label, settings, \
                input_cost_per_mtok, output_cost_per_mtok, is_default) \
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, \
                NOT EXISTS (SELECT 1 FROM ai_models WHERE kind = $4 AND is_default)) \
              RETURNING {MODEL_COLS}"
-        ))
+        )))
         .bind(vyasa_common::next_id_i64())
         .bind(new.provider)
         .bind(new.model)
@@ -313,7 +313,7 @@ impl AiModelsRepo {
         id: i64,
         update: &AiModelUpdate<'_>,
     ) -> Result<AiModelRow, AppError> {
-        sqlx::query_as::<_, AiModelRow>(&format!(
+        sqlx::query_as::<_, AiModelRow>(sqlx::AssertSqlSafe(format!(
             "UPDATE ai_models SET \
                label = COALESCE($2, label), \
                enabled = COALESCE($3, enabled), \
@@ -322,7 +322,7 @@ impl AiModelsRepo {
                output_cost_per_mtok = CASE WHEN $7 THEN $8 ELSE output_cost_per_mtok END, \
                updated_at = now() \
              WHERE id = $1 RETURNING {MODEL_COLS}"
-        ))
+        )))
         .bind(id)
         .bind(update.label)
         .bind(update.enabled)
@@ -357,10 +357,10 @@ impl AiModelsRepo {
             .execute(&mut *tx)
             .await
             .map_err(|e| db_err(&e))?;
-        let row = sqlx::query_as::<_, AiModelRow>(&format!(
+        let row = sqlx::query_as::<_, AiModelRow>(sqlx::AssertSqlSafe(format!(
             "UPDATE ai_models SET is_default = true, enabled = true, updated_at = now() \
              WHERE id = $1 RETURNING {MODEL_COLS}"
-        ))
+        )))
         .bind(id)
         .fetch_one(&mut *tx)
         .await

@@ -140,10 +140,10 @@ impl ThemeDraftsRepo {
             .begin()
             .await
             .map_err(|e| db_err("theme draft tx begin failed", &e))?;
-        let row = sqlx::query_as::<_, ThemeDraftRow>(&format!(
+        let row = sqlx::query_as::<_, ThemeDraftRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO theme_drafts (id, name, base_theme_id, tokens, layout, templates, assets, created_by)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING {DRAFT_COLUMNS}"
-        ))
+        )))
         .bind(vyasa_common::next_id_i64())
         .bind(name)
         .bind(base_theme_id)
@@ -180,9 +180,9 @@ impl ThemeDraftsRepo {
     /// # Errors
     /// [`AppError::NotFound`] when missing, [`AppError::Db`] on failure.
     pub async fn get(&self, id: i64) -> Result<ThemeDraftRow, AppError> {
-        sqlx::query_as::<_, ThemeDraftRow>(&format!(
+        sqlx::query_as::<_, ThemeDraftRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {DRAFT_COLUMNS} FROM theme_drafts WHERE id = $1"
-        ))
+        )))
         .bind(id)
         .fetch_optional(&self.pool)
         .await
@@ -195,9 +195,9 @@ impl ThemeDraftsRepo {
     /// # Errors
     /// [`AppError::Db`] on failure.
     pub async fn list(&self) -> Result<Vec<ThemeDraftRow>, AppError> {
-        sqlx::query_as::<_, ThemeDraftRow>(&format!(
+        sqlx::query_as::<_, ThemeDraftRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {DRAFT_COLUMNS} FROM theme_drafts ORDER BY updated_at DESC"
-        ))
+        )))
         .fetch_all(&self.pool)
         .await
         .map_err(|e| db_err("theme draft list failed", &e))
@@ -254,11 +254,11 @@ impl ThemeDraftsRepo {
         .execute(&mut *tx)
         .await
         .map_err(|e| db_err("theme draft revision insert failed", &e))?;
-        let row = sqlx::query_as::<_, ThemeDraftRow>(&format!(
+        let row = sqlx::query_as::<_, ThemeDraftRow>(sqlx::AssertSqlSafe(format!(
             "UPDATE theme_drafts SET tokens = $2, layout = $3, templates = $4, assets = $5,
                     revision = $6, updated_at = now()
              WHERE id = $1 RETURNING {DRAFT_COLUMNS}"
-        ))
+        )))
         .bind(draft_id)
         .bind(docs.tokens)
         .bind(docs.layout)
@@ -279,10 +279,10 @@ impl ThemeDraftsRepo {
     /// # Errors
     /// [`AppError::NotFound`] when missing, [`AppError::Db`] on failure.
     pub async fn rename(&self, id: i64, name: &str) -> Result<ThemeDraftRow, AppError> {
-        sqlx::query_as::<_, ThemeDraftRow>(&format!(
+        sqlx::query_as::<_, ThemeDraftRow>(sqlx::AssertSqlSafe(format!(
             "UPDATE theme_drafts SET name = $2, updated_at = now() WHERE id = $1
              RETURNING {DRAFT_COLUMNS}"
-        ))
+        )))
         .bind(id)
         .bind(name)
         .fetch_optional(&self.pool)
@@ -336,10 +336,10 @@ impl ThemeDraftsRepo {
     /// # Errors
     /// [`AppError::Db`] on failure.
     pub async fn revisions(&self, draft_id: i64) -> Result<Vec<ThemeDraftRevisionRow>, AppError> {
-        sqlx::query_as::<_, ThemeDraftRevisionRow>(&format!(
+        sqlx::query_as::<_, ThemeDraftRevisionRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {REVISION_COLUMNS} FROM theme_draft_revisions
              WHERE draft_id = $1 ORDER BY seq DESC"
-        ))
+        )))
         .bind(draft_id)
         .fetch_all(&self.pool)
         .await
@@ -355,10 +355,10 @@ impl ThemeDraftsRepo {
         draft_id: i64,
         seq: i32,
     ) -> Result<ThemeDraftRevisionRow, AppError> {
-        sqlx::query_as::<_, ThemeDraftRevisionRow>(&format!(
+        sqlx::query_as::<_, ThemeDraftRevisionRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {REVISION_COLUMNS} FROM theme_draft_revisions
              WHERE draft_id = $1 AND seq = $2"
-        ))
+        )))
         .bind(draft_id)
         .bind(seq)
         .fetch_optional(&self.pool)
@@ -395,11 +395,11 @@ impl ThemeDraftsRepo {
         proposal: Option<&serde_json::Value>,
         proposal_base: Option<i32>,
     ) -> Result<ThemeDraftMessageRow, AppError> {
-        sqlx::query_as::<_, ThemeDraftMessageRow>(&format!(
+        sqlx::query_as::<_, ThemeDraftMessageRow>(sqlx::AssertSqlSafe(format!(
             "INSERT INTO theme_draft_messages
                  (id, draft_id, role, text, revision, proposal, proposal_base)
              VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING {MESSAGE_COLUMNS}"
-        ))
+        )))
         .bind(vyasa_common::next_id_i64())
         .bind(draft_id)
         .bind(role)
@@ -421,10 +421,10 @@ impl ThemeDraftsRepo {
         draft_id: i64,
         message_id: i64,
     ) -> Result<ThemeDraftMessageRow, AppError> {
-        sqlx::query_as::<_, ThemeDraftMessageRow>(&format!(
+        sqlx::query_as::<_, ThemeDraftMessageRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {MESSAGE_COLUMNS} FROM theme_draft_messages
              WHERE id = $1 AND draft_id = $2"
-        ))
+        )))
         .bind(message_id)
         .bind(draft_id)
         .fetch_optional(&self.pool)
@@ -460,10 +460,10 @@ impl ThemeDraftsRepo {
     /// # Errors
     /// [`AppError::Db`] on failure.
     pub async fn messages(&self, draft_id: i64) -> Result<Vec<ThemeDraftMessageRow>, AppError> {
-        sqlx::query_as::<_, ThemeDraftMessageRow>(&format!(
+        sqlx::query_as::<_, ThemeDraftMessageRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {MESSAGE_COLUMNS} FROM theme_draft_messages
              WHERE draft_id = $1 ORDER BY created_at ASC, id ASC"
-        ))
+        )))
         .bind(draft_id)
         .fetch_all(&self.pool)
         .await

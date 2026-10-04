@@ -44,11 +44,11 @@ impl TestDb {
             .clone();
         let name = format!("{TEST_PREFIX}{}_{:016x}", now_secs(), rand::random::<u64>());
         let mut admin = connect_admin(&admin_url).await;
-        sqlx::query(&format!(
+        sqlx::query(sqlx::AssertSqlSafe(format!(
             r#"CREATE DATABASE "{}" TEMPLATE "{}""#,
             guarded(&name),
             guarded(&template)
-        ))
+        )))
         .execute(&mut admin)
         .await
         .unwrap_or_else(|e| panic!("creating test database {name}: {e}"));
@@ -271,7 +271,10 @@ async fn sweep(admin: &mut PgConnection, current_template: &str) {
                 r#"DROP DATABASE IF EXISTS "{}" WITH (FORCE)"#,
                 guarded(&name)
             );
-            if let Err(e) = sqlx::query(&sql).execute(&mut *admin).await {
+            if let Err(e) = sqlx::query(sqlx::AssertSqlSafe(sql))
+                .execute(&mut *admin)
+                .await
+            {
                 eprintln!("vyasa-testkit: sweeping {name}: {e}");
             }
         }
@@ -287,7 +290,10 @@ async fn drop_database(admin_url: &str, name: &str) {
         r#"DROP DATABASE IF EXISTS "{}" WITH (FORCE)"#,
         guarded(name)
     );
-    if let Err(e) = sqlx::query(&sql).execute(&mut admin).await {
+    if let Err(e) = sqlx::query(sqlx::AssertSqlSafe(sql))
+        .execute(&mut admin)
+        .await
+    {
         eprintln!("vyasa-testkit: dropping {name}: {e}; a later run sweeps it");
     }
     let _ = admin.close().await;
@@ -302,7 +308,7 @@ async fn database_exists(admin: &mut PgConnection, name: &str) -> bool {
 }
 
 async fn exec(admin: &mut PgConnection, sql: &str) {
-    sqlx::query(sql)
+    sqlx::query(sqlx::AssertSqlSafe(sql.to_owned()))
         .execute(admin)
         .await
         .unwrap_or_else(|e| panic!("{sql}: {e}"));

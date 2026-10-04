@@ -27,11 +27,11 @@ impl CommentsRepo {
     ///
     /// Returns [`AppError::Db`] on database failure.
     pub async fn insert(&self, comment: &NewComment<'_>) -> Result<CommentRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "INSERT INTO comments (id, post_id, author_user_id, author_name, author_email, content, parent_id, status)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              RETURNING {COMMENT_COLUMNS}"
-        ))
+        )))
         .bind(comment.id)
         .bind(comment.post_id)
         .bind(comment.author_user_id)
@@ -51,9 +51,9 @@ impl CommentsRepo {
     ///
     /// Returns [`AppError::NotFound`] when missing.
     pub async fn get(&self, id: i64) -> Result<CommentRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {COMMENT_COLUMNS} FROM comments WHERE id = $1"
-        ))
+        )))
         .bind(id)
         .fetch_optional(&self.pool)
         .await
@@ -172,9 +172,9 @@ impl CommentsRepo {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<CommentRow>, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {COMMENT_COLUMNS} FROM comments WHERE status = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3"
-        ))
+        )))
         .bind(status.as_str())
         .bind(limit)
         .bind(offset)
@@ -206,9 +206,9 @@ impl CommentsRepo {
         id: i64,
         status: CommentStatus,
     ) -> Result<CommentRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "UPDATE comments SET status = $2 WHERE id = $1 RETURNING {COMMENT_COLUMNS}"
-        ))
+        )))
         .bind(id)
         .bind(status.as_str())
         .fetch_optional(&self.pool)

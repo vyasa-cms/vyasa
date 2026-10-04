@@ -411,7 +411,7 @@ pub async fn backfill(
         .execute(&mut *tx)
         .await
         .map_err(db)?;
-    let ids: Vec<i64> = sqlx::query_scalar(&format!("{source} AND p.id > $1 AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.kind = $2 AND j.status IN ('queued', 'running') AND j.payload->>$3 = p.id::text) ORDER BY p.id LIMIT 101"))
+    let ids: Vec<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!("{source} AND p.id > $1 AND NOT EXISTS (SELECT 1 FROM jobs j WHERE j.kind = $2 AND j.status IN ('queued', 'running') AND j.payload->>$3 = p.id::text) ORDER BY p.id LIMIT 101")))
         .bind(body.after_id.unwrap_or(0)).bind(kind).bind(key).fetch_all(&mut *tx).await.map_err(db)?;
     let more = ids.len() > 100;
     let batch = &ids[..ids.len().min(100)];

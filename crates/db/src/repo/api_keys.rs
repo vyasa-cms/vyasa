@@ -34,23 +34,24 @@ impl ApiKeysRepo {
     /// its owner is suspended or unconfirmed, or [`AppError::Db`] on
     /// database failure.
     pub async fn resolve(&self, key_hash: &str) -> Result<(ApiKeyRow, UserRow), AppError> {
-        let key: ApiKeyRow = sqlx::query_as(&format!(
+        let key: ApiKeyRow = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {KEY_COLUMNS} FROM api_keys
              WHERE key_hash = $1 AND revoked_at IS NULL"
-        ))
+        )))
         .bind(key_hash)
         .fetch_optional(&self.pool)
         .await
         .map_err(|err| AppError::db(format!("api key lookup failed: {err}")))?
         .ok_or_else(|| AppError::not_found("api_key", "hash"))?;
 
-        let user: UserRow =
-            sqlx::query_as(&format!("SELECT {USER_COLUMNS} FROM users WHERE id = $1"))
-                .bind(key.user_id)
-                .fetch_optional(&self.pool)
-                .await
-                .map_err(|err| AppError::db(format!("api key owner lookup failed: {err}")))?
-                .ok_or_else(|| AppError::not_found("user", key.user_id))?;
+        let user: UserRow = sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {USER_COLUMNS} FROM users WHERE id = $1"
+        )))
+        .bind(key.user_id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| AppError::db(format!("api key owner lookup failed: {err}")))?
+        .ok_or_else(|| AppError::not_found("user", key.user_id))?;
         // Nor do the keys of an account whose address was never confirmed:
         // it cannot sign in, so it has no business holding a working key.
         if user.suspended_at.is_some() || user.email_verified_at.is_none() {
@@ -80,11 +81,11 @@ impl ApiKeysRepo {
         key_hash: &str,
         capabilities: &serde_json::Value,
     ) -> Result<ApiKeyRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "INSERT INTO api_keys (id, user_id, name, key_hash, capabilities)
              VALUES ($1, $2, $3, $4, $5)
              RETURNING {KEY_COLUMNS}"
-        ))
+        )))
         .bind(id)
         .bind(user_id)
         .bind(name)
@@ -131,9 +132,9 @@ impl ApiKeysRepo {
     ///
     /// Returns [`AppError::Db`] on database failure.
     pub async fn list_for_user(&self, user_id: i64) -> Result<Vec<ApiKeyRow>, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {KEY_COLUMNS} FROM api_keys WHERE user_id = $1 ORDER BY created_at DESC"
-        ))
+        )))
         .bind(user_id)
         .fetch_all(&self.pool)
         .await

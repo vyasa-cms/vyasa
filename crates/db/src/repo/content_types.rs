@@ -93,9 +93,9 @@ impl ContentTypesRepo {
     ///
     /// Returns [`AppError::Db`] on database failure.
     pub async fn list(&self) -> Result<Vec<ContentTypeRow>, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {TYPE_COLUMNS} FROM content_types ORDER BY slug"
-        ))
+        )))
         .fetch_all(&self.pool)
         .await
         .map_err(|err| AppError::db(format!("content type list failed: {err}")))
@@ -108,9 +108,9 @@ impl ContentTypesRepo {
     /// Returns [`AppError::NotFound`] when there is no such type, or
     /// [`AppError::Db`] on database failure.
     pub async fn get(&self, slug: &str) -> Result<ContentTypeRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {TYPE_COLUMNS} FROM content_types WHERE slug = $1"
-        ))
+        )))
         .bind(slug)
         .fetch_optional(&self.pool)
         .await
@@ -127,11 +127,11 @@ impl ContentTypesRepo {
     /// one through — or [`AppError::Db`] on database failure (including a
     /// value the table's constraints refuse).
     pub async fn insert(&self, row: &NewContentType<'_>) -> Result<ContentTypeRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "INSERT INTO content_types (slug, singular, plural, description, public, has_archive)
              VALUES ($1, $2, $3, $4, $5, $6)
              RETURNING {TYPE_COLUMNS}"
-        ))
+        )))
         .bind(row.slug)
         .bind(row.singular)
         .bind(row.plural)
@@ -160,7 +160,7 @@ impl ContentTypesRepo {
         slug: &str,
         update: &ContentTypeUpdate<'_>,
     ) -> Result<ContentTypeRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "UPDATE content_types SET
                 singular = COALESCE($2, singular),
                 plural = COALESCE($3, plural),
@@ -170,7 +170,7 @@ impl ContentTypesRepo {
                 updated_at = now()
              WHERE slug = $1
              RETURNING {TYPE_COLUMNS}"
-        ))
+        )))
         .bind(slug)
         .bind(update.singular)
         .bind(update.plural)

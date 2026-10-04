@@ -27,12 +27,12 @@ impl RevisionsRepo {
     ///
     /// Returns [`AppError::Db`] on database failure.
     pub async fn insert(&self, rev: &NewRevision<'_>) -> Result<PostRevisionRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "INSERT INTO post_revisions
                  (id, post_id, title, content, author_id, is_autosave, layout, fields)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
              RETURNING {REVISION_COLUMNS}"
-        ))
+        )))
         .bind(rev.id)
         .bind(rev.post_id)
         .bind(rev.title)
@@ -52,9 +52,9 @@ impl RevisionsRepo {
     ///
     /// Returns [`AppError::NotFound`] when missing.
     pub async fn get(&self, id: i64) -> Result<PostRevisionRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {REVISION_COLUMNS} FROM post_revisions WHERE id = $1"
-        ))
+        )))
         .bind(id)
         .fetch_optional(&self.pool)
         .await
@@ -73,19 +73,19 @@ impl RevisionsRepo {
         include_autosave: bool,
     ) -> Result<Vec<PostRevisionRow>, AppError> {
         let rows = if include_autosave {
-            sqlx::query_as(&format!(
+            sqlx::query_as(sqlx::AssertSqlSafe(format!(
                 "SELECT {REVISION_COLUMNS} FROM post_revisions
                  WHERE post_id = $1 ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(post_id)
             .fetch_all(&self.pool)
             .await
         } else {
-            sqlx::query_as(&format!(
+            sqlx::query_as(sqlx::AssertSqlSafe(format!(
                 "SELECT {REVISION_COLUMNS} FROM post_revisions
                  WHERE post_id = $1 AND is_autosave = false
                  ORDER BY created_at DESC, id DESC"
-            ))
+            )))
             .bind(post_id)
             .fetch_all(&self.pool)
             .await
@@ -99,10 +99,10 @@ impl RevisionsRepo {
     ///
     /// Returns [`AppError::Db`] on database failure.
     pub async fn latest_for_post(&self, post_id: i64) -> Result<Option<PostRevisionRow>, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {REVISION_COLUMNS} FROM post_revisions
              WHERE post_id = $1 ORDER BY created_at DESC, id DESC LIMIT 1"
-        ))
+        )))
         .bind(post_id)
         .fetch_optional(&self.pool)
         .await

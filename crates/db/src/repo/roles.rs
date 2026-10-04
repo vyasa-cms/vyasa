@@ -60,11 +60,11 @@ impl RolesRepo {
             role: RoleRow,
             users: i64,
         }
-        let rows: Vec<Counted> = sqlx::query_as(&format!(
+        let rows: Vec<Counted> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {ROLE_COLUMNS},
                     (SELECT COUNT(*) FROM users u WHERE u.custom_role = roles.slug) AS users
              FROM roles ORDER BY slug"
-        ))
+        )))
         .fetch_all(&self.pool)
         .await
         .map_err(|err| AppError::db(format!("role list failed: {err}")))?;
@@ -78,12 +78,14 @@ impl RolesRepo {
     /// Returns [`AppError::NotFound`] when there is no such role, or
     /// [`AppError::Db`] on database failure.
     pub async fn get(&self, slug: &str) -> Result<RoleRow, AppError> {
-        sqlx::query_as(&format!("SELECT {ROLE_COLUMNS} FROM roles WHERE slug = $1"))
-            .bind(slug)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|err| AppError::db(format!("role lookup failed: {err}")))?
-            .ok_or_else(|| AppError::not_found("role", slug))
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {ROLE_COLUMNS} FROM roles WHERE slug = $1"
+        )))
+        .bind(slug)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| AppError::db(format!("role lookup failed: {err}")))?
+        .ok_or_else(|| AppError::not_found("role", slug))
     }
 
     /// Inserts a role.
@@ -94,11 +96,11 @@ impl RolesRepo {
     /// [`AppError::Db`] on database failure (including a slug or name the
     /// table's constraints refuse).
     pub async fn insert(&self, role: &NewRole<'_>) -> Result<RoleRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "INSERT INTO roles (slug, name, description, capabilities)
              VALUES ($1, $2, $3, $4)
              RETURNING {ROLE_COLUMNS}"
-        ))
+        )))
         .bind(role.slug)
         .bind(role.name)
         .bind(role.description)
@@ -127,7 +129,7 @@ impl RolesRepo {
         // do when one account's role changes (`UsersRepo::set_role`). The
         // same set again, in any order, changes nothing and keeps them;
         // confirmation tokens grant nothing and always stay.
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "WITH dropped AS (
                 DELETE FROM reset_tokens
                 WHERE purpose = 'reset'
@@ -146,7 +148,7 @@ impl RolesRepo {
                 updated_at = now()
              WHERE slug = $1
              RETURNING {ROLE_COLUMNS}"
-        ))
+        )))
         .bind(slug)
         .bind(update.slug)
         .bind(update.name)

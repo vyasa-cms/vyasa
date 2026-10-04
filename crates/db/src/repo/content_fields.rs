@@ -90,10 +90,10 @@ impl ContentFieldsRepo {
     ///
     /// Returns [`AppError::Db`] on database failure.
     pub async fn list(&self, type_slug: &str) -> Result<Vec<ContentFieldRow>, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {FIELD_COLUMNS} FROM content_fields
              WHERE type_slug = $1 ORDER BY position, key"
-        ))
+        )))
         .bind(type_slug)
         .fetch_all(&self.pool)
         .await
@@ -106,9 +106,9 @@ impl ContentFieldsRepo {
     ///
     /// Returns [`AppError::Db`] on database failure.
     pub async fn list_all(&self) -> Result<Vec<ContentFieldRow>, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {FIELD_COLUMNS} FROM content_fields ORDER BY type_slug, position, key"
-        ))
+        )))
         .fetch_all(&self.pool)
         .await
         .map_err(|err| AppError::db(format!("content field list failed: {err}")))
@@ -121,9 +121,9 @@ impl ContentFieldsRepo {
     /// Returns [`AppError::NotFound`] when missing, [`AppError::Db`] on
     /// database failure.
     pub async fn get(&self, type_slug: &str, key: &str) -> Result<ContentFieldRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {FIELD_COLUMNS} FROM content_fields WHERE type_slug = $1 AND key = $2"
-        ))
+        )))
         .bind(type_slug)
         .bind(key)
         .fetch_optional(&self.pool)
@@ -153,12 +153,12 @@ impl ContentFieldsRepo {
     /// [`AppError::Db`] on database failure (including a value the
     /// table's constraints refuse).
     pub async fn insert(&self, field: &NewContentField<'_>) -> Result<ContentFieldRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "INSERT INTO content_fields (type_slug, key, label, help, kind, required, options, position)
              VALUES ($1, $2, $3, $4, $5, $6, $7,
                      (SELECT COALESCE(MAX(position) + 1, 0) FROM content_fields WHERE type_slug = $1))
              RETURNING {FIELD_COLUMNS}"
-        ))
+        )))
         .bind(field.type_slug)
         .bind(field.key)
         .bind(field.label)
@@ -189,7 +189,7 @@ impl ContentFieldsRepo {
         key: &str,
         update: &ContentFieldUpdate<'_>,
     ) -> Result<ContentFieldRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "UPDATE content_fields SET
                 label = COALESCE($3, label),
                 help = COALESCE($4, help),
@@ -199,7 +199,7 @@ impl ContentFieldsRepo {
                 updated_at = now()
              WHERE type_slug = $1 AND key = $2
              RETURNING {FIELD_COLUMNS}"
-        ))
+        )))
         .bind(type_slug)
         .bind(key)
         .bind(update.label)
@@ -266,12 +266,12 @@ impl ContentFieldsRepo {
         type_slug: &str,
         key: &str,
     ) -> Result<i64, AppError> {
-        sqlx::query_scalar(&format!(
+        sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
             "SELECT COUNT(*) FROM posts
              WHERE type = $1 AND jsonb_typeof(meta->'fields') = 'object'
                AND (meta->'fields'->$2) IS NOT NULL
                AND (meta->'fields'->$2) NOT IN {EMPTY_VALUES}"
-        ))
+        )))
         .bind(type_slug)
         .bind(key)
         .fetch_one(&self.pool)
@@ -291,13 +291,13 @@ impl ContentFieldsRepo {
     ) -> Result<Vec<(String, i64)>, AppError> {
         // `jsonb_each` refuses a non-object, and a WHERE clause is no
         // promise about evaluation order, so the guard sits inside it.
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT f.key, COUNT(*) FROM posts p,
                     jsonb_each(CASE WHEN jsonb_typeof(p.meta->'fields') = 'object'
                                     THEN p.meta->'fields' ELSE '{{}}'::jsonb END) AS f(key, value)
              WHERE p.type = $1 AND f.value NOT IN {EMPTY_VALUES}
              GROUP BY f.key ORDER BY f.key"
-        ))
+        )))
         .bind(type_slug)
         .fetch_all(&self.pool)
         .await
