@@ -46,7 +46,7 @@ function mount() {
 beforeEach(() => {
   vi.clearAllMocks();
   mocked.setupChecks.mockResolvedValue([{ name: "smtp", status: "warn", detail: "no SMTP relay" }]);
-  mocked.setupVerifyUrl.mockResolvedValue({ reachable: true });
+  mocked.setupVerifyUrl.mockResolvedValue({ reachable: true, local: false });
   mocked.mailSettings.mockResolvedValue({ host: "", port: 587, username: "", from: "", has_password: false, source: "none", encrypted: true });
   // A resolved default for every test, not just the membership ones: an
   // unresolved `vi.fn()` returns `undefined`, which React Query treats as
@@ -109,7 +109,7 @@ describe("settings page", () => {
   it("checks a new site address against the server and offers Save anyway when it fails", { timeout: 15_000 }, async () => {
     const user = userEvent.setup();
     mocked.getOptions.mockResolvedValue({ site_url: "https://old.example.com" } as never);
-    mocked.setupVerifyUrl.mockResolvedValue({ reachable: false });
+    mocked.setupVerifyUrl.mockResolvedValue({ reachable: false, local: false });
     mocked.putOptions.mockResolvedValue(undefined);
     mount();
     const url = await screen.findByLabelText("Site address");
@@ -122,6 +122,21 @@ describe("settings page", () => {
     const again = await screen.findByRole("button", { name: "Save anyway" });
     await user.click(again);
     await waitFor(() => expect(mocked.putOptions).toHaveBeenCalledWith({ site_url: "https://new.example.com" }));
+  });
+
+  it("saves a local site address without a warning, since the server does not test it", { timeout: 15_000 }, async () => {
+    const user = userEvent.setup();
+    mocked.getOptions.mockResolvedValue({ site_url: "https://old.example.com" } as never);
+    mocked.setupVerifyUrl.mockResolvedValue({ reachable: false, local: true });
+    mocked.putOptions.mockResolvedValue(undefined);
+    mount();
+    const url = await screen.findByLabelText("Site address");
+    await user.clear(url);
+    await user.click(url);
+    await user.paste("http://localhost:3000");
+    await user.click(screen.getByRole("button", { name: "Save changes" }));
+    await waitFor(() => expect(mocked.putOptions).toHaveBeenCalledWith({ site_url: "http://localhost:3000" }));
+    expect(screen.queryByText(/does not reach this server/)).not.toBeInTheDocument();
   });
 
   it("gates the newsletter switch on an SMTP relay", async () => {
