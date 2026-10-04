@@ -1,0 +1,8 @@
+{
+  "name": "vyasa-updates",
+  "compatibility_date": "2026-10-01",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [{ "pattern": "updates.vyasa.site", "custom_domain": true }],
+  "assets": { "directory": "./dist", "not_found_handling": "none" }
+}
