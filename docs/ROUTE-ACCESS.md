@@ -167,6 +167,7 @@ plugin's own route, public, decided by the plugin.
 | DELETE | /redirects/{*from} | manage_options |
 | GET | /registry | manage_plugins or manage_themes |
 | POST | /registry/install | manage_plugins or manage_themes |
+| GET | /registry/sources | manage_options |
 | GET | /roles | manage_users |
 | POST | /roles | manage_users |
 | DELETE | /roles/{slug} | manage_users |

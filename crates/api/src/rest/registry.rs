@@ -322,3 +322,38 @@ pub async fn install(
     );
     Ok((axum::http::StatusCode::CREATED, Json(installed)))
 }
+
+/// One source as the admin sees it.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct SourceInfo {
+    pub state: crate::official::SourceState,
+    /// The address in use; empty when off.
+    pub url: String,
+}
+
+/// Where packages and releases come from.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct SourcesResponse {
+    pub marketplace: SourceInfo,
+    pub updates: SourceInfo,
+}
+
+/// `GET /api/v1/registry/sources` — the marketplace and update channel
+/// this server uses: the official ones, an operator's mirror, or off.
+#[utoipa::path(get, path = "/api/v1/registry/sources", tag = "registry",
+    security(("session_cookie" = [])),
+    responses(
+        (status = 200, description = "Sources", body = SourcesResponse),
+        (status = 403, description = "Forbidden", body = ApiErrorBody),
+    )
+)]
+pub async fn sources(State(state): State<AppState>) -> ApiResult<Json<SourcesResponse>> {
+    let info = |s: crate::official::Source| SourceInfo {
+        state: s.state,
+        url: s.url,
+    };
+    Ok(Json(SourcesResponse {
+        marketplace: info(crate::official::marketplace(&state.config)),
+        updates: info(crate::official::updates(&state.config)),
+    }))
+}

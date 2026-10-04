@@ -596,6 +596,9 @@ fn site_routes() -> Guarded {
         // An install needs the capability for the listing's kind, which is
         // in the body and checked by the handler; a caller with neither
         // cannot install anything.
+        .at("/registry/sources", |r| {
+            r.get(Cap(ManageOptions), registry::sources)
+        })
         .at("/registry/install", |r| {
             r.post(AnyOf(REGISTRY_BROWSERS), registry::install)
         })

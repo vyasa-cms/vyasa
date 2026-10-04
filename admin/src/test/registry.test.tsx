@@ -50,6 +50,7 @@ describe("registry browser", () => {
   it("shows what a plugin will be able to do before installing it", async () => {
     mocked.browseRegistry.mockResolvedValue({
       configured: true,
+      state: "official",
       error: null,
       entries: [entry()],
     });
@@ -63,6 +64,7 @@ describe("registry browser", () => {
   it("sends the capabilities it displayed back as the accepted set", async () => {
     mocked.browseRegistry.mockResolvedValue({
       configured: true,
+      state: "official",
       error: null,
       entries: [entry()],
     });
@@ -90,6 +92,7 @@ describe("registry browser", () => {
   it("marks an update's new capabilities and offers Update, not Install", async () => {
     mocked.browseRegistry.mockResolvedValue({
       configured: true,
+      state: "official",
       error: null,
       entries: [
         entry({
@@ -104,9 +107,9 @@ describe("registry browser", () => {
     expect(screen.getByText("net:fetch:api.stripe.com (new)")).toBeInTheDocument();
   });
 
-  it("says so plainly when no marketplace is configured", async () => {
-    mocked.browseRegistry.mockResolvedValue({ configured: false, error: null, entries: [] });
+  it("says so plainly when the operator turned the marketplace off", async () => {
+    mocked.browseRegistry.mockResolvedValue({ configured: false, state: "off", error: null, entries: [] });
     mount();
-    expect(await screen.findByText(/No marketplace configured/)).toBeInTheDocument();
+    expect(await screen.findByText(/turned off on this server/)).toBeInTheDocument();
   });
 });

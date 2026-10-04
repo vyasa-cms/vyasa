@@ -318,3 +318,34 @@ async fn scripted_theme_upload_needs_a_trusted_signature() {
     let fine = upload_theme(server.base(), &cookie, &plain, None);
     assert_eq!(fine.status(), 201, "{}", body(fine));
 }
+
+// ---- what the admin is told ------------------------------------------------
+
+#[tokio::test]
+async fn the_sources_endpoint_reports_official_and_needs_manage_options() {
+    let db = TestDb::new().await;
+    let server = TestServer::start(common::BIN, &db);
+    let cookie = admin_cookie(&db, server.base()).await;
+    let resp = http(
+        ureq::get(format!("{}/api/v1/registry/sources", server.base()).as_str())
+            .set("Cookie", &cookie)
+            .call(),
+    );
+    assert_eq!(resp.status(), 200);
+    let doc = body(resp);
+    assert_eq!(doc["marketplace"]["state"], "official", "{doc}");
+    assert_eq!(doc["updates"]["state"], "official", "{doc}");
+    assert_eq!(
+        doc["marketplace"]["url"], "https://marketplace.vyasa.site/index.json",
+        "{doc}"
+    );
+
+    let author = common::seed_user(db.pool(), Role::Author).await;
+    let author_cookie = common::login_cookie(server.base(), &author.email, &author.password);
+    let resp = http(
+        ureq::get(format!("{}/api/v1/registry/sources", server.base()).as_str())
+            .set("Cookie", &author_cookie)
+            .call(),
+    );
+    assert_eq!(resp.status(), 403);
+}

@@ -203,7 +203,7 @@ export const CAPABILITIES: Record<string, CapabilityInfo> = {
       "the audit log",
       "seeing the mail relay's settings (not its password)",
       "AI models, providers, their keys, and AI usage",
-      "checking for updates",
+      "checking for updates, and seeing which marketplace and update channel the server uses",
       "rebuilding the search index",
       "redirects",
       "site health checks and cleanup",
@@ -218,7 +218,7 @@ export const CAPABILITIES: Record<string, CapabilityInfo> = {
       "applying updates",
       "importing a site archive",
     ],
-    areas: ["ai", "audience", "audit-log", "content-types", "export", "import", "mail", "options", "privacy", "redirects", "search", "site-health", "updates"],
+    areas: ["ai", "audience", "audit-log", "content-types", "export", "import", "mail", "options", "privacy", "redirects", "registry", "search", "site-health", "updates"],
   },
   view_admin: {
     label: "Use the admin screens",

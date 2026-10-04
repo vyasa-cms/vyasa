@@ -2,7 +2,7 @@ import { useUnsavedChanges } from "@/lib/use-unsaved-changes";
 import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, type RoleResponse } from "@/api/client";
+import { api, type RoleResponse, type SourceInfo } from "@/api/client";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { MediaPicker } from "@/components/editor/MediaPicker";
@@ -396,14 +396,8 @@ const SECTIONS: Section[] = [
   {
     id: "updates",
     title: "Marketplace and updates",
-    description: "Where plugins, themes and core releases come from, and whose signatures to trust. Packages are verified by checksum and signature, so the host only has to be reachable.",
-    step: "updates",
-    keys: [
-      { key: "registry_url", label: "Marketplace index URL", hint: "An https URL to a registry index.json. Leave empty to turn the marketplace off.", placeholder: "https://registry.example.com/index.json", kind: "url" },
-      { key: "registry_trusted_keys", label: "Marketplace signing keys", hint: "Packages signed by anyone else are refused.", kind: "keys" },
-      { key: "update_channel_url", label: "Core update channel URL", hint: "Where Vyasa checks for its own new releases.", placeholder: "https://releases.example.com/vyasa.json", kind: "url" },
-      { key: "update_trusted_keys", label: "Release signing keys", hint: "Releases signed by anyone else are refused.", kind: "keys" },
-    ],
+    description: "Where plugins, themes and core releases come from. Both are built in and verified by keys compiled into this server; the operator can mirror or switch them off in vyasa.toml.",
+    keys: [],
   },
   {
     id: "advanced",
@@ -416,6 +410,31 @@ const SECTIONS: Section[] = [
 ];
 
 const ALL_KEYS = SECTIONS.flatMap((s) => s.keys);
+
+function sourceLine(what: "Official marketplace" | "Marketplace" | "Updates", info: SourceInfo | undefined): string {
+  if (!info) return `${what} — checking…`;
+  const noun = what === "Updates" ? "Updates" : info.state === "official" ? "Official marketplace" : "Marketplace";
+  switch (info.state) {
+    case "official":
+      return noun === "Updates" ? "Updates — stable channel" : "Official marketplace — connected";
+    case "mirror":
+      return `${noun} — mirrored by your operator (${info.url})`;
+    case "off":
+      return `${noun} — turned off by your operator`;
+  }
+}
+
+/** Read-only: these come from the binary and the server's own config. */
+function SourcesPanel() {
+  const sources = useQuery({ queryKey: ["registry-sources"], queryFn: () => api.registrySources() });
+  return (
+    <div className="2xl:col-span-2 space-y-1 text-sm" data-testid="sources-panel">
+      <p>{sourceLine("Official marketplace", sources.data?.marketplace)}</p>
+      <p>{sourceLine("Updates", sources.data?.updates)}</p>
+      <p className="text-xs text-muted-foreground">Set in the server's vyasa.toml ([marketplace] / [updates]); see the deployment guide.</p>
+    </div>
+  );
+}
 const LABEL_OF = Object.fromEntries(ALL_KEYS.map((k) => [k.key, k.label]));
 
 /**
@@ -528,16 +547,8 @@ export function SettingsPage() {
     errors["ai_month_cap_usd"] = v !== "" && !(Number(v) >= 0) ? "A non-negative amount." : null;
   }
   {
-    const v = (values["registry_url"] ?? "").trim();
-    errors["registry_url"] = v !== "" && !v.startsWith("https://") ? "Must be an https URL." : null;
-  }
-  {
     const v = (values["site_url"] ?? "").trim();
     errors["site_url"] = v !== "" && !/^https?:\/\/[^\s/]+/.test(v) ? "Must start with http:// or https:// and name a host." : urlCheck === "unreachable" ? "This address does not reach this server. Save anyway if DNS is still settling." : null;
-  }
-  for (const key of ["registry_trusted_keys", "update_trusted_keys"]) {
-    const bad = (values[key] ?? "").split(/\r?\n/).map((s) => s.trim()).filter(Boolean).find((k) => !/^[0-9a-fA-F]{64}$/.test(k));
-    errors[key] = bad ? `"${bad.slice(0, 12)}…" is not a 64-hex ed25519 key.` : null;
   }
   const blocking = Object.entries(errors).some(([k, e]) => e !== null && k !== "site_url") || (errors["site_url"] !== null && urlCheck !== "unreachable");
 
@@ -687,6 +698,7 @@ export function SettingsPage() {
                         </Field>
                       </div>
                     ))}
+                    {section.id === "updates" ? <SourcesPanel /> : null}
                     {section.id === "advanced" ? (
                       <div className="2xl:col-span-2 border-t pt-4">
                         <ExportImportPanel />
