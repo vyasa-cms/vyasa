@@ -1,0 +1,5 @@
+name = "footer-note"
+version = "0.1.0"
+min_host_api = 0
+description = "Adds a short note under every post: the smallest useful plugin"
+capabilities = ["log:write", "db:read:posts"]
