@@ -395,8 +395,6 @@ fn setup_routes() -> Guarded {
         .at("/setup/mail", |r| r.post(Public, setup::mail))
         .at("/setup/mail/test", |r| r.post(Public, setup::mail_test))
         .at("/setup/assistants", |r| r.post(Public, setup::assistants))
-        .at("/setup/updates", |r| r.post(Public, setup::updates))
-        .at("/setup/keypair", |r| r.post(Public, setup::keypair))
         .at("/setup/finish", |r| r.post(Public, setup::finish))
 }
 

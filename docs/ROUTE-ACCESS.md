@@ -180,12 +180,10 @@ plugin's own route, public, decided by the plugin.
 | POST | /setup/content | public |
 | POST | /setup/delivery | public |
 | POST | /setup/finish | public |
-| POST | /setup/keypair | public |
 | POST | /setup/mail | public |
 | POST | /setup/mail/test | public |
 | POST | /setup/site | public |
 | GET | /setup/status | public |
-| POST | /setup/updates | public |
 | GET | /setup/verify-url | public |
 | GET | /site-health | manage_options |
 | POST | /site-health/cleanup | manage_options |

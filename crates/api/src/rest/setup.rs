@@ -14,8 +14,7 @@ use crate::error::{ApiError, ApiResult};
 use crate::middleware::Principal;
 use crate::policy;
 use crate::setup::{
-    self, AccountInput, AssistantsInput, ContentInput, DeliveryInput, Keypair, MailInput,
-    SiteInput, UpdatesInput,
+    self, AccountInput, AssistantsInput, ContentInput, DeliveryInput, MailInput, SiteInput,
 };
 use crate::state::AppState;
 
@@ -395,33 +394,6 @@ pub async fn assistants(
     }
     setup::assistants(&state, input).await?;
     Ok(StatusCode::NO_CONTENT)
-}
-
-/// `POST /api/v1/setup/updates`
-#[utoipa::path(post, path = "/api/v1/setup/updates", tag = "setup", request_body = UpdatesInput,
-    responses((status = 204, description = "Saved")))]
-pub async fn updates(
-    State(state): State<AppState>,
-    who: SetupPrincipal,
-    Json(input): Json<UpdatesInput>,
-) -> ApiResult<StatusCode> {
-    if input.update_channel_url.is_some()
-        || input.registry_url.is_some()
-        || input.trusted_keys.is_some()
-    {
-        who.full_administrator(
-            "change the update channel, the marketplace address or their trusted keys",
-        )?;
-    }
-    setup::updates(&state, input).await?;
-    Ok(StatusCode::NO_CONTENT)
-}
-
-/// `POST /api/v1/setup/keypair` — a plugin signing key, shown once.
-#[utoipa::path(post, path = "/api/v1/setup/keypair", tag = "setup",
-    responses((status = 200, description = "A fresh keypair", body = Keypair)))]
-pub async fn keypair(_who: SetupPrincipal) -> Json<Keypair> {
-    Json(setup::keypair())
 }
 
 /// What finishing did.

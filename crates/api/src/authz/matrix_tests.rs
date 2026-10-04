@@ -90,8 +90,6 @@ const PUBLIC_GATES: &[(&str, &str, Gate, &str)] = &[
     ("POST", "/setup/mail", Gate::Setup, SETUP),
     ("POST", "/setup/mail/test", Gate::Setup, SETUP),
     ("POST", "/setup/assistants", Gate::Setup, SETUP),
-    ("POST", "/setup/updates", Gate::Setup, SETUP),
-    ("POST", "/setup/keypair", Gate::Setup, SETUP),
     ("POST", "/setup/finish", Gate::Setup, SETUP),
     (
         "GET",

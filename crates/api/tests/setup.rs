@@ -178,10 +178,6 @@ async fn the_wizard_runs_once_and_then_closes() {
             "assistants",
             json!({"monthly_cap_usd": 5, "alt_text": true}),
         ),
-        (
-            "updates",
-            json!({"registry_url": "https://marketplace.example.com/index.json"}),
-        ),
     ] {
         let r = http(
             ureq::post(format!("{base}/api/v1/setup/{step}").as_str())
@@ -254,4 +250,39 @@ async fn the_wizard_runs_once_and_then_closes() {
     ));
     assert_eq!(status["needs_setup"], false);
     assert_eq!(status["step"], "done");
+}
+
+#[tokio::test]
+async fn the_updates_step_is_gone() {
+    let db = TestDb::new().await;
+    let server = TestServer::builder(common::BIN, &db)
+        .env("VYASA_SETUP_TOKEN", TOKEN)
+        .start();
+    let base = server.base();
+    let r = http(
+        ureq::post(format!("{base}/api/v1/setup/updates").as_str())
+            .send_json(json!({"registry_url": "https://x.invalid/i"})),
+    );
+    assert_ne!(r.status(), 204, "the wizard no longer has an updates step");
+    let k = http(ureq::post(format!("{base}/api/v1/setup/keypair").as_str()).send_json(json!({})));
+    assert_ne!(k.status(), 200);
+}
+
+#[tokio::test]
+async fn an_old_updates_progress_reads_as_finish() {
+    let db = TestDb::new().await;
+    sqlx::query(
+        "INSERT INTO options (key, value) VALUES ('setup_progress', '\"updates\"') \
+         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value",
+    )
+    .execute(db.pool())
+    .await
+    .expect("seed progress");
+    let server = TestServer::builder(common::BIN, &db)
+        .env("VYASA_SETUP_TOKEN", TOKEN)
+        .start();
+    let status = json_body(http(
+        ureq::get(format!("{}/api/v1/setup/status", server.base()).as_str()).call(),
+    ));
+    assert_eq!(status["step"], "finish", "{status}");
 }

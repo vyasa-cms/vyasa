@@ -132,10 +132,6 @@ fn sensitive_options() -> Vec<(&'static str, Value)> {
         ("smtp_username", json!("attacker")),
         ("smtp_password", json!("hunter22")),
         ("smtp_from", json!("a@attacker.invalid")),
-        ("update_channel_url", json!("https://attacker.invalid/ch")),
-        ("update_trusted_keys", json!([])),
-        ("registry_url", json!("https://attacker.invalid/index")),
-        ("registry_trusted_keys", json!([])),
         // Phase 98: who may make their own account, and what they become.
         ("registration_enabled", json!(true)),
         ("registration_default_role", json!("subscriber")),
@@ -184,12 +180,6 @@ fn guarded_operations() -> Vec<(&'static str, &'static str, String, Value)> {
             "POST",
             "/setup/mail/test".to_owned(),
             json!({ "to": "a@attacker.invalid" }),
-        ),
-        (
-            "update channel",
-            "POST",
-            "/setup/updates".to_owned(),
-            json!({ "update_channel_url": "https://attacker.invalid/ch" }),
         ),
         // A provider's address with the key left out keeps the stored key
         // and sends it to the new host.
@@ -299,11 +289,32 @@ async fn an_administrator_is_a_full_administrator() {
         Some(json!("https://attacker.invalid"))
     );
     assert_eq!(option(pool, "smtp_host").await, Some(json!("127.0.0.1")));
-    assert_eq!(
-        option(pool, "update_channel_url").await,
-        Some(json!("https://attacker.invalid/ch"))
-    );
     assert_eq!(option(pool, "site_title").await, Some(json!("Taken")));
+}
+
+#[tokio::test]
+async fn retired_options_are_refused() {
+    let db = TestDb::new().await;
+    let admin = common::seed_user(db.pool(), Role::Admin).await;
+    let server = TestServer::start(common::BIN, &db);
+    let base = server.base();
+    let cookie = common::login_cookie(base, &admin.email, &admin.password);
+    for key in [
+        "registry_url",
+        "registry_trusted_keys",
+        "update_channel_url",
+        "update_trusted_keys",
+    ] {
+        let (status, message) = outcome(call(
+            base,
+            As::Cookie(&cookie),
+            "PUT",
+            &format!("/options/{key}"),
+            Some(json!("https://x.invalid/i")),
+        ));
+        assert_eq!(status, 400, "{key}: {message}");
+        assert!(message.contains("unknown option"), "{key}: {message}");
+    }
 }
 
 #[tokio::test]
