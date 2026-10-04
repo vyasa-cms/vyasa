@@ -21,16 +21,9 @@ export default defineConfig({
     react(),
     {
       name: "disable-rocket-loader",
-      generateBundle(_, bundle) {
-        for (const [name, chunk] of Object.entries(bundle)) {
-          if (name === "index.html" && "source" in chunk) {
-            const source = (chunk as { source: string }).source;
-            (chunk as { source: string }).source = source.replace(
-              '<script type="module"',
-              '<script data-cfasync="false" type="module"',
-            );
-          }
-        }
+      transformIndexHtml: {
+        order: "post",
+        handler: (html) => html.replace('<script type="module"', '<script data-cfasync="false" type="module"'),
       },
     },
   ],
