@@ -9,6 +9,7 @@
 pub mod html_to_blocks;
 pub mod media;
 pub mod pg_source;
+mod rcdom;
 pub mod wp;
 
 use std::collections::HashMap;

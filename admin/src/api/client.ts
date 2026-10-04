@@ -1462,7 +1462,7 @@ export const api = {
     return request("/api/v1/mail/test", { method: "POST", body: JSON.stringify({ to }) });
   },
 
-  setupVerifyUrl(url: string): Promise<{ reachable: boolean }> {
+  setupVerifyUrl(url: string): Promise<{ reachable: boolean; local: boolean }> {
     return request(`/api/v1/setup/verify-url?url=${encodeURIComponent(url)}`);
   },
   setupStep<T = void>(step: string, body: unknown): Promise<T> {

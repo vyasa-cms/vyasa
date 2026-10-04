@@ -71,11 +71,13 @@ async fn roles_of(pool: &PgPool, id: i64) -> Option<(String, Option<String>)> {
 }
 
 async fn field(pool: &PgPool, id: i64, column: &str) -> Option<String> {
-    sqlx::query_scalar(&format!("SELECT {column}::text FROM users WHERE id = $1"))
-        .bind(id)
-        .fetch_one(pool)
-        .await
-        .expect("user field")
+    sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+        "SELECT {column}::text FROM users WHERE id = $1"
+    )))
+    .bind(id)
+    .fetch_one(pool)
+    .await
+    .expect("user field")
 }
 
 /// The roles every test here uses: a user manager who holds nothing

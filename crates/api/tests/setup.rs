@@ -108,10 +108,27 @@ async fn the_wizard_runs_once_and_then_closes() {
             .set("cookie", &session)
             .send_json(json!({"site_title": "Probe", "site_tagline": "t", "site_url": base, "site_language": "en"})),
     ));
-    assert_eq!(
-        site["site_url_verified"], true,
-        "the address reaches this very server"
-    );
+    // The server only fetches public addresses, so a loopback site address
+    // is reported as local and untested rather than as unreachable.
+    assert_eq!(site["site_url_verified"], false, "{site}");
+    assert_eq!(site["site_url_local"], true, "{site}");
+    for (url, local) in [
+        (base, true),
+        ("http://localhost:1", true),
+        ("http://169.254.169.254/latest", true),
+        ("http://[::1]:1", true),
+        ("http://10.1.2.3", true),
+        ("http://name.invalid", false),
+    ] {
+        let checked = json_body(http(
+            ureq::get(format!("{base}/api/v1/setup/verify-url").as_str())
+                .query("url", url)
+                .set("cookie", &session)
+                .call(),
+        ));
+        assert_eq!(checked["reachable"], false, "{url}: {checked}");
+        assert_eq!(checked["local"], local, "{url}: {checked}");
+    }
     let content = http(
         ureq::post(format!("{base}/api/v1/setup/content").as_str())
             .set("cookie", &session)

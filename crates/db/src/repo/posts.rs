@@ -190,12 +190,14 @@ impl PostsRepo {
     ///
     /// Returns [`AppError::NotFound`] when missing.
     pub async fn get(&self, id: i64) -> Result<PostRow, AppError> {
-        sqlx::query_as(&format!("SELECT {POST_COLUMNS} FROM posts WHERE id = $1"))
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|err| AppError::db(format!("post lookup failed: {err}")))?
-            .ok_or_else(|| AppError::not_found("post", id))
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {POST_COLUMNS} FROM posts WHERE id = $1"
+        )))
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| AppError::db(format!("post lookup failed: {err}")))?
+        .ok_or_else(|| AppError::not_found("post", id))
     }
 
     /// Fetches a post by type + slug (trash excluded).
@@ -204,10 +206,10 @@ impl PostsRepo {
     ///
     /// Returns [`AppError::NotFound`] when missing.
     pub async fn get_by_slug(&self, post_type: PostType, slug: &str) -> Result<PostRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {POST_COLUMNS} FROM posts
              WHERE type = $1 AND slug = $2 AND status <> 'trash'"
-        ))
+        )))
         .bind(post_type.as_str())
         .bind(slug)
         .fetch_optional(&self.pool)
@@ -283,7 +285,7 @@ impl PostsRepo {
         } else {
             ""
         };
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {POST_COLUMNS} FROM posts p
              WHERE ($1::text IS NULL OR p.status = $1)
                AND ($2::text IS NULL OR p.type = $2)
@@ -300,7 +302,7 @@ impl PostsRepo {
                AND ($12::text[] IS NULL OR p.type IN ('post', 'page') OR p.type = ANY($12))
              ORDER BY {sticky}{order}
              LIMIT $6 OFFSET $7"
-        ))
+        )))
         .bind(filter.status.map(PostStatus::as_str))
         .bind(filter.post_type.map(PostType::as_str))
         .bind(filter.author_id)
@@ -358,9 +360,9 @@ impl PostsRepo {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {POST_COLUMNS} FROM posts WHERE id = ANY($1)"
-        ))
+        )))
         .bind(ids)
         .fetch_all(&self.pool)
         .await
@@ -400,7 +402,7 @@ impl PostsRepo {
              ORDER BY {order}
              LIMIT $4"
         );
-        let mut query = sqlx::query_as(&sql)
+        let mut query = sqlx::query_as(sqlx::AssertSqlSafe(sql))
             .bind(q.post_type.as_str())
             .bind(q.term_id)
             .bind(serde_json::Value::Array(conditions))
@@ -478,12 +480,12 @@ impl PostsRepo {
         now: chrono::DateTime<chrono::Utc>,
         limit: i64,
     ) -> Result<Vec<PostRow>, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {POST_COLUMNS} FROM posts
              WHERE status = 'scheduled' AND scheduled_for <= $1
              ORDER BY scheduled_for ASC
              LIMIT $2"
-        ))
+        )))
         .bind(now)
         .bind(limit)
         .fetch_all(&self.pool)
@@ -510,7 +512,7 @@ impl PostsRepo {
         now: chrono::DateTime<chrono::Utc>,
         limit: i64,
     ) -> Result<Vec<PostRow>, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "UPDATE posts SET
                 status = 'published',
                 published_at = COALESCE(published_at, now())
@@ -522,7 +524,7 @@ impl PostsRepo {
                  FOR UPDATE SKIP LOCKED)
                AND status = 'scheduled'
              RETURNING {POST_COLUMNS}"
-        ))
+        )))
         .bind(now)
         .bind(limit)
         .fetch_all(&self.pool)
@@ -567,7 +569,7 @@ impl PostsRepo {
             .begin()
             .await
             .map_err(|err| AppError::db(format!("tx begin failed: {err}")))?;
-        let row: Option<PostRow> = sqlx::query_as(&format!(
+        let row: Option<PostRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "UPDATE posts SET
                 status = COALESCE($2, status),
                 slug = COALESCE($3, slug),
@@ -585,7 +587,7 @@ impl PostsRepo {
                 updated_at = CASE WHEN $11 THEN now() ELSE updated_at END
              WHERE id = $1 AND ($15::text IS NULL OR status = $15)
              RETURNING {POST_COLUMNS}"
-        ))
+        )))
         .bind(post.id)
         .bind(post.status.map(PostStatus::as_str))
         .bind(&post.slug)
@@ -691,13 +693,13 @@ async fn insert_in(
     slug: &str,
     term_ids: Option<&[i64]>,
 ) -> Result<PostRow, AppError> {
-    let row: PostRow = sqlx::query_as(&format!(
+    let row: PostRow = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO posts (id, type, status, slug, title, content, excerpt,
                             author_id, parent_id, meta, published_at, scheduled_for,
                             password_hash, layout)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
          RETURNING {POST_COLUMNS}"
-    ))
+    )))
     .bind(post.id)
     .bind(post.post_type.as_str())
     .bind(post.status.as_str())
@@ -932,9 +934,9 @@ impl PostsRepo {
     /// # Errors
     /// Returns [`AppError::Db`] on database failure.
     pub async fn translations(&self, group: i64) -> Result<Vec<PostRow>, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {POST_COLUMNS} FROM posts WHERE translation_group = $1 ORDER BY lang, id"
-        ))
+        )))
         .bind(group)
         .fetch_all(&self.pool)
         .await

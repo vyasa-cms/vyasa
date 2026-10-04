@@ -81,11 +81,11 @@ impl MediaRepo {
     ///
     /// Returns [`AppError::Db`] on database failure.
     pub async fn insert(&self, media: &NewMedia<'_>) -> Result<MediaRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "INSERT INTO media (id, owner_id, file_name, mime, byte_size, storage, path, width, height, blurhash, alt, caption, derivatives, sha256)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
              RETURNING {MEDIA_COLUMNS}"
-        ))
+        )))
         .bind(media.id)
         .bind(media.owner_id)
         .bind(media.file_name)
@@ -129,10 +129,10 @@ impl MediaRepo {
             if filter.trashed { "NOT NULL" } else { "NULL" },
             filter.kind_clause()
         );
-        let rows = sqlx::query_as::<_, MediaRow>(&format!(
+        let rows = sqlx::query_as::<_, MediaRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {MEDIA_COLUMNS} FROM media {where_clause} ORDER BY {} LIMIT $3 OFFSET $4",
             filter.order()
-        ))
+        )))
         .bind(&search)
         .bind(filter.owner_id)
         .bind(limit)
@@ -140,13 +140,14 @@ impl MediaRepo {
         .fetch_all(&self.pool)
         .await
         .map_err(|err| AppError::db(format!("media list failed: {err}")))?;
-        let total =
-            sqlx::query_scalar::<_, i64>(&format!("SELECT count(*) FROM media {where_clause}"))
-                .bind(&search)
-                .bind(filter.owner_id)
-                .fetch_one(&self.pool)
-                .await
-                .map_err(|err| AppError::db(format!("media count failed: {err}")))?;
+        let total = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+            "SELECT count(*) FROM media {where_clause}"
+        )))
+        .bind(&search)
+        .bind(filter.owner_id)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|err| AppError::db(format!("media count failed: {err}")))?;
         Ok((rows, total))
     }
 
@@ -172,9 +173,9 @@ impl MediaRepo {
     ///
     /// Returns [`AppError::Db`] on database failure.
     pub async fn find_by_sha256(&self, sha256: &str) -> Result<Option<MediaRow>, AppError> {
-        sqlx::query_as::<_, MediaRow>(&format!(
+        sqlx::query_as::<_, MediaRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {MEDIA_COLUMNS} FROM media WHERE sha256 = $1 ORDER BY created_at ASC LIMIT 1"
-        ))
+        )))
         .bind(sha256)
         .fetch_optional(&self.pool)
         .await
@@ -192,11 +193,11 @@ impl MediaRepo {
         file_name: Option<&str>,
         focal: Option<(f32, f32)>,
     ) -> Result<MediaRow, AppError> {
-        sqlx::query_as::<_, MediaRow>(&format!(
+        sqlx::query_as::<_, MediaRow>(sqlx::AssertSqlSafe(format!(
             "UPDATE media SET file_name = COALESCE($2, file_name),
                  focal_x = COALESCE($3, focal_x), focal_y = COALESCE($4, focal_y)
              WHERE id = $1 RETURNING {MEDIA_COLUMNS}"
-        ))
+        )))
         .bind(id)
         .bind(file_name)
         .bind(focal.map(|f| f.0))
@@ -222,11 +223,11 @@ impl MediaRepo {
         path: &str,
         sha256: &str,
     ) -> Result<MediaRow, AppError> {
-        sqlx::query_as::<_, MediaRow>(&format!(
+        sqlx::query_as::<_, MediaRow>(sqlx::AssertSqlSafe(format!(
             "UPDATE media SET file_name = $2, mime = $3, byte_size = $4, path = $5, sha256 = $6,
                  width = NULL, height = NULL, blurhash = NULL, derivatives = '{{}}'::jsonb
              WHERE id = $1 RETURNING {MEDIA_COLUMNS}"
-        ))
+        )))
         .bind(id)
         .bind(file_name)
         .bind(mime)
@@ -245,12 +246,14 @@ impl MediaRepo {
     ///
     /// Returns [`AppError::NotFound`] when missing.
     pub async fn get(&self, id: i64) -> Result<MediaRow, AppError> {
-        sqlx::query_as(&format!("SELECT {MEDIA_COLUMNS} FROM media WHERE id = $1"))
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|err| AppError::db(format!("media lookup failed: {err}")))?
-            .ok_or_else(|| AppError::not_found("media", id))
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {MEDIA_COLUMNS} FROM media WHERE id = $1"
+        )))
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| AppError::db(format!("media lookup failed: {err}")))?
+        .ok_or_else(|| AppError::not_found("media", id))
     }
 
     /// Whether a media row exists and is in the trash: `None` when there
@@ -278,9 +281,9 @@ impl MediaRepo {
         if ids.is_empty() {
             return Ok(Vec::new());
         }
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {MEDIA_COLUMNS} FROM media WHERE id = ANY($1) AND trashed_at IS NULL"
-        ))
+        )))
         .bind(ids)
         .fetch_all(&self.pool)
         .await
@@ -293,9 +296,9 @@ impl MediaRepo {
     ///
     /// Returns [`AppError::Db`] on database failure.
     pub async fn list(&self, limit: i64, offset: i64) -> Result<Vec<MediaRow>, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {MEDIA_COLUMNS} FROM media ORDER BY created_at DESC LIMIT $1 OFFSET $2"
-        ))
+        )))
         .bind(limit)
         .bind(offset)
         .fetch_all(&self.pool)
@@ -314,9 +317,9 @@ impl MediaRepo {
         limit: i64,
         offset: i64,
     ) -> Result<Vec<MediaRow>, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {MEDIA_COLUMNS} FROM media WHERE owner_id = $1 ORDER BY created_at DESC LIMIT $2 OFFSET $3"
-        ))
+        )))
         .bind(owner_id)
         .bind(limit)
         .bind(offset)
@@ -339,13 +342,13 @@ impl MediaRepo {
         alt: Option<&str>,
         caption: Option<&str>,
     ) -> Result<MediaRow, AppError> {
-        sqlx::query_as::<_, MediaRow>(&format!(
+        sqlx::query_as::<_, MediaRow>(sqlx::AssertSqlSafe(format!(
             "UPDATE media
                 SET alt = COALESCE($2, alt),
                     caption = COALESCE($3, caption)
               WHERE id = $1
               RETURNING {MEDIA_COLUMNS}"
-        ))
+        )))
         .bind(id)
         .bind(alt)
         .bind(caption)
@@ -395,9 +398,9 @@ impl MediaRepo {
     /// # Errors
     /// Returns [`AppError::Db`] on database failure.
     pub async fn trashed(&self) -> Result<Vec<MediaRow>, AppError> {
-        sqlx::query_as::<_, MediaRow>(&format!(
+        sqlx::query_as::<_, MediaRow>(sqlx::AssertSqlSafe(format!(
             "SELECT {MEDIA_COLUMNS} FROM media WHERE trashed_at IS NOT NULL"
-        ))
+        )))
         .fetch_all(&self.pool)
         .await
         .map_err(|err| AppError::db(format!("media trashed failed: {err}")))

@@ -253,17 +253,71 @@ pub async fn site(state: &AppState, input: SiteInput) -> Result<(), AppError> {
     set_progress(state, "content").await
 }
 
+/// What testing a site address found.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SiteUrlCheck {
+    /// The address answers, and it is this very server.
+    Reaches,
+    /// The address did not answer as this server.
+    DoesNotReach,
+    /// The address is on this machine or a private network. The server
+    /// only fetches public addresses, so it was not tested.
+    Local,
+}
+
 /// Whether `site_url` reaches this very server: the status endpoint answers
-/// with the instance nonce minted at boot.
-pub async fn site_url_reaches_us(state: &AppState, site_url: &str) -> bool {
+/// with the instance nonce minted at boot. Only public addresses are
+/// fetched, through the guarded client, so the check cannot be used to
+/// probe the server's own network.
+pub async fn check_site_url(state: &AppState, site_url: &str) -> SiteUrlCheck {
     let target = format!("{}/api/v1/setup/status", site_url.trim_end_matches('/'));
-    let Ok(response) = state.link_client.get(&target).send().await else {
-        return false;
+    let Ok(url) = url::Url::parse(&target) else {
+        return SiteUrlCheck::DoesNotReach;
+    };
+    if is_local(&url).await {
+        return SiteUrlCheck::Local;
+    }
+    if !crate::net_guard::url_allowed(&url) {
+        return SiteUrlCheck::DoesNotReach;
+    }
+    let Ok(response) = state.site_url_client.get(url).send().await else {
+        return SiteUrlCheck::DoesNotReach;
     };
     let Ok(body) = response.json::<serde_json::Value>().await else {
-        return false;
+        return SiteUrlCheck::DoesNotReach;
     };
-    body.get("instance").and_then(serde_json::Value::as_str) == Some(state.instance_nonce.as_str())
+    if body.get("instance").and_then(serde_json::Value::as_str)
+        == Some(state.instance_nonce.as_str())
+    {
+        SiteUrlCheck::Reaches
+    } else {
+        SiteUrlCheck::DoesNotReach
+    }
+}
+
+/// Whether `url` names this machine or a private network: a non-public
+/// address, `localhost`, or a name all of whose addresses are non-public.
+async fn is_local(url: &url::Url) -> bool {
+    let public = crate::net_guard::is_public_ip;
+    match url.host() {
+        Some(url::Host::Ipv4(ip)) => !public(ip.into()),
+        Some(url::Host::Ipv6(ip)) => !public(ip.into()),
+        Some(url::Host::Domain(name)) => {
+            let name = name.trim_end_matches('.').to_ascii_lowercase();
+            if name == "localhost" || name.ends_with(".localhost") {
+                return true;
+            }
+            let port = url.port_or_known_default().unwrap_or(80);
+            match tokio::net::lookup_host(format!("{name}:{port}")).await {
+                Ok(addrs) => {
+                    let ips: Vec<_> = addrs.map(|a| a.ip()).collect();
+                    !ips.is_empty() && ips.into_iter().all(|ip| !public(ip))
+                }
+                Err(_) => false,
+            }
+        }
+        None => false,
+    }
 }
 
 /// Step 3.

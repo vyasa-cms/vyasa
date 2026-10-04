@@ -66,12 +66,12 @@ impl Loader<i64> for AuthorLoader {
         if keys.is_empty() {
             return Ok(HashMap::new());
         }
-        let rows = sqlx::query_as::<_, UserRow>(&format!(
+        let rows = sqlx::query_as::<_, UserRow>(sqlx::AssertSqlSafe(format!(
             // An account that has not confirmed its address is nobody's
             // public author: it loads as nothing, and `author` is null.
             "SELECT {} FROM users WHERE id = ANY($1) AND email_verified_at IS NOT NULL",
             vyasa_db::repo::users::USER_COLUMNS
-        ))
+        )))
         .bind(keys)
         .fetch_all(&self.pool)
         .await

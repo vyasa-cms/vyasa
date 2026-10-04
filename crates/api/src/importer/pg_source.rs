@@ -41,7 +41,7 @@ impl PgWpSource {
         Ok(Self { pool })
     }
 
-    async fn scalar_rows<T>(&self, sql: &str) -> Result<Vec<T>, AppError>
+    async fn scalar_rows<T>(&self, sql: &'static str) -> Result<Vec<T>, AppError>
     where
         T: for<'r> sqlx::FromRow<'r, sqlx::postgres::PgRow> + Send + Unpin,
     {

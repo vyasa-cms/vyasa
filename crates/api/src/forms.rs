@@ -134,28 +134,32 @@ fn check(input: &FormInput) -> Result<(), AppError> {
 /// # Errors
 /// Database errors.
 pub async fn list(state: &AppState) -> Result<Vec<FormRow>, AppError> {
-    sqlx::query_as::<_, FormRow>(&format!("SELECT {COLS} FROM forms ORDER BY name"))
-        .fetch_all(&state.pool)
-        .await
-        .map_err(|e| AppError::db(format!("forms: {e}")))
+    sqlx::query_as::<_, FormRow>(sqlx::AssertSqlSafe(format!(
+        "SELECT {COLS} FROM forms ORDER BY name"
+    )))
+    .fetch_all(&state.pool)
+    .await
+    .map_err(|e| AppError::db(format!("forms: {e}")))
 }
 
 /// # Errors
 /// [`AppError::NotFound`] when missing.
 pub async fn get(state: &AppState, id: i64) -> Result<FormRow, AppError> {
-    sqlx::query_as::<_, FormRow>(&format!("SELECT {COLS} FROM forms WHERE id = $1"))
-        .bind(id)
-        .fetch_optional(&state.pool)
-        .await
-        .map_err(|e| AppError::db(format!("form: {e}")))?
-        .ok_or_else(|| AppError::not_found("form", id))
+    sqlx::query_as::<_, FormRow>(sqlx::AssertSqlSafe(format!(
+        "SELECT {COLS} FROM forms WHERE id = $1"
+    )))
+    .bind(id)
+    .fetch_optional(&state.pool)
+    .await
+    .map_err(|e| AppError::db(format!("form: {e}")))?
+    .ok_or_else(|| AppError::not_found("form", id))
 }
 
 /// The enabled form behind a slug, if any.
 pub async fn by_slug(state: &AppState, slug: &str) -> Option<FormRow> {
-    sqlx::query_as::<_, FormRow>(&format!(
+    sqlx::query_as::<_, FormRow>(sqlx::AssertSqlSafe(format!(
         "SELECT {COLS} FROM forms WHERE slug = $1 AND enabled"
-    ))
+    )))
     .bind(slug)
     .fetch_optional(&state.pool)
     .await
@@ -184,10 +188,10 @@ pub async fn create(state: &AppState, input: FormInput) -> Result<FormRow, AppEr
     } else {
         input.success_message.trim().to_owned()
     };
-    sqlx::query_as::<_, FormRow>(&format!(
+    sqlx::query_as::<_, FormRow>(sqlx::AssertSqlSafe(format!(
         "INSERT INTO forms (id, name, slug, fields, notify_email, success_message, enabled)
          VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING {COLS}"
-    ))
+    )))
     .bind(vyasa_common::next_id_i64())
     .bind(input.name.trim())
     .bind(&slug)
@@ -209,10 +213,10 @@ pub async fn update(state: &AppState, id: i64, input: FormInput) -> Result<FormR
     } else {
         input.success_message.trim().to_owned()
     };
-    sqlx::query_as::<_, FormRow>(&format!(
+    sqlx::query_as::<_, FormRow>(sqlx::AssertSqlSafe(format!(
         "UPDATE forms SET name = $2, fields = $3, notify_email = $4, success_message = $5,
                 enabled = $6, updated_at = now() WHERE id = $1 RETURNING {COLS}"
-    ))
+    )))
     .bind(id)
     .bind(input.name.trim())
     .bind(serde_json::json!(input.fields))

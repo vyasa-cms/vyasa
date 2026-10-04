@@ -5443,6 +5443,11 @@ export interface components {
         };
         /** @description What the site step reports back. */
         SiteResult: {
+            /**
+             * @description The address is on this machine or a private network, so it was not
+             *     tested; `site_url_verified` is then false.
+             */
+            site_url_local: boolean;
             /** @description The address answers and it is this server. */
             site_url_verified: boolean;
         };
@@ -5870,6 +5875,11 @@ export interface components {
         };
         /** @description What the round trip found. */
         VerifyUrlResult: {
+            /**
+             * @description The address is on this machine or a private network, so it was not
+             *     tested.
+             */
+            local: boolean;
             /** @description The address answers, and it is this very server. */
             reachable: boolean;
         };

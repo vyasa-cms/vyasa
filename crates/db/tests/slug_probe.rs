@@ -29,7 +29,7 @@ async fn seed_author(pool: &sqlx::PgPool) {
 
 async fn plan(pool: &sqlx::PgPool, sql: &str, slug_arg: SlugArg) -> String {
     let query = format!("EXPLAIN {sql}");
-    let q = sqlx::query_scalar::<_, String>(&query).bind("post");
+    let q = sqlx::query_scalar::<_, String>(sqlx::AssertSqlSafe(query.clone())).bind("post");
     let q = match slug_arg {
         SlugArg::One(slug) => q.bind(slug),
         SlugArg::Many(slugs) => q.bind(slugs),

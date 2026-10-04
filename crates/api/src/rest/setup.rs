@@ -253,6 +253,9 @@ pub async fn account(
 pub struct SiteResult {
     /// The address answers and it is this server.
     pub site_url_verified: bool,
+    /// The address is on this machine or a private network, so it was not
+    /// tested; `site_url_verified` is then false.
+    pub site_url_local: bool,
 }
 
 /// `POST /api/v1/setup/site`
@@ -267,8 +270,10 @@ pub async fn site(
     who.full_administrator("change the site address")?;
     let url = input.site_url.clone();
     setup::site(&state, input).await?;
+    let check = setup::check_site_url(&state, &url).await;
     Ok(Json(SiteResult {
-        site_url_verified: setup::site_url_reaches_us(&state, &url).await,
+        site_url_verified: check == setup::SiteUrlCheck::Reaches,
+        site_url_local: check == setup::SiteUrlCheck::Local,
     }))
 }
 
@@ -283,6 +288,9 @@ pub struct VerifyUrlQuery {
 pub struct VerifyUrlResult {
     /// The address answers, and it is this very server.
     pub reachable: bool,
+    /// The address is on this machine or a private network, so it was not
+    /// tested.
+    pub local: bool,
 }
 
 /// `GET /api/v1/setup/verify-url?url=` — does an address reach this server?
@@ -297,10 +305,15 @@ pub async fn verify_url(
 ) -> ApiResult<Json<VerifyUrlResult>> {
     let url = q.url.trim();
     if !(url.starts_with("http://") || url.starts_with("https://")) {
-        return Ok(Json(VerifyUrlResult { reachable: false }));
+        return Ok(Json(VerifyUrlResult {
+            reachable: false,
+            local: false,
+        }));
     }
+    let check = setup::check_site_url(&state, url).await;
     Ok(Json(VerifyUrlResult {
-        reachable: setup::site_url_reaches_us(&state, url).await,
+        reachable: check == setup::SiteUrlCheck::Reaches,
+        local: check == setup::SiteUrlCheck::Local,
     }))
 }
 

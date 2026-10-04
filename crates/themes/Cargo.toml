@@ -22,7 +22,7 @@ vyasa-core = { path = "../core" }
 thiserror = "2"
 futures = { version = "0.3", features = ["executor"] }
 moka = { version = "0.12", features = ["sync"] }
-zip = { version = "2", features = ["deflate"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
 toml = "1"
 syntect = { version = "5.3.0", default-features = false, features = ["default-fancy"] }
 
@@ -31,7 +31,7 @@ criterion = { version = "0.8", default-features = false, features = ["cargo_benc
 futures = "0.3"
 insta = { version = "1", features = ["json"] }
 tokio = { version = "1", features = ["sync"] }
-zip = { version = "2", features = ["deflate"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
 
 [[bench]]
 name = "render"

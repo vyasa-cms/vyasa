@@ -484,7 +484,7 @@ export function SettingsPage() {
   const [saved, setSaved] = React.useState<Record<string, string>>({});
   const [brand, setBrand] = React.useState<Record<string, string>>({});
   const [savedBrand, setSavedBrand] = React.useState<Record<string, string>>({});
-  const [urlCheck, setUrlCheck] = React.useState<"idle" | "checking" | "ok" | "unreachable">("idle");
+  const [urlCheck, setUrlCheck] = React.useState<"idle" | "checking" | "ok" | "local" | "unreachable">("idle");
 
   const dirtyRef = React.useRef(false);
   React.useEffect(() => {
@@ -547,12 +547,12 @@ export function SettingsPage() {
       // reported and the save waits for a second click.
       if (dirtyKeys.includes("site_url") && urlCheck !== "unreachable") {
         setUrlCheck("checking");
-        const r = await api.setupVerifyUrl((values["site_url"] ?? "").trim()).catch(() => ({ reachable: false }));
-        if (!r.reachable) {
+        const r = await api.setupVerifyUrl((values["site_url"] ?? "").trim()).catch(() => ({ reachable: false, local: false }));
+        if (!r.reachable && !r.local) {
           setUrlCheck("unreachable");
           throw new Error("The site address does not reach this server. Check it, or press Save again to keep it.");
         }
-        setUrlCheck("ok");
+        setUrlCheck(r.reachable ? "ok" : "local");
       }
       const body: Record<string, unknown> = Object.fromEntries(
         dirtyKeys.map((key) => [key, fromForm(ALL_KEYS.find((k) => k.key === key)?.kind ?? "text", values[key] ?? "")]),
@@ -641,6 +641,7 @@ export function SettingsPage() {
             <Input id={id} value={v} placeholder={k.placeholder} onChange={(e) => set(k.key, e.target.value)} className={k.kind === "url" ? "font-mono text-sm" : undefined} />
             {k.key === "site_url" && urlCheck === "checking" ? <span className="text-xs text-muted-foreground">checking…</span> : null}
             {k.key === "site_url" && urlCheck === "ok" ? <span className="text-xs text-success">reaches this server</span> : null}
+            {k.key === "site_url" && urlCheck === "local" ? <span className="text-xs text-muted-foreground">local address, not tested</span> : null}
           </div>
         );
     }

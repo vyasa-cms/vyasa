@@ -207,10 +207,12 @@ function Site({ siteUrl, onDone, onBack }: { siteUrl: string; onDone: (url: stri
   const set = (k: keyof typeof v) => (e: React.ChangeEvent<HTMLInputElement>) => setV({ ...v, [k]: e.target.value });
   const [verified, setVerified] = React.useState<boolean | null>(null);
   const save = useMutation({
-    mutationFn: () => api.setupStep<{ site_url_verified: boolean }>("site", v),
+    mutationFn: () => api.setupStep<{ site_url_verified: boolean; site_url_local: boolean }>("site", v),
     onSuccess: (r) => {
-      setVerified(r.site_url_verified);
-      if (r.site_url_verified) onDone(v.site_url);
+      // A local address is not tested by the server, so it is not an error.
+      const fine = r.site_url_verified || r.site_url_local;
+      setVerified(fine);
+      if (fine) onDone(v.site_url);
       else notify.error("Saved, but that address does not reach this server", "Check it, or continue if the DNS is still settling.");
     },
     onError: (e) => notify.error("Couldn't save the site details", e),

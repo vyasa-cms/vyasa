@@ -10,8 +10,8 @@
 
 use std::collections::BTreeSet;
 
+use super::rcdom::{Handle, NodeData, RcDom};
 use html5ever::tendril::TendrilSink;
-use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use vyasa_core::block::Block;
 
 /// Parses and converts `html` into a block document.
@@ -51,7 +51,7 @@ fn walk_children(handle: &Handle, out: &mut Vec<Block>, warnings: &mut Vec<Strin
 fn walk(handle: &Handle, out: &mut Vec<Block>, warnings: &mut Vec<String>) {
     match &handle.data {
         NodeData::Element { name, .. } => {
-            let tag = name.local.as_ref();
+            let tag = &*name.local;
             match tag {
                 "p" => {
                     let text = inline_html(handle);
@@ -171,7 +171,7 @@ fn collect_figure(
     caption: &mut String,
 ) {
     if let NodeData::Element { name, .. } = &handle.data {
-        match name.local.as_ref() {
+        match &*name.local {
             "img" => {
                 let src = attr(handle, "src").unwrap_or_default();
                 *img = Some((src, attr(handle, "alt")));
@@ -198,7 +198,7 @@ fn image_block(handle: &Handle, caption: Option<String>, out: &mut Vec<Block>) {
 
 fn collect_list_items(handle: &Handle, items: &mut Vec<String>) {
     if let NodeData::Element { name, .. } = &handle.data {
-        if name.local.as_ref() == "li" {
+        if &*name.local == "li" {
             items.push(inline_html(handle));
             return;
         }
@@ -237,14 +237,14 @@ fn serialize(handle: &Handle, allow: &BTreeSet<&str>, root: bool) -> String {
     match &handle.data {
         NodeData::Text { ref contents } => esc(&contents.borrow()),
         NodeData::Element { name, attrs, .. } => {
-            let tag = name.local.as_ref();
+            let tag = &*name.local;
             if !root && !allow.contains(tag) {
                 return serialize_children(handle, allow);
             }
             let open_attrs = attrs
                 .borrow()
                 .iter()
-                .filter(|a| matches!(a.name.local.as_ref(), "href" | "src" | "alt"))
+                .filter(|a| matches!(&*a.name.local, "href" | "src" | "alt"))
                 .map(|a| format!(" {}=\"{}\"", a.name.local, esc(&a.value)))
                 .collect::<String>();
             format!(
@@ -282,7 +282,7 @@ fn plain_text(handle: &Handle) -> String {
 fn attr(handle: &Handle, name: &str) -> Option<String> {
     if let NodeData::Element { attrs, .. } = &handle.data {
         for a in attrs.borrow().iter() {
-            if a.name.local.as_ref() == name {
+            if &*a.name.local == name {
                 return Some(a.value.to_string());
             }
         }

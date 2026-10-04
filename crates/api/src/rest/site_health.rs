@@ -14,7 +14,7 @@ use vyasa_core::health::{self, Check, Report};
 use crate::error::{ApiErrorBody, ApiResult};
 use crate::state::AppState;
 
-async fn count(pool: &sqlx::PgPool, sql: &str) -> i64 {
+async fn count(pool: &sqlx::PgPool, sql: &'static str) -> i64 {
     sqlx::query_scalar::<_, i64>(sql)
         .fetch_one(pool)
         .await

@@ -73,7 +73,7 @@ pub struct AppState {
     pub embed_client: reqwest::Client,
     /// Outbound client for link checks: follows a few redirects, gives up
     /// after eight seconds.
-    pub link_client: reqwest::Client,
+    pub site_url_client: reqwest::Client,
     /// The first-run setup token, while no administrator exists.
     pub setup_token: Arc<std::sync::Mutex<Option<String>>>,
     /// A nonce minted at boot; the setup wizard's site-address check looks
@@ -151,9 +151,10 @@ fn embed_client() -> reqwest::Client {
         .unwrap_or_default()
 }
 
-/// Outbound client for link checks.
-fn link_client() -> reqwest::Client {
-    reqwest::Client::builder()
+/// Outbound client for testing a site address: guarded, because anyone
+/// holding the setup token or the options capability chooses the address.
+fn site_url_client() -> reqwest::Client {
+    crate::net_guard::guarded_builder(5)
         .timeout(std::time::Duration::from_secs(8))
         .redirect(reqwest::redirect::Policy::limited(5))
         .user_agent("Mozilla/5.0 (compatible; Vyasa link check)")
@@ -265,7 +266,7 @@ impl AppState {
             plugins_repo: plugins_repo_shared,
             plugin_surface,
             embed_client: embed_client(),
-            link_client: link_client(),
+            site_url_client: site_url_client(),
             setup_token: Arc::new(std::sync::Mutex::new(None)),
             instance_nonce: hex::encode({
                 use rand::RngCore as _;

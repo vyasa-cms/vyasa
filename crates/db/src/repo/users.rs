@@ -40,12 +40,14 @@ impl UsersRepo {
     /// Returns [`AppError::NotFound`] when the user does not exist, or
     /// [`AppError::Db`] on database failure.
     pub async fn get(&self, id: i64) -> Result<UserRow, AppError> {
-        sqlx::query_as(&format!("SELECT {USER_COLUMNS} FROM users WHERE id = $1"))
-            .bind(id)
-            .fetch_optional(&self.pool)
-            .await
-            .map_err(|err| AppError::db(format!("user lookup failed: {err}")))?
-            .ok_or_else(|| AppError::not_found("user", id))
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {USER_COLUMNS} FROM users WHERE id = $1"
+        )))
+        .bind(id)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| AppError::db(format!("user lookup failed: {err}")))?
+        .ok_or_else(|| AppError::not_found("user", id))
     }
 
     /// Fetches a user by email (case-insensitive via citext).
@@ -59,9 +61,9 @@ impl UsersRepo {
     /// Returns [`AppError::NotFound`] when the user does not exist, or
     /// [`AppError::Db`] on database failure.
     pub async fn get_by_email(&self, email: &str) -> Result<UserRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {USER_COLUMNS} FROM users WHERE email = $1::citext"
-        ))
+        )))
         .bind(email)
         .fetch_optional(&self.pool)
         .await
@@ -76,11 +78,11 @@ impl UsersRepo {
     /// Returns [`AppError::Db`] on database failure (e.g. uniqueness
     /// violation; callers map constraint errors to friendly conflicts).
     pub async fn insert(&self, user: &NewUser<'_>) -> Result<UserRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "INSERT INTO users (id, email, username, display_name, password_hash, role, bio)
              VALUES ($1, $2, $3, $4, $5, $6, $7)
              RETURNING {USER_COLUMNS}"
-        ))
+        )))
         .bind(user.id)
         .bind(user.email)
         .bind(user.username)
@@ -107,12 +109,12 @@ impl UsersRepo {
         user: &NewUser<'_>,
         slug: &str,
     ) -> Result<UserRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "INSERT INTO users
                  (id, email, username, display_name, password_hash, role, bio, custom_role)
              VALUES ($1, $2, $3, $4, $5, 'subscriber', $6, $7)
              RETURNING {USER_COLUMNS}"
-        ))
+        )))
         .bind(user.id)
         .bind(user.email)
         .bind(user.username)
@@ -232,10 +234,10 @@ impl UsersRepo {
     /// # Errors
     /// Returns [`AppError::Db`] on database failure.
     pub async fn list(&self, limit: u32, offset: u32) -> Result<Vec<UserRow>, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {USER_COLUMNS} FROM users
              ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2"
-        ))
+        )))
         .bind(i64::from(limit))
         .bind(i64::from(offset))
         .fetch_all(&self.pool)
@@ -255,11 +257,11 @@ impl UsersRepo {
         offset: u32,
     ) -> Result<(Vec<UserRow>, i64), AppError> {
         let pattern = format!("%{}%", term.trim().replace('%', "\\%"));
-        let rows: Vec<UserRow> = sqlx::query_as(&format!(
+        let rows: Vec<UserRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {USER_COLUMNS} FROM users
              WHERE $1 = '' OR email ILIKE $2 OR username ILIKE $2 OR display_name ILIKE $2
              ORDER BY created_at DESC, id DESC LIMIT $3 OFFSET $4"
-        ))
+        )))
         .bind(term.trim())
         .bind(&pattern)
         .bind(i64::from(limit))
@@ -325,14 +327,14 @@ impl UsersRepo {
         display_name: Option<&str>,
         bio: Option<&str>,
     ) -> Result<UserRow, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "UPDATE users SET
                 email = COALESCE($2, email),
                 username = COALESCE($3, username),
                 display_name = COALESCE($4, display_name),
                 bio = COALESCE($5, bio)
              WHERE id = $1 RETURNING {USER_COLUMNS}"
-        ))
+        )))
         .bind(id)
         .bind(email)
         .bind(username)
@@ -927,13 +929,13 @@ impl UsersRepo {
             Some(_) => crate::models::Role::Subscriber,
             None => user.role,
         };
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "INSERT INTO users
                  (id, email, username, display_name, password_hash, role, bio, custom_role,
                   email_verified_at)
              VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NULL)
              RETURNING {USER_COLUMNS}"
-        ))
+        )))
         .bind(user.id)
         .bind(user.email)
         .bind(user.username)
@@ -972,10 +974,10 @@ impl UsersRepo {
         &self,
         username: &str,
     ) -> Result<Option<UserRow>, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {USER_COLUMNS} FROM users
              WHERE username = $1::citext AND email_verified_at IS NOT NULL"
-        ))
+        )))
         .bind(username)
         .fetch_optional(&self.pool)
         .await
@@ -993,13 +995,13 @@ impl UsersRepo {
         &self,
         token_hash: &str,
     ) -> Result<Option<UserRow>, AppError> {
-        sqlx::query_as(&format!(
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
             "SELECT {USER_COLUMNS} FROM users
              WHERE id IN (SELECT user_id FROM reset_tokens
                           WHERE token_hash = $1 AND purpose = 'verify' AND used = false
                             AND expires_at > now())
              LIMIT 1"
-        ))
+        )))
         .bind(token_hash)
         .fetch_optional(&self.pool)
         .await
@@ -1148,11 +1150,11 @@ impl UsersRepo {
         let mut purged = 0;
         let mut after = i64::MIN;
         while purged < max {
-            let candidates: Vec<i64> = sqlx::query_scalar(&format!(
+            let candidates: Vec<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
                 "SELECT u.id FROM users u
                  WHERE u.id > $2 AND {PURGEABLE}
                  ORDER BY u.id LIMIT $3"
-            ))
+            )))
             .bind(older_than)
             .bind(after)
             .bind(batch.max(1))
@@ -1167,9 +1169,9 @@ impl UsersRepo {
                 if purged >= max {
                     break;
                 }
-                let deleted = sqlx::query(&format!(
+                let deleted = sqlx::query(sqlx::AssertSqlSafe(format!(
                     "DELETE FROM users u WHERE u.id = $2 AND {PURGEABLE}"
-                ))
+                )))
                 .bind(older_than)
                 .bind(id)
                 .execute(&self.pool)
@@ -1218,12 +1220,12 @@ async fn confirm_in(
     id: i64,
     clear_password: bool,
 ) -> Result<Option<UserRow>, AppError> {
-    let user: Option<UserRow> = sqlx::query_as(&format!(
+    let user: Option<UserRow> = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "UPDATE users SET email_verified_at = COALESCE(email_verified_at, now()),
                           password_hash = CASE WHEN $2 AND email_verified_at IS NULL
                                                THEN NULL ELSE password_hash END
          WHERE id = $1 RETURNING {USER_COLUMNS}"
-    ))
+    )))
     .bind(id)
     .bind(clear_password)
     .fetch_optional(&mut *conn)
