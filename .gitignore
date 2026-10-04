@@ -62,3 +62,4 @@ benchmark_output/
 
 # first-run setup token, written by `vyasa serve`
 .run/
+__pycache__/
