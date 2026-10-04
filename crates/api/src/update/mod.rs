@@ -26,8 +26,11 @@ use vyasa_common::AppError;
 
 use crate::state::AppState;
 
-/// Option holding hex ed25519 public keys that may sign releases.
-pub const TRUSTED_KEYS_OPTION: &str = "update_trusted_keys";
+/// The release channel this install checks.
+#[must_use]
+pub fn source(state: &AppState) -> crate::official::Source {
+    crate::official::updates(&state.config)
+}
 
 /// What the admin panel and `vyasa update check` both render.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
@@ -48,28 +51,8 @@ pub struct UpdateStatus {
     pub preflight: preflight::Preflight,
     /// Why no channel answered, when none did.
     pub channel_error: Option<String>,
-}
-
-/// Reads an option holding a list of strings (or one comma-separated).
-async fn string_list(state: &AppState, key: &str) -> Vec<String> {
-    match state.options.get(key).await {
-        Ok(serde_json::Value::Array(items)) => items
-            .iter()
-            .filter_map(|v| v.as_str().map(str::to_owned))
-            .collect(),
-        Ok(serde_json::Value::String(one)) => one
-            .split(',')
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(ToOwned::to_owned)
-            .collect(),
-        _ => Vec::new(),
-    }
-}
-
-/// Release keys this install trusts.
-pub async fn trusted_keys(state: &AppState) -> Vec<String> {
-    string_list(state, TRUSTED_KEYS_OPTION).await
+    /// Official channel, an operator's mirror, or off.
+    pub channel_state: crate::official::SourceState,
 }
 
 /// Gathers everything without changing anything.
@@ -79,15 +62,9 @@ pub async fn trusted_keys(state: &AppState) -> Vec<String> {
 /// deployment facts when the network is down.
 pub async fn status(state: &AppState) -> UpdateStatus {
     let environment = mode::detect();
-    let channel = state
-        .options
-        .get(manifest::CHANNEL_OPTION)
-        .await
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_owned))
-        .unwrap_or_default();
+    let source = source(state);
 
-    let (manifest, channel_error) = match manifest::fetch(&channel).await {
+    let (manifest, channel_error) = match manifest::fetch(&source.url).await {
         Ok(m) => (Some(m), None),
         Err(err) => (None, Some(err.to_string())),
     };
@@ -121,6 +98,7 @@ pub async fn status(state: &AppState) -> UpdateStatus {
         instructions,
         preflight: checks,
         channel_error,
+        channel_state: source.state,
     }
 }
 
@@ -135,14 +113,7 @@ pub async fn plan_for(
     version: Option<&str>,
 ) -> Result<(manifest::Release, preflight::Preflight, mode::Environment), AppError> {
     let environment = mode::detect();
-    let channel = state
-        .options
-        .get(manifest::CHANNEL_OPTION)
-        .await
-        .ok()
-        .and_then(|v| v.as_str().map(str::to_owned))
-        .unwrap_or_default();
-    let doc = manifest::fetch(&channel).await?;
+    let doc = manifest::fetch(&source(state).url).await?;
     let release = match version {
         Some(v) => doc
             .release(v)

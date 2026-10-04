@@ -210,3 +210,55 @@ async fn marketplace_off_refuses_browse_and_install() {
     assert_eq!(resp.status(), 400);
     assert!(body(resp).to_string().contains("turned off"));
 }
+
+// ---- the update channel ---------------------------------------------------
+
+/// The registry host serves `<registry_dir>/index.json` byte for byte, so
+/// a manifest placed there stands in for updates.vyasa.site.
+fn manifest_registry(manifest: &serde_json::Value) -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("index.json"), manifest.to_string()).expect("write manifest");
+    dir
+}
+
+#[tokio::test]
+async fn the_update_check_reads_the_official_channel() {
+    let db = TestDb::new().await;
+    let dir = manifest_registry(&json!({
+        "latest": "9.9.9",
+        "releases": [{"version": "9.9.9", "summary": "x", "artifacts": []}]
+    }));
+    let server = TestServer::builder(common::BIN, &db)
+        .env("VYASA_REGISTRY_DIR", dir.path().display().to_string())
+        .env("VYASA_TESTONLY_UPDATES_URL", "/registry/index.json")
+        .start();
+    let cookie = admin_cookie(&db, server.base()).await;
+    let doc = body(http(
+        ureq::get(format!("{}/api/v1/updates", server.base()).as_str())
+            .set("Cookie", &cookie)
+            .call(),
+    ));
+    assert_eq!(doc["update_available"], true, "{doc}");
+    assert_eq!(doc["channel_state"], "official", "{doc}");
+}
+
+#[tokio::test]
+async fn updates_off_is_reported_not_an_error() {
+    let db = TestDb::new().await;
+    let server = TestServer::builder(common::BIN, &db)
+        .env("VYASA_UPDATES__ENABLED", "false")
+        .start();
+    let cookie = admin_cookie(&db, server.base()).await;
+    let doc = body(http(
+        ureq::get(format!("{}/api/v1/updates", server.base()).as_str())
+            .set("Cookie", &cookie)
+            .call(),
+    ));
+    assert_eq!(doc["channel_state"], "off", "{doc}");
+    assert!(
+        doc["channel_error"]
+            .as_str()
+            .is_some_and(|e| e.contains("update checks are turned off on this server")),
+        "{doc}"
+    );
+}

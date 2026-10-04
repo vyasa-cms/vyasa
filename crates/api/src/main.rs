@@ -1065,7 +1065,7 @@ async fn prepare_release(
     };
 
     step(Stage::Downloading, "downloading the release");
-    let keys = update::trusted_keys(state).await;
+    let keys = update::source(state).keys;
     let bytes = match apply::download(artifact, &keys).await {
         Ok(bytes) => bytes,
         Err(err) => return Err(fail(binary, &release.version, &format!("{err}"))),
