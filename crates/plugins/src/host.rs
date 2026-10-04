@@ -621,7 +621,6 @@ impl WasmtimeHost {
     pub fn with_limits(repo: PluginsRepo, limits: HostLimits) -> Result<Self, AppError> {
         let mut config = Config::new();
         config.wasm_component_model(true);
-        config.async_support(true);
         config.consume_fuel(true);
         config.epoch_interruption(true);
         let engine = Engine::new(&config)
