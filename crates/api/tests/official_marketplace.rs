@@ -349,3 +349,62 @@ async fn the_sources_endpoint_reports_official_and_needs_manage_options() {
     );
     assert_eq!(resp.status(), 403);
 }
+
+// ---- hand-upload messages -------------------------------------------------
+
+fn upload_plugin(base: &str, cookie: &str, bytes: &[u8]) -> ureq::Response {
+    let boundary = "----vyasaplugin";
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; \
+             filename=\"p.vyplugin\"\r\nContent-Type: application/zip\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(bytes);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    http(
+        ureq::post(format!("{base}/api/v1/plugins").as_str())
+            .set("Cookie", cookie)
+            .set(
+                "Content-Type",
+                &format!("multipart/form-data; boundary={boundary}"),
+            )
+            .send_bytes(&body),
+    )
+}
+
+#[tokio::test]
+async fn an_untrusted_plugin_upload_points_at_the_operator_config_not_settings() {
+    let db = TestDb::new().await;
+    let (author, _) = fixtures::keypair();
+    let pkg = fixtures::plugin_package("fx", "1.0.0", &["log:write"], &author);
+    // No keys at all.
+    let server = TestServer::start(common::BIN, &db);
+    let cookie = admin_cookie(&db, server.base()).await;
+    let msg = body(upload_plugin(server.base(), &cookie, &pkg)).to_string();
+    assert!(msg.contains("package_trusted_keys"), "{msg}");
+    assert!(!msg.contains("Settings"), "{msg}");
+    drop(server);
+    // A key, but not the author's.
+    let (_, other_pub) = fixtures::keypair();
+    let server = TestServer::builder(common::BIN, &db)
+        .env("VYASA_PACKAGE_TRUSTED_KEYS", other_pub)
+        .start();
+    let cookie = admin_cookie(&db, server.base()).await;
+    let msg = body(upload_plugin(server.base(), &cookie, &pkg)).to_string();
+    assert!(msg.contains("package_trusted_keys"), "{msg}");
+    assert!(!msg.contains("Settings"), "{msg}");
+}
+
+#[tokio::test]
+async fn a_corrupt_theme_upload_reports_the_parse_error_not_the_signing_rule() {
+    let db = TestDb::new().await;
+    let server = TestServer::start(common::BIN, &db);
+    let cookie = admin_cookie(&db, server.base()).await;
+    let resp = upload_theme(server.base(), &cookie, b"this is not a zip", None);
+    assert_eq!(resp.status(), 400);
+    let msg = body(resp).to_string();
+    assert!(!msg.contains("carries a script"), "{msg}");
+}

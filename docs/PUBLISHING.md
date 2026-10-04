@@ -65,8 +65,9 @@ Tell your test install to trust your key, then upload the package:
 VYASA_PACKAGE_TRUSTED_KEYS=<public hex> vyasa serve
 ```
 
-Plugins → Upload, or Appearance → Upload (attach the `.sig` as the
-signature for a scripted theme). Enable or activate it and use it the way
+Plugins → Upload, or Appearance → Upload package (for a theme that carries
+a script, select the `.sig` together with the `.vytheme` in the file
+picker). Enable or activate it and use it the way
 an operator would. A package that installs here installs everywhere: the
 marketplace's checks are the server's own.
 

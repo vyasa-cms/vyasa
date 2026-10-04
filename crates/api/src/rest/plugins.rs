@@ -63,7 +63,8 @@ pub async fn install(
     if keys.is_empty() {
         return Err(ApiError(AppError::validation(
             "no trusted signing keys are configured, so no package can be verified; \
-             add the author's public key under Settings → Marketplace and updates",
+             ask your operator to add the author's public key to package_trusted_keys \
+             in vyasa.toml (or VYASA_PACKAGE_TRUSTED_KEYS)",
         )));
     }
     let parsed = match vyasa_plugins::package::parse_rpplugin(&bytes, &keys) {
@@ -85,7 +86,8 @@ pub async fn install(
                 .unwrap_or_default();
             return Err(ApiError(AppError::forbidden(format!(
                 "this package is not signed by any trusted key (signature {prefix}…); \
-                 add the author's public key under Settings → Marketplace and updates, then install again"
+                 ask your operator to add the author's public key to package_trusted_keys \
+                 in vyasa.toml (or VYASA_PACKAGE_TRUSTED_KEYS), then install again"
             ))));
         }
     };

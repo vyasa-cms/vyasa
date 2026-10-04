@@ -102,17 +102,18 @@ pub async fn install(
         )));
     };
 
+    let parsed = vyasa_themes::package::parse_vytheme(&bytes)
+        .map_err(|e| ApiError(AppError::validation(e.to_string())))?;
+
     // Scripted themes need a trusted signature, exactly as from the
-    // marketplace; the operator's own keys count here too.
+    // marketplace; the operator's own keys count here too. Checked after
+    // parsing so a corrupt package reports what is wrong with it.
     let mut keys: Vec<String> = crate::official::MARKETPLACE_KEYS
         .iter()
         .map(|k| (*k).to_owned())
         .collect();
     keys.extend(state.config.package_trusted_keys.iter().cloned());
     crate::signing::verify_theme_upload(&bytes, signature.as_deref(), &keys).map_err(ApiError)?;
-
-    let parsed = vyasa_themes::package::parse_vytheme(&bytes)
-        .map_err(|e| ApiError(AppError::validation(e.to_string())))?;
 
     let templates_json =
         if parsed.templates.is_empty() {

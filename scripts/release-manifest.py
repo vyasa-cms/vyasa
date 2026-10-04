@@ -60,6 +60,7 @@ def main(argv=None) -> int:
     })
     doc["releases"].sort(key=lambda r: tuple(int(x) for x in r["version"].split(".")), reverse=True)
     doc["latest"] = doc["releases"][0]["version"]
+    a.out.parent.mkdir(parents=True, exist_ok=True)
     a.out.write_text(json.dumps(doc, indent=2) + "\n")
     print(f"stable.json: latest {doc['latest']}, {len(doc['releases'])} release(s)")
     return 0

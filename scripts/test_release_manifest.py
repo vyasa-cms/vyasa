@@ -46,6 +46,11 @@ class ReleaseManifest(unittest.TestCase):
         migrations = len(list((HERE.parent / "crates/db/migrations").glob("*.sql")))
         self.assertEqual(release["migration_version"], migrations)
 
+    def test_the_output_directory_is_created(self):
+        self.out = self.tmp / "deploy" / "updates" / "dist" / "stable.json"
+        self.assertEqual(self.run_it("1.0.0"), 0)
+        self.assertTrue(self.out.exists())
+
     def test_a_prerelease_is_refused(self):
         self.assertEqual(self.run_it("1.1.0-rc.1"), 2)
         self.assertFalse(self.out.exists())
