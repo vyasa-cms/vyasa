@@ -10,7 +10,7 @@ description = "Vyasa plugins crate"
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 toml = "1"
-zip = { version = "2", features = ["deflate"] }
+zip = { version = "8", default-features = false, features = ["deflate"] }
 ammonia = "4"
 wasmtime = { version = "36", features = ["component-model", "async", "runtime"] }
 tracing = "0.1"
