@@ -63,7 +63,7 @@ zip = { version = "2", features = ["deflate"] }
 html5ever = { version = "0.40", optional = true }
 ureq = { version = "2", optional = true }
 vyasa-plugins = { path = "../plugins" }
-ed25519-dalek = "2"
+ed25519-dalek = "3"
 vyasa-ai = { path = "../ai" }
 schemars = "1.2.2"
 reqwest = "0.13.4"
