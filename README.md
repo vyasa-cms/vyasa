@@ -84,6 +84,7 @@ environment variables — `__` separates nesting, so `VYASA_LOG__LEVEL=debug`.
 | How it fits together | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) |
 | Building themes | [docs/THEMES.md](docs/THEMES.md) |
 | Writing plugins | [docs/plugin-api.md](docs/plugin-api.md), [plugin-sdk/](plugin-sdk) |
+| Publishing to the marketplace | [docs/PUBLISHING.md](docs/PUBLISHING.md) |
 | AI agents over MCP | [docs/MCP.md](docs/MCP.md) |
 | Deploying and running | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md), [docs/OPERATIONS.md](docs/OPERATIONS.md) |
 | Security model | [docs/SECURITY.md](docs/SECURITY.md) |
@@ -99,8 +100,11 @@ migrations are forward-only.
 
 ## Plugins and themes
 
-Find and publish plugins and themes in the
-[Vyasa marketplace](https://github.com/vyasa-cms/marketplace).
+Every install browses the official marketplace out of the box — Plugins
+→ Browse plugins, Appearance → Browse themes. To publish yours, start
+from the [theme-starter](https://github.com/vyasa-cms/theme-starter) or
+[plugin-starter](https://github.com/vyasa-cms/plugin-starter) template
+and follow [docs/PUBLISHING.md](docs/PUBLISHING.md).
 
 ## Contributing
 

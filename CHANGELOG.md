@@ -15,6 +15,18 @@ follows [semantic versioning](https://semver.org) as described in
 - Dependencies moved to their current majors: sqlx 0.9, wasmtime 49,
   zip 8, ed25519-dalek 3 and html5ever 0.40; the admin builds with vite 8,
   vitest 5 and TypeScript 6.
+- The official marketplace (marketplace.vyasa.site) and update channel
+  (updates.vyasa.site) are built in, trusted through keys compiled into
+  the binary. The `registry_url`, `registry_trusted_keys`,
+  `update_channel_url` and `update_trusted_keys` options and the setup
+  wizard's updates step are gone; operators can mirror or switch either
+  source off in `vyasa.toml`. **Upgrade note:** stored values of those
+  options are deleted (migration 52).
+- A theme carrying script must be signed to be uploaded by hand.
+  `vyasa theme pack` builds and signs one. `plugin_trusted_keys` is now
+  `package_trusted_keys` (the old name still works).
+- Marketplace plugins are checked against the author key in their
+  listing, so sites no longer need each author's key.
 
 ## [0.1.0-rc.2] - 2026-10-03
 
