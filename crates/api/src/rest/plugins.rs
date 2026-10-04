@@ -208,7 +208,7 @@ pub(crate) async fn trusted_keys(state: &AppState) -> Vec<VerifyingKey> {
     // The environment and the Settings page both count. Uploads used to
     // read the environment only, so a key pasted under Settings let the
     // marketplace verify a package that the upload form then refused.
-    let mut raws: Vec<String> = state.config.plugin_trusted_keys.clone();
+    let mut raws: Vec<String> = state.config.package_trusted_keys.clone();
     raws.extend(crate::registry::trusted_keys(state).await);
     let mut out = Vec::new();
     for raw in raws {

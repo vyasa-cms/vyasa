@@ -44,6 +44,7 @@ mod mfa;
 mod middleware;
 mod net_guard;
 mod newsletter;
+mod official;
 mod patterns;
 mod permalinks;
 mod plugin_blocks;

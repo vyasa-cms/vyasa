@@ -8,7 +8,7 @@
 //! including their own.
 //!
 //! These commands are that missing helper: `keygen` mints a keypair and
-//! prints the public half to put in `plugin_trusted_keys`, `pack` builds
+//! prints the public half to put in `package_trusted_keys`, `pack` builds
 //! and signs the `.vyplugin` zip.
 
 use std::path::{Path, PathBuf};
@@ -43,11 +43,11 @@ pub fn keygen() {
     println!("secret (keep private, pass as VYASA_SIGNING_KEY):");
     println!("  {}", hex::encode(seed));
     println!();
-    println!("public (add to plugin_trusted_keys):");
+    println!("public (add to package_trusted_keys):");
     println!("  {public}");
     println!();
     println!("Trust it by adding to your .env:");
-    println!("  VYASA_PLUGIN_TRUSTED_KEYS={public}");
+    println!("  VYASA_PACKAGE_TRUSTED_KEYS={public}");
 }
 
 /// Builds `<dir>` into a signed `.vyplugin` package.
@@ -111,7 +111,7 @@ pub fn pack(dir: &Path, out: Option<PathBuf>, key_hex: Option<String>) -> Result
         "signed with public key {}",
         hex::encode(signing.verifying_key().to_bytes())
     );
-    println!("the server must list that key in plugin_trusted_keys to accept it");
+    println!("the server must list that key in package_trusted_keys to accept it");
     Ok(())
 }
 
@@ -135,7 +135,7 @@ pub async fn install(
 
     let bytes = std::fs::read(path).map_err(|e| format!("{}: {e}", path.display()))?;
     let keys: Vec<VerifyingKey> = config
-        .plugin_trusted_keys
+        .package_trusted_keys
         .iter()
         .filter_map(|raw| {
             let bytes = hex::decode(raw.trim()).ok()?;
@@ -145,7 +145,7 @@ pub async fn install(
         .collect();
     if keys.is_empty() {
         return Err(String::from(
-            "no trusted signing keys configured; set VYASA_PLUGIN_TRUSTED_KEYS              to the public key that signed this package",
+            "no trusted signing keys configured; set VYASA_PACKAGE_TRUSTED_KEYS              to the public key that signed this package",
         ));
     }
     let parsed = vyasa_plugins::package::parse_rpplugin(&bytes, &keys)
