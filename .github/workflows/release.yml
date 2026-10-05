@@ -291,9 +291,9 @@ jobs:
           rm release.key
         env:
           RELEASE_KEY: ${{ secrets.RELEASE_KEY }}
-      - uses: cloudflare/wrangler-action@v3
-        with:
-          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: deploy/updates
-          command: deploy
+      - name: Deploy updates.vyasa.site
+        working-directory: deploy/updates
+        run: npx --yes wrangler@4 deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
