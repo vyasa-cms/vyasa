@@ -2,7 +2,7 @@
 //! the eight steps. Each step is a plain function over `AppState` so the
 //! browser wizard and `vyasa setup --answers` run the same code.
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use vyasa_common::AppError;
 use vyasa_core::health::{Check, Status};
 
@@ -46,6 +46,15 @@ pub async fn progress(state: &AppState) -> Option<String> {
         .ok()
         .and_then(|v| v.as_str().map(str::to_owned))
         .filter(|s| !s.is_empty())
+        // The wizard's "updates" step was retired with the marketplace
+        // options; a site that stopped there resumes at the last step.
+        .map(|s| {
+            if s == "updates" {
+                "finish".to_owned()
+            } else {
+                s
+            }
+        })
 }
 
 async fn set_progress(state: &AppState, step: &str) -> Result<(), AppError> {
@@ -623,78 +632,7 @@ pub async fn assistants(state: &AppState, input: AssistantsInput) -> Result<(), 
             )
             .await?;
     }
-    set_progress(state, "updates").await
-}
-
-/// Step 7.
-#[derive(Deserialize, utoipa::ToSchema, Default)]
-pub struct UpdatesInput {
-    pub update_channel_url: Option<String>,
-    pub registry_url: Option<String>,
-    pub trusted_keys: Option<Vec<String>>,
-}
-
-/// # Errors
-/// Validation from the options service.
-pub async fn updates(state: &AppState, input: UpdatesInput) -> Result<(), AppError> {
-    if let Some(u) = input.update_channel_url.filter(|u| !u.trim().is_empty()) {
-        state
-            .options_service
-            .put(
-                "update_channel_url",
-                serde_json::Value::String(u.trim().to_owned()),
-            )
-            .await?;
-    }
-    if let Some(u) = input.registry_url.filter(|u| !u.trim().is_empty()) {
-        state
-            .options_service
-            .put(
-                "registry_url",
-                serde_json::Value::String(u.trim().to_owned()),
-            )
-            .await?;
-    }
-    if let Some(keys) = input.trusted_keys {
-        let keys: Vec<serde_json::Value> = keys
-            .into_iter()
-            .map(|k| serde_json::Value::String(k.trim().to_owned()))
-            .filter(|k| k.as_str().is_some_and(|s| !s.is_empty()))
-            .collect();
-        state
-            .options_service
-            .put(
-                "update_trusted_keys",
-                serde_json::Value::Array(keys.clone()),
-            )
-            .await?;
-        state
-            .options_service
-            .put("registry_trusted_keys", serde_json::Value::Array(keys))
-            .await?;
-    }
     set_progress(state, "finish").await
-}
-
-/// A fresh ed25519 keypair for signing this site's own plugin packages.
-/// The private half is returned once and stored nowhere.
-#[derive(Serialize, utoipa::ToSchema)]
-pub struct Keypair {
-    pub public_key: String,
-    pub private_key: String,
-}
-
-#[must_use]
-pub fn keypair() -> Keypair {
-    use ed25519_dalek::SigningKey;
-    use rand::RngCore as _;
-    let mut seed = [0u8; 32];
-    rand::thread_rng().fill_bytes(&mut seed);
-    let signing = SigningKey::from_bytes(&seed);
-    Keypair {
-        public_key: hex::encode(signing.verifying_key().to_bytes()),
-        private_key: hex::encode(signing.to_bytes()),
-    }
 }
 
 /// Step 8: marks setup done and rebuilds the search index.
@@ -729,8 +667,6 @@ pub async fn print_answers(state: &AppState) -> String {
         "ai_alt_text",
         "ai_comment_screening",
         "ai_related_posts",
-        "update_channel_url",
-        "registry_url",
     ] {
         if let Ok(v) = state.options.get(key).await {
             if !v.is_null() {
@@ -758,7 +694,9 @@ pub struct Answers {
     pub delivery: Option<DeliveryInput>,
     pub mail: Option<MailInput>,
     pub assistants: Option<AssistantsInput>,
-    pub updates: Option<UpdatesInput>,
+    /// Retired with the marketplace options; old answer files still load.
+    #[serde(default, rename = "updates")]
+    pub _updates: Option<serde::de::IgnoredAny>,
     #[serde(default = "default_true")]
     pub finish: bool,
 }
@@ -809,10 +747,6 @@ pub async fn run_answers(state: &AppState, answers: Answers) -> Result<Vec<Strin
     if let Some(a) = answers.assistants {
         assistants(state, a).await?;
         done.push("assistants".into());
-    }
-    if let Some(u) = answers.updates {
-        updates(state, u).await?;
-        done.push("updates".into());
     }
     if answers.finish {
         finish(state).await?;

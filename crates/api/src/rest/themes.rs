@@ -56,7 +56,7 @@ impl From<ThemeRow> for ThemeResponse {
     post, path = "/api/v1/themes",
     tag = "themes",
     security(("session_cookie" = [])),
-    request_body(content = crate::rest::upload_schema::FileUpload, description = "multipart/form-data with `file` (.vytheme)", content_type = "multipart/form-data"),
+    request_body(content = crate::rest::upload_schema::FileUpload, description = "multipart/form-data with `file` (.vytheme) and, for a theme carrying script, `signature` (hex ed25519 over the file)", content_type = "multipart/form-data"),
     responses(
         (status = 201, description = "Installed", body = ThemeResponse),
         (status = 400, description = "Invalid package", body = ApiErrorBody),
@@ -69,11 +69,19 @@ pub async fn install(
     mut multipart: Multipart,
 ) -> ApiResult<(StatusCode, Json<ThemeResponse>)> {
     let mut bytes: Option<Vec<u8>> = None;
+    let mut signature: Option<String> = None;
     while let Some(field) = multipart
         .next_field()
         .await
         .map_err(|err| ApiError(AppError::validation(format!("multipart error: {err}"))))?
     {
+        if field.name() == Some("signature") {
+            signature =
+                Some(field.text().await.map_err(|err| {
+                    ApiError(AppError::validation(format!("read failed: {err}")))
+                })?);
+            continue;
+        }
         if field.name() == Some("file") {
             let data = field
                 .bytes()
@@ -96,6 +104,16 @@ pub async fn install(
 
     let parsed = vyasa_themes::package::parse_vytheme(&bytes)
         .map_err(|e| ApiError(AppError::validation(e.to_string())))?;
+
+    // Scripted themes need a trusted signature, exactly as from the
+    // marketplace; the operator's own keys count here too. Checked after
+    // parsing so a corrupt package reports what is wrong with it.
+    let mut keys: Vec<String> = crate::official::MARKETPLACE_KEYS
+        .iter()
+        .map(|k| (*k).to_owned())
+        .collect();
+    keys.extend(state.config.package_trusted_keys.iter().cloned());
+    crate::signing::verify_theme_upload(&bytes, signature.as_deref(), &keys).map_err(ApiError)?;
 
     let templates_json =
         if parsed.templates.is_empty() {

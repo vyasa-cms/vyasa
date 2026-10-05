@@ -2,6 +2,9 @@ import type { components } from "./schema";
 import { parseJsonPreservingIds } from "./json-bigint";
 
 /** Generated schema types re-exported for convenience. */
+/** Where the marketplace or update channel points, as the server reports it. */
+export type SourceInfo = { state: "official" | "mirror" | "off"; url: string };
+
 export type UserResponse = IdAsString<components["schemas"]["UserResponse"]>;
 /**
  * The account an administrator's "Confirm" left, and `link_sent`: whether
@@ -1462,6 +1465,9 @@ export const api = {
     return request("/api/v1/mail/test", { method: "POST", body: JSON.stringify({ to }) });
   },
 
+  registrySources(): Promise<{ marketplace: SourceInfo; updates: SourceInfo }> {
+    return request("/api/v1/registry/sources");
+  },
   setupVerifyUrl(url: string): Promise<{ reachable: boolean; local: boolean }> {
     return request(`/api/v1/setup/verify-url?url=${encodeURIComponent(url)}`);
   },

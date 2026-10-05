@@ -5893,12 +5893,17 @@ dependencies = [
 name = "vyasa-testkit"
 version = "0.1.0-rc.2"
 dependencies = [
+ "ed25519-dalek",
+ "hex",
  "rand 0.8.8",
  "sha2 0.11.0",
  "socket2",
  "sqlx",
  "tokio",
  "url",
+ "vyasa-plugins",
+ "vyasa-themes",
+ "zip",
 ]
 
 [[package]]

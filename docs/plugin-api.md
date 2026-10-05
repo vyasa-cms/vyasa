@@ -465,13 +465,15 @@ cargo build --release --target wasm32-wasip2
 wasm-tools validate target/wasm32-wasip2/release/*.wasm
 ```
 
-A package is a zip of `manifest.toml`, `plugin.wasm` and `signature.txt`,
-and the server accepts it only when the signature verifies against a key
-in `plugin_trusted_keys`. Mint one and sign with the CLI:
+A package is a zip of `manifest.toml`, `plugin.wasm` and `signature.txt`.
+A hand-uploaded package is accepted only when the signature verifies
+against a key in `package_trusted_keys` (`plugin_trusted_keys` still
+works as an alias); a marketplace package is checked against the
+`author_key` its listing names. Mint a key and sign with the CLI:
 
 ```bash
 vyasa plugin keygen                 # prints a secret and a public key
-export VYASA_PLUGIN_TRUSTED_KEYS=<public hex>   # then restart the server
+export VYASA_PACKAGE_TRUSTED_KEYS=<public hex>  # then restart the server
 
 mkdir pkg && cp target/wasm32-wasip2/release/my_plugin.wasm pkg/plugin.wasm
 cat > pkg/manifest.toml <<'TOML'
@@ -497,7 +499,8 @@ vyasa plugin install my-plugin.vyplugin --enable
 ```
 
 All three run the same checks: size, zip safety, capability names, and
-the signature against `plugin_trusted_keys`.
+the signature against `package_trusted_keys`. To publish the package for
+every Vyasa install, see [PUBLISHING.md](PUBLISHING.md).
 
 Installing does not enable it; enable it separately.
 

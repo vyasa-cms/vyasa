@@ -42,14 +42,6 @@ pub const SITE_OPTION_KEYS: &[&str] = &[
     // Audience (phase 61): the newsletter is off until an operator
     // turns it on — publishing must never surprise-email anyone.
     "newsletter_enabled",
-    // Upgrades (phase 63): where release metadata is fetched from, and
-    // the ed25519 public keys whose signature makes a release trusted.
-    "update_channel_url",
-    "update_trusted_keys",
-    // Marketplace (phase 65): where the plugin/theme index lives, and the
-    // keys whose signature makes one of its packages trustworthy.
-    "registry_url",
-    "registry_trusted_keys",
     // First-run setup (phase 76): how far the wizard got, and the site's
     // language tag for the html element.
     "setup_progress",
@@ -68,12 +60,11 @@ pub const SITE_OPTION_KEYS: &[&str] = &[
     "registration_default_role",
 ];
 
-/// Options that decide where the site's mail goes, which address its
-/// links carry, where upgrades and packages come from, and whose signature
-/// makes them trusted. Whoever writes one can take the site over (a
-/// password-reset link sent through their relay, or to their address; a
-/// release or a plugin they signed), so the API asks for more than
-/// `manage_options` to write them.
+/// Options that decide where the site's mail goes and which address its
+/// links carry. Whoever writes one can take the site over (a
+/// password-reset link sent through their relay, or to their address), so
+/// the API asks for more than `manage_options` to write them. Where
+/// upgrades and packages come from is compiled into the binary.
 pub const FULL_ADMINISTRATOR_OPTION_KEYS: &[&str] = &[
     // The absolute address in password-reset and invitation links.
     "site_url",
@@ -84,14 +75,6 @@ pub const FULL_ADMINISTRATOR_OPTION_KEYS: &[&str] = &[
     "smtp_username",
     "smtp_password",
     "smtp_from",
-    // Where release metadata is fetched from, and the keys that make a
-    // release trusted: together, the binary the site runs next.
-    "update_channel_url",
-    "update_trusted_keys",
-    // Where the marketplace index lives, and the keys that make a
-    // plugin or theme package trusted.
-    "registry_url",
-    "registry_trusted_keys",
     // Whether strangers may make accounts, and what those accounts may do.
     "registration_enabled",
     "registration_default_role",
@@ -566,26 +549,6 @@ impl OptionsService {
                     "ai_comment_screening must be off|flag|spam",
                 ));
             }
-            "registry_url" => {
-                let raw = value.as_str().unwrap_or("");
-                if !raw.is_empty() && !raw.starts_with("https://") {
-                    return Err(AppError::validation(
-                        "the marketplace index must be an https URL",
-                    ));
-                }
-            }
-            "registry_trusted_keys" | "update_trusted_keys" => {
-                validate_trusted_keys(value)?;
-            }
-            "update_channel_url" => {
-                let raw = value.as_str().unwrap_or("");
-                if !raw.is_empty() && !raw.starts_with("https://") {
-                    return Err(AppError::validation(
-                        "the update channel must be an https URL — a release fetched \
-                         over plain http can be swapped in transit",
-                    ));
-                }
-            }
             k if k.starts_with("registration_") => return registration_option(k, value),
             "newsletter_enabled" if !value.is_boolean() => {
                 return Err(AppError::validation(
@@ -884,21 +847,4 @@ fn default_role_refused(name: &str) -> AppError {
         "\"{name}\" cannot be the role new registrations get: it can manage users, \
          options, plugins, themes or categories, edit others' content or moderate comments"
     ))
-}
-
-fn validate_trusted_keys(value: &serde_json::Value) -> Result<(), AppError> {
-    let keys = match value {
-        serde_json::Value::Null => Vec::new(),
-        serde_json::Value::Array(items) => items.clone(),
-        _ => return Err(AppError::validation("trusted keys must be a list")),
-    };
-    for key in &keys {
-        let hex = key.as_str().unwrap_or("");
-        if hex.len() != 64 || !hex.bytes().all(|b| b.is_ascii_hexdigit()) {
-            return Err(AppError::validation(
-                "each trusted key is 64 hex characters (an ed25519 public key)",
-            ));
-        }
-    }
-    Ok(())
 }

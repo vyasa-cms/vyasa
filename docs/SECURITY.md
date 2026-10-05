@@ -140,10 +140,12 @@ land on the current release line.
     the bulk `PUT /options` (one such key refuses the whole request):
     `site_url` (the address in reset and invitation links), `smtp_host`,
     `smtp_port`, `smtp_username`, `smtp_password`, `smtp_from` (the relay,
-    stored as options), `update_channel_url` and `update_trusted_keys`
-    (the binary the site runs next), `registry_url` and
-    `registry_trusted_keys` (which plugin and theme packages are trusted).
-    The list is `vyasa_core::options::FULL_ADMINISTRATOR_OPTION_KEYS`;
+    stored as options). The list is
+    `vyasa_core::options::FULL_ADMINISTRATOR_OPTION_KEYS`. Where releases
+    and packages come from, and whose signature makes them trusted, is
+    not an option at all: it is compiled into the binary
+    (`crates/api/src/official.rs`) and only the server's configuration
+    can mirror or disable it;
   - `POST /updates/apply`;
   - `POST /import`: an archive brings in content, accounts and (when
     asked) site options wholesale;

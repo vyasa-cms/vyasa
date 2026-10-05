@@ -42,7 +42,9 @@ fn dummy_config() -> VyasaConfig {
         index_dir: PathBuf::from("/tmp"),
         registry_dir: PathBuf::from("/tmp"),
         debug: true,
-        plugin_trusted_keys: Vec::new(),
+        package_trusted_keys: Vec::new(),
+        marketplace: vyasa_common::config::SourceConfig::default(),
+        updates: vyasa_common::config::SourceConfig::default(),
         db: DbConfig {
             max_connections: 4,
             acquire_timeout_secs: 5,

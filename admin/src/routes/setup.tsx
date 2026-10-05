@@ -18,11 +18,11 @@ export const Route = createFileRoute("/setup")({
   component: SetupPage,
 });
 
-const STEPS = ["welcome", "account", "site", "content", "delivery", "mail", "assistants", "updates", "done"] as const;
+const STEPS = ["welcome", "account", "site", "content", "delivery", "mail", "assistants", "done"] as const;
 type Step = (typeof STEPS)[number];
 const LABELS: Record<Step, string> = {
   welcome: "Welcome", account: "Account", site: "Site", content: "Content", delivery: "Delivery",
-  mail: "Mail", assistants: "Assistants", updates: "Updates", done: "Done",
+  mail: "Mail", assistants: "Assistants", done: "Done",
 };
 
 /**
@@ -96,7 +96,6 @@ function SetupPage() {
       {step === "delivery" ? <Delivery onDone={next} onSkip={skip} onBack={back} /> : null}
       {step === "mail" ? <Mail email={String(answers["email"] ?? "")} onDone={next} onSkip={skip} onBack={back} /> : null}
       {step === "assistants" ? <Assistants onDone={next} onSkip={skip} onBack={back} /> : null}
-      {step === "updates" ? <Updates onDone={next} onSkip={skip} onBack={back} /> : null}
       {step === "done" ? <Done skipped={skipped} siteUrl={String(answers["site_url"] ?? window.location.origin)} /> : null}
     </Shell>
   );
@@ -366,38 +365,6 @@ function Assistants({ onDone, onSkip, onBack }: { onDone: () => void; onSkip: ()
         <label className="flex items-center gap-2"><input type="checkbox" checked={alt} onChange={(e) => setAlt(e.target.checked)} className="accent-primary" />Write alt text for uploads that have none</label>
         <label className="flex items-center gap-2"><input type="checkbox" checked={screen} onChange={(e) => setScreen(e.target.checked)} className="accent-primary" />Screen comments before they publish</label>
         <label className="flex items-center gap-2"><input type="checkbox" checked={related} onChange={(e) => setRelated(e.target.checked)} className="accent-primary" />Related posts and semantic search (needs an embedding model)</label>
-      </div>
-      <Actions onBack={onBack} onSkip={onSkip} primary="Save and continue" pending={save.isPending} onPrimary={() => save.mutate()} />
-    </div>
-  );
-}
-
-function Updates({ onDone, onSkip, onBack }: { onDone: () => void; onSkip: () => void; onBack: () => void }) {
-  const [v, setV] = React.useState({ update_channel_url: "", registry_url: `${window.location.origin}/registry/index.json`, trusted_keys: "" });
-  const [pair, setPair] = React.useState<{ public_key: string; private_key: string } | null>(null);
-  const keygen = useMutation({ mutationFn: () => api.setupStep<{ public_key: string; private_key: string }>("keypair", {}), onSuccess: setPair, onError: (e) => notify.error("Couldn't generate a key", e) });
-  const save = useMutation({
-    mutationFn: () => api.setupStep("updates", { ...v, trusted_keys: v.trusted_keys.split(/[\s,]+/).filter(Boolean) }),
-    onSuccess: onDone,
-    onError: (e) => notify.error("Couldn't save update settings", e),
-  });
-  return (
-    <div>
-      <StepHeader title="Updates & marketplace" why="Where new releases and packages come from, and whose signatures to trust." />
-      <div className="grid gap-3 lg:grid-cols-2 2xl:grid-cols-3">
-        <Field label="Update channel" htmlFor="s-uc" hint="Leave empty to keep the official channel."><Input id="s-uc" value={v.update_channel_url} onChange={(e) => setV({ ...v, update_channel_url: e.target.value })} className="font-mono text-sm" /></Field>
-        <Field label="Marketplace" htmlFor="s-reg" hint="Themes and plugins offered under Appearance and Plugins."><Input id="s-reg" value={v.registry_url} onChange={(e) => setV({ ...v, registry_url: e.target.value })} className="font-mono text-sm" /></Field>
-        <Field label="Trusted keys" htmlFor="s-keys" hint="Hex ed25519 public keys, one per line. Packages signed by anyone else are refused."><Input id="s-keys" value={v.trusted_keys} onChange={(e) => setV({ ...v, trusted_keys: e.target.value })} className="font-mono text-sm" /></Field>
-      </div>
-      <div className="mt-3 space-y-2">
-        <Button type="button" variant="outline" disabled={keygen.isPending} onClick={() => keygen.mutate()}>Generate a plugin signing key for this site</Button>
-        {pair ? (
-          <div className="rounded-md border bg-muted/40 p-3 text-xs" data-testid="setup-keypair">
-            <p className="font-medium">Shown once. Keep the private half with your deploy secrets.</p>
-            <p className="mt-1 break-all"><span className="text-muted-foreground">public</span> <code>{pair.public_key}</code></p>
-            <p className="break-all"><span className="text-muted-foreground">private</span> <code>{pair.private_key}</code></p>
-          </div>
-        ) : null}
       </div>
       <Actions onBack={onBack} onSkip={onSkip} primary="Save and finish" pending={save.isPending} onPrimary={() => save.mutate()} />
     </div>

@@ -353,9 +353,11 @@ export const rollbackTheme = (name: string): Promise<ThemeSummary> =>
   );
 
 /** Uploads a `.vytheme` package. Installs only; nothing goes live. */
-export const installTheme = (file: File): Promise<ThemeSummary> => {
+export const installTheme = (file: File, signature?: string): Promise<ThemeSummary> => {
   const form = new FormData();
   form.append("file", file);
+  // A theme that carries a script must be signed; the .sig travels as text.
+  if (signature) form.append("signature", signature.trim());
   return fetch("/api/v1/themes", {
     method: "POST",
     credentials: "same-origin",

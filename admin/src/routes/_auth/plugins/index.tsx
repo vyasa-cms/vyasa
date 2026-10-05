@@ -322,7 +322,7 @@ function InstallSection({ onInstalled }: { onInstalled: () => void }) {
               <p className="text-xs text-success" data-testid="signature-ok">Signed by a trusted key.</p>
             ) : (
               <p className="text-xs text-destructive" data-testid="signature-bad">
-                Not signed by any trusted key (signature {seen.signature_prefix}…). Add the author's public key under <a href="/admin/settings#settings-updates" className="underline">Settings → Marketplace and updates</a>, then upload again.
+                Not signed by any trusted key (signature {seen.signature_prefix}…). Ask your operator to add the author's public key to <code>package_trusted_keys</code> in vyasa.toml, then upload again.
               </p>
             )}
           </div>

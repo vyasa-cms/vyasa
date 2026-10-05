@@ -62,8 +62,8 @@ export function RegistryBrowser({ kind }: { kind: "plugin" | "theme" }) {
     return (
       <Panel title={title}>
         <EmptyState
-          title="No marketplace configured"
-          description="Set a marketplace index URL in Settings to browse and install from one."
+          title="The marketplace is turned off"
+          description="The marketplace is turned off on this server. Your operator can turn it back on in vyasa.toml."
         />
       </Panel>
     );

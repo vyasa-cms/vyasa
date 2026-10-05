@@ -720,11 +720,9 @@ pub const DEMO_REFUSED_ROUTES: &[(&str, &str, &str)] = &[
     ("POST", "/api/v1/setup/content", "Re-running setup"),
     ("POST", "/api/v1/setup/delivery", "Re-running setup"),
     ("POST", "/api/v1/setup/finish", "Re-running setup"),
-    ("POST", "/api/v1/setup/keypair", "Re-running setup"),
     ("POST", "/api/v1/setup/mail", "Re-running setup"),
     ("POST", "/api/v1/setup/mail/test", "Re-running setup"),
     ("POST", "/api/v1/setup/site", "Re-running setup"),
-    ("POST", "/api/v1/setup/updates", "Re-running setup"),
 ];
 
 /// Whether a demo refuses `method` on the route matched as `matched_path`.

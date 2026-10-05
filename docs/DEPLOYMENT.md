@@ -182,14 +182,13 @@ The state that *can* be lost is on disk:
 Neither should live inside the directory a release is extracted over.
 The preflight checks that too.
 
-### Set up the channel
+### The channel
 
-```bash
-# Where release metadata lives (https only).
-vyasa … # or Settings → the update_channel_url option
-# Optional: trust only signed releases (hex ed25519 public keys).
-#   update_trusted_keys = ["<64 hex chars>", …]
-```
+Update checks read <https://updates.vyasa.site/stable.json>, and every
+tarball is verified against the release keys compiled into the binary;
+nothing to set up. Container installs are told which image to pull rather
+than swapping the binary. To mirror the manifest or turn checks off, see
+`[updates]` in [MARKETPLACE.md](MARKETPLACE.md#operators-mirrors-and-switches).
 
 ### Check, rehearse, apply
 

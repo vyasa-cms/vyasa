@@ -179,7 +179,7 @@ export function AppearancePage({
   });
 
   const upload = useMutation({
-    mutationFn: (file: File) => installTheme(file),
+    mutationFn: ({ file, signature }: { file: File; signature?: string }) => installTheme(file, signature),
     onSuccess: (theme) => {
       invalidate();
       notify.success(`Installed ${theme.name} v${theme.version}`, "Activate it when you're ready.");
@@ -235,12 +235,20 @@ export function AppearancePage({
             <input
               ref={fileRef}
               type="file"
-              accept=".vytheme,.zip"
+              accept=".vytheme,.zip,.sig"
+              multiple
               className="hidden"
-              aria-label="Theme package"
+              aria-label="Theme package (and its .sig, for a theme that carries a script)"
               onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file !== undefined) upload.mutate(file);
+                // One package, plus an optional detached signature: a
+                // theme that carries a script is refused without one.
+                const files = Array.from(e.target.files ?? []);
+                const file = files.find((f) => !f.name.endsWith(".sig"));
+                const sig = files.find((f) => f.name.endsWith(".sig"));
+                if (file !== undefined) {
+                  if (sig !== undefined) void sig.text().then((signature) => upload.mutate({ file, signature }));
+                  else upload.mutate({ file });
+                }
                 e.target.value = "";
               }}
             />

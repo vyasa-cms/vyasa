@@ -42,6 +42,8 @@ pub struct BrowseQuery {
 pub struct BrowseResponse {
     /// Whether a marketplace is configured at all.
     pub configured: bool,
+    /// Official, an operator's mirror, or off.
+    pub state: crate::official::SourceState,
     /// Why the marketplace could not be read, when it could not.
     pub error: Option<String>,
     /// Matching listings.
@@ -108,19 +110,21 @@ pub async fn browse(
     State(state): State<AppState>,
     Query(query): Query<BrowseQuery>,
 ) -> ApiResult<Json<BrowseResponse>> {
-    let url = crate::registry::url(&state).await;
-    if url.trim().is_empty() {
+    let source = crate::registry::source(&state);
+    if source.state == crate::official::SourceState::Off {
         return Ok(Json(BrowseResponse {
             configured: false,
+            state: source.state,
             error: None,
             entries: Vec::new(),
         }));
     }
-    let doc = match index::fetch(&url).await {
+    let doc = match index::fetch(&source.url).await {
         Ok(doc) => doc,
         Err(err) => {
             return Ok(Json(BrowseResponse {
                 configured: true,
+                state: source.state,
                 error: Some(err.to_string()),
                 entries: Vec::new(),
             }))
@@ -191,6 +195,7 @@ pub async fn browse(
 
     Ok(Json(BrowseResponse {
         configured: true,
+        state: source.state,
         error: None,
         entries,
     }))
@@ -257,8 +262,13 @@ pub async fn install(
         )));
     }
 
-    let url = crate::registry::url(&state).await;
-    let doc = index::fetch(&url).await?;
+    let source = crate::registry::source(&state);
+    if source.state == crate::official::SourceState::Off {
+        return Err(ApiError(AppError::validation(
+            "the marketplace is turned off on this server",
+        )));
+    }
+    let doc = index::fetch(&source.url).await?;
     let listing = doc.find(kind, &body.name).ok_or_else(|| {
         ApiError(AppError::validation(format!(
             "the marketplace lists no {} called \"{}\"",
@@ -311,4 +321,39 @@ pub async fn install(
         serde_json::json!({ "capabilities": installed.capabilities }),
     );
     Ok((axum::http::StatusCode::CREATED, Json(installed)))
+}
+
+/// One source as the admin sees it.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct SourceInfo {
+    pub state: crate::official::SourceState,
+    /// The address in use; empty when off.
+    pub url: String,
+}
+
+/// Where packages and releases come from.
+#[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+pub struct SourcesResponse {
+    pub marketplace: SourceInfo,
+    pub updates: SourceInfo,
+}
+
+/// `GET /api/v1/registry/sources` — the marketplace and update channel
+/// this server uses: the official ones, an operator's mirror, or off.
+#[utoipa::path(get, path = "/api/v1/registry/sources", tag = "registry",
+    security(("session_cookie" = [])),
+    responses(
+        (status = 200, description = "Sources", body = SourcesResponse),
+        (status = 403, description = "Forbidden", body = ApiErrorBody),
+    )
+)]
+pub async fn sources(State(state): State<AppState>) -> ApiResult<Json<SourcesResponse>> {
+    let info = |s: crate::official::Source| SourceInfo {
+        state: s.state,
+        url: s.url,
+    };
+    Ok(Json(SourcesResponse {
+        marketplace: info(crate::official::marketplace(&state.config)),
+        updates: info(crate::official::updates(&state.config)),
+    }))
 }

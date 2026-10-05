@@ -26,6 +26,7 @@ vi.mock("@/api/client", async (importOriginal) => {
       myCaps: vi.fn(),
       listRoles: vi.fn(),
       registrationInfo: vi.fn(),
+      registrySources: vi.fn(),
     },
   };
 });
@@ -55,6 +56,10 @@ beforeEach(() => {
   mocked.myCaps.mockResolvedValue([]);
   mocked.listRoles.mockResolvedValue([]);
   mocked.registrationInfo.mockResolvedValue({ enabled: false, available: false, password_min_length: 8 });
+  mocked.registrySources.mockResolvedValue({
+    marketplace: { state: "official", url: "https://marketplace.vyasa.site/index.json" },
+    updates: { state: "official", url: "https://updates.vyasa.site/stable.json" },
+  });
 });
 
 describe("settings page", () => {
@@ -66,8 +71,6 @@ describe("settings page", () => {
       ai_month_cap_usd: 12.5,
       media_storage_cap_mb: 2048,
       site_language: "en",
-      registry_trusted_keys: ["a".repeat(64), "b".repeat(64)],
-      update_trusted_keys: [],
     } as never);
     mount();
     expect(((await screen.findByLabelText("Timezone")) as HTMLSelectElement).value).toBe("Asia/Kolkata");
@@ -76,34 +79,35 @@ describe("settings page", () => {
     expect((screen.getByLabelText("Monthly cap") as HTMLInputElement).value).toBe("12.5");
     expect((screen.getByLabelText("Storage cap") as HTMLInputElement).value).toBe("2048");
     expect((screen.getByLabelText("Language") as HTMLInputElement).value).toBe("en");
-    expect((screen.getByLabelText("Marketplace signing keys") as HTMLTextAreaElement).value.split("\n")).toHaveLength(2);
   });
 
   it("names the changed fields in the save bar and saves lists and numbers typed", { timeout: 15_000 }, async () => {
     const user = userEvent.setup();
-    mocked.getOptions.mockResolvedValue({ edge_cache_seconds: 0, update_trusted_keys: [] } as never);
+    mocked.getOptions.mockResolvedValue({ edge_cache_seconds: 0, site_language: "" } as never);
     mocked.putOptions.mockResolvedValue(undefined);
     mount();
     const cache = await screen.findByLabelText("Edge cache");
     await user.clear(cache);
     await user.type(cache, "120");
-    const keys = screen.getByLabelText("Release signing keys");
-    await user.click(keys);
-    await user.paste("c".repeat(64));
-    expect(screen.getByTestId("save-bar")).toHaveTextContent("2 unsaved changes: Edge cache, Release signing keys");
+    const lang = screen.getByLabelText("Language");
+    await user.click(lang);
+    await user.paste("pt-BR");
+    expect(screen.getByTestId("save-bar")).toHaveTextContent("2 unsaved changes: Language, Edge cache");
     await user.click(screen.getByRole("button", { name: "Save changes" }));
     await waitFor(() => expect(mocked.putOptions).toHaveBeenCalledTimes(1));
-    expect(mocked.putOptions).toHaveBeenCalledWith({ edge_cache_seconds: 120, update_trusted_keys: ["c".repeat(64)] });
+    expect(mocked.putOptions).toHaveBeenCalledWith({ edge_cache_seconds: 120, site_language: "pt-BR" });
   });
 
-  it("refuses a bad signing key and an http marketplace before asking the server", { timeout: 15_000 }, async () => {
-    const user = userEvent.setup();
+  it("shows the official sources read-only", async () => {
     mocked.getOptions.mockResolvedValue({} as never);
+    mocked.registrySources.mockResolvedValue({
+      marketplace: { state: "official", url: "https://marketplace.vyasa.site/index.json" },
+      updates: { state: "off", url: "" },
+    });
     mount();
-    await user.click(await screen.findByLabelText("Marketplace index URL"));
-    await user.paste("http://plain.example.com/index.json");
-    expect(screen.getByText("Must be an https URL.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Save changes" })).toBeDisabled();
+    expect(await screen.findByText("Official marketplace — connected")).toBeInTheDocument();
+    expect(screen.getByText("Updates — turned off by your operator")).toBeInTheDocument();
+    expect(screen.queryByLabelText("Marketplace index URL")).not.toBeInTheDocument();
   });
 
   it("checks a new site address against the server and offers Save anyway when it fails", { timeout: 15_000 }, async () => {

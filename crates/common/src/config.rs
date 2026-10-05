@@ -102,6 +102,26 @@ impl Default for JobsConfig {
     }
 }
 
+/// Where packages or releases come from, as the operator configures it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(default)]
+pub struct SourceConfig {
+    /// False turns the source off entirely.
+    pub enabled: bool,
+    /// Another https address serving the same signed document. Keys stay
+    /// the official ones, so a mirror can serve nothing they did not sign.
+    pub mirror_url: String,
+}
+
+impl Default for SourceConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            mirror_url: String::new(),
+        }
+    }
+}
+
 /// Public sandbox mode (`VYASA_DEMO__ENABLED=true`).
 ///
 /// Visitors sign in with the shared account below and may edit freely,
@@ -309,9 +329,14 @@ pub struct VyasaConfig {
     /// Whether the playground and other dev-only endpoints are enabled.
     #[serde(default)]
     pub debug: bool,
-    /// Trusted plugin signing keys (hex ed25519 public keys).
+    /// Hex ed25519 public keys trusted for manually uploaded plugins and
+    /// scripted themes (`plugin_trusted_keys` is accepted as an alias).
     #[serde(default)]
-    pub plugin_trusted_keys: Vec<String>,
+    pub package_trusted_keys: Vec<String>,
+    /// The marketplace: on by default, mirrorable, switchable off.
+    pub marketplace: SourceConfig,
+    /// The update channel: on by default, mirrorable, switchable off.
+    pub updates: SourceConfig,
     /// Database pool settings.
     pub db: DbConfig,
     /// Logging settings.
@@ -421,6 +446,9 @@ struct RawConfig {
     registry_dir: Option<PathBuf>,
     debug: Option<bool>,
     plugin_trusted_keys: Option<Vec<String>>,
+    package_trusted_keys: Option<Vec<String>>,
+    marketplace: Option<SourceConfig>,
+    updates: Option<SourceConfig>,
     db: Option<DbConfig>,
     log: Option<LogConfig>,
     jobs: Option<JobsConfig>,
@@ -454,6 +482,18 @@ impl TryFrom<RawConfig> for VyasaConfig {
                 jobs.workers
             )));
         }
+        for (name, source) in [("marketplace", &raw.marketplace), ("updates", &raw.updates)] {
+            if let Some(s) = source {
+                let m = s.mirror_url.trim();
+                if !m.is_empty() && !m.starts_with("https://") {
+                    return Err(crate::AppError::validation(format!(
+                        "{name}.mirror_url must be an https URL"
+                    )));
+                }
+            }
+        }
+        let mut package_trusted_keys = raw.package_trusted_keys.clone().unwrap_or_default();
+        package_trusted_keys.extend(raw.plugin_trusted_keys.clone().unwrap_or_default());
         let db = raw.db.unwrap_or_default();
         if !(1..=1000).contains(&db.max_connections) {
             return Err(crate::AppError::validation(format!(
@@ -482,7 +522,9 @@ impl TryFrom<RawConfig> for VyasaConfig {
                 .registry_dir
                 .unwrap_or_else(|| PathBuf::from("registry")),
             debug: raw.debug.unwrap_or(false),
-            plugin_trusted_keys: raw.plugin_trusted_keys.unwrap_or_default(),
+            package_trusted_keys,
+            marketplace: raw.marketplace.unwrap_or_default(),
+            updates: raw.updates.unwrap_or_default(),
             db,
             log: raw.log.unwrap_or_default(),
             jobs,
@@ -502,6 +544,14 @@ impl TryFrom<RawConfig> for VyasaConfig {
 }
 
 impl VyasaConfig {
+    /// The port the server binds, for building its own address.
+    #[must_use]
+    pub fn bind_addr_port(&self) -> u16 {
+        self.bind_addr
+            .parse::<SocketAddr>()
+            .map_or(3000, |a| a.port())
+    }
+
     /// Loads configuration from an optional `vyasa.toml` in the
     /// current directory plus `VYASA_*` environment overrides.
     ///
@@ -538,6 +588,7 @@ impl VyasaConfig {
                     // — one this project does not ship.
                     .list_separator(",")
                     .with_list_parse_key("plugin_trusted_keys")
+                    .with_list_parse_key("package_trusted_keys")
                     .with_list_parse_key("trusted_proxies"),
             )
             .build()
@@ -555,6 +606,57 @@ impl VyasaConfig {
 mod tests {
     use super::{LogFormat, VyasaConfig};
     use crate::AppError;
+
+    fn config_from(toml: &str, tag: &str) -> Result<VyasaConfig, AppError> {
+        let path = std::env::temp_dir()
+            .join(format!("vyasa-config-{tag}-{}.toml", std::process::id()))
+            .to_string_lossy()
+            .into_owned();
+        std::fs::write(
+            &path,
+            format!("database_url = \"postgres://u:p@localhost/x\"\n{toml}"),
+        )
+        .expect("write config");
+        VyasaConfig::load_from_file(&path)
+    }
+
+    #[test]
+    fn marketplace_and_updates_default_to_on_without_a_mirror() {
+        let cfg = config_from("", "defaults").expect("load");
+        assert!(cfg.marketplace.enabled && cfg.marketplace.mirror_url.is_empty());
+        assert!(cfg.updates.enabled && cfg.updates.mirror_url.is_empty());
+    }
+
+    #[test]
+    fn a_plain_http_mirror_is_refused() {
+        let err = config_from(
+            "[marketplace]\nmirror_url = \"http://mirror.example/index.json\"\n",
+            "http-mirror",
+        )
+        .expect_err("http mirror");
+        assert!(
+            err.to_string()
+                .contains("marketplace.mirror_url must be an https URL"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn both_names_for_package_keys_are_merged() {
+        let cfg = config_from(
+            &format!(
+                "plugin_trusted_keys = [\"{}\"]\npackage_trusted_keys = [\"{}\"]\n",
+                "a".repeat(64),
+                "b".repeat(64)
+            ),
+            "key-names",
+        )
+        .expect("load");
+        assert_eq!(
+            cfg.package_trusted_keys,
+            vec!["b".repeat(64), "a".repeat(64)]
+        );
+    }
 
     fn temp_config_path() -> String {
         std::env::temp_dir()
@@ -594,7 +696,7 @@ mod tests {
             cfg.database_url.expose(),
             "postgres://user:secretpw@localhost/rp"
         );
-        assert!(cfg.plugin_trusted_keys.is_empty(), "none configured");
+        assert!(cfg.package_trusted_keys.is_empty(), "none configured");
 
         // 2b. A list-valued field from the environment. Without an
         // explicit list separator this field is unbuildable from env at
@@ -602,7 +704,7 @@ mod tests {
         // — and installing a plugin needs at least one trusted key.
         std::env::set_var("VYASA_PLUGIN_TRUSTED_KEYS", "aa11,bb22");
         let keyed = VyasaConfig::load_from_file(&path).expect("load with keys");
-        assert_eq!(keyed.plugin_trusted_keys, vec!["aa11", "bb22"]);
+        assert_eq!(keyed.package_trusted_keys, vec!["aa11", "bb22"]);
         std::env::remove_var("VYASA_PLUGIN_TRUSTED_KEYS");
         assert_eq!(cfg.bind_addr, "127.0.0.1:9999");
         assert_eq!(cfg.media_dir, std::path::PathBuf::from("media"));

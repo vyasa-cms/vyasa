@@ -2404,6 +2404,26 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/registry/sources": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * `GET /api/v1/registry/sources` — the marketplace and update channel
+         *     this server uses: the official ones, an operator's mirror, or off.
+         */
+        get: operations["sources"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/roles": {
         parameters: {
             query?: never;
@@ -2621,23 +2641,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/api/v1/setup/keypair": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** `POST /api/v1/setup/keypair` — a plugin signing key, shown once. */
-        post: operations["keypair"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/api/v1/setup/mail": {
         parameters: {
             query?: never;
@@ -2700,23 +2703,6 @@ export interface paths {
         get: operations["status"];
         put?: never;
         post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/api/v1/setup/updates": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /** `POST /api/v1/setup/updates` */
-        post: operations["updates"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3941,6 +3927,8 @@ export interface components {
             entries: components["schemas"]["BrowseEntry"][];
             /** @description Why the marketplace could not be read, when it could not. */
             error?: string | null;
+            /** @description Official, an operator's mirror, or off. */
+            state: components["schemas"]["SourceState"];
         };
         /** @description Documents to render without saving. */
         CandidateRequest: {
@@ -4607,14 +4595,6 @@ export interface components {
             revoked: boolean;
         };
         /**
-         * @description A fresh ed25519 keypair for signing this site's own plugin packages.
-         *     The private half is returned once and stored nowhere.
-         */
-        Keypair: {
-            private_key: string;
-            public_key: string;
-        };
-        /**
          * @description What a listing installs into.
          * @enum {string}
          */
@@ -4670,6 +4650,12 @@ export interface components {
         Listing: {
             /** @description Author display string. */
             author?: string;
+            /**
+             * @description Hex ed25519 key the plugin's author signs with. The marketplace
+             *     signature over the bytes vouches for it; absent, the package must
+             *     be author-signed by a marketplace key.
+             */
+            author_key?: string | null;
             /** @description Project or documentation URL. */
             homepage?: string | null;
             /** @description `plugin` or `theme`. */
@@ -5456,6 +5442,22 @@ export interface components {
          * @enum {string}
          */
         Source: "options" | "environment" | "none";
+        /** @description One source as the admin sees it. */
+        SourceInfo: {
+            state: components["schemas"]["SourceState"];
+            /** @description The address in use; empty when off. */
+            url: string;
+        };
+        /**
+         * @description Where a source points, as the admin is told.
+         * @enum {string}
+         */
+        SourceState: "official" | "mirror" | "off";
+        /** @description Where packages and releases come from. */
+        SourcesResponse: {
+            marketplace: components["schemas"]["SourceInfo"];
+            updates: components["schemas"]["SourceInfo"];
+        };
         /**
          * @description One step of a run, as the admin polls it.
          * @enum {string}
@@ -5729,6 +5731,8 @@ export interface components {
         UpdateStatus: {
             /** @description Why no channel answered, when none did. */
             channel_error?: string | null;
+            /** @description Official channel, an operator's mirror, or off. */
+            channel_state: components["schemas"]["SourceState"];
             /** @description The running version. */
             current: string;
             /** @description How this install is deployed, and what may be done to it. */
@@ -5782,12 +5786,6 @@ export interface components {
             display_name?: string | null;
             email?: string | null;
             username?: string | null;
-        };
-        /** @description Step 7. */
-        UpdatesInput: {
-            registry_url?: string | null;
-            trusted_keys?: string[] | null;
-            update_channel_url?: string | null;
         };
         /** @description Response shape for any user (no secrets). */
         UserResponse: {
@@ -10840,6 +10838,35 @@ export interface operations {
             };
         };
     };
+    sources: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Sources */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SourcesResponse"];
+                };
+            };
+            /** @description Forbidden */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
     list: {
         parameters: {
             query?: never;
@@ -11265,26 +11292,6 @@ export interface operations {
             };
         };
     };
-    keypair: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description A fresh keypair */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Keypair"];
-                };
-            };
-        };
-    };
     mail: {
         parameters: {
             query?: never;
@@ -11377,28 +11384,6 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["SetupStatus"];
                 };
-            };
-        };
-    };
-    updates: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["UpdatesInput"];
-            };
-        };
-        responses: {
-            /** @description Saved */
-            204: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content?: never;
             };
         };
     };
@@ -11790,7 +11775,7 @@ export interface operations {
             path?: never;
             cookie?: never;
         };
-        /** @description multipart/form-data with `file` (.vytheme) */
+        /** @description multipart/form-data with `file` (.vytheme) and, for a theme carrying script, `signature` (hex ed25519 over the file) */
         requestBody: {
             content: {
                 "multipart/form-data": components["schemas"]["FileUpload"];

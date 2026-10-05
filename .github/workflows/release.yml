@@ -264,3 +264,36 @@ jobs:
           files: |
             dist/*.tar.gz
             dist/*.tar.gz.sha256
+
+  channel:
+    name: Update channel
+    needs: [meta, release]
+    if: needs.meta.outputs.publish == 'true' && needs.meta.outputs.prerelease == 'false'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: archive-*
+          path: dist
+          merge-multiple: true
+      - run: pip install cryptography
+      - name: Add the release to stable.json
+        run: |
+          set -euo pipefail
+          printf '%s' "$RELEASE_KEY" > release.key
+          curl -fsS https://updates.vyasa.site/stable.json -o current.json
+          python3 scripts/release-manifest.py --version "${{ needs.meta.outputs.version }}" \
+            --dist dist --key-file release.key --current current.json \
+            --out deploy/updates/dist/stable.json
+          rm release.key
+        env:
+          RELEASE_KEY: ${{ secrets.RELEASE_KEY }}
+      - uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: deploy/updates
+          command: deploy

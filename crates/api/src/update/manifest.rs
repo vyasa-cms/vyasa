@@ -11,9 +11,6 @@ use vyasa_common::AppError;
 /// The build's own version, stamped at compile time.
 pub const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-/// Where the manifest lives; empty disables update checks entirely.
-pub const CHANNEL_OPTION: &str = "update_channel_url";
-
 /// One downloadable build.
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct Artifact {
@@ -132,7 +129,12 @@ const MAX_MANIFEST_BYTES: usize = 16 * 1024 * 1024;
 pub async fn fetch(url: &str) -> Result<Manifest, AppError> {
     if url.trim().is_empty() {
         return Err(AppError::validation(
-            "no update channel is configured (set update_channel_url)",
+            "update checks are turned off on this server",
+        ));
+    }
+    if !crate::official::transport_ok(url.trim_start()) {
+        return Err(AppError::validation(
+            "the update channel must be an https URL",
         ));
     }
     let client = reqwest::Client::builder()

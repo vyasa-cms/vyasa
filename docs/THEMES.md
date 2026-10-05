@@ -388,11 +388,20 @@ my-theme/
 └── screenshot.png       # optional, shown in the theme picker (≤ 1 MiB)
 ```
 
-Package it from inside the folder so the files sit at the archive root:
+Package it with the CLI, which validates it as it zips:
 
 ```bash
-cd my-theme && zip -r ../my-theme.vytheme . -x '.*' '*/.*'
+vyasa theme pack my-theme                       # my-theme-1.vytheme
+vyasa theme pack my-theme --key <secret hex>    # + my-theme-1.vytheme.sig
 ```
+
+A theme that is only data uploads as it is. A theme that carries a
+script — `assets/theme.js`, or a template that writes a `<script>` — runs
+in every visitor's browser, so it must be signed: by the official
+marketplace key when it comes from the marketplace, or by a key the
+operator lists in `package_trusted_keys` when uploaded by hand (send the
+`.sig` contents as the `signature` field beside `file`). `vyasa plugin
+keygen` mints a key.
 
 | Limit | Value |
 |---|---|
@@ -484,8 +493,8 @@ part of the system:
    ```
 4. Install on a running server:
    ```bash
-   curl -F file=@theme.vytheme -H "Cookie: $SESSION" \
-        http://localhost:8080/api/v1/themes
+   curl -F file=@theme.vytheme -F signature=@theme.vytheme.sig \
+        -H "Cookie: $SESSION" http://localhost:8080/api/v1/themes
    ```
 
 ### Renderer conventions
