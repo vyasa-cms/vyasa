@@ -7,6 +7,21 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-05
+
+The first public release: an AI-native content management system in one
+server binary plus PostgreSQL. Content is stored as structured blocks,
+themes are data compiled to CSS with sandboxed templates, plugins are
+WebAssembly components that can only do what they declare, and every
+install browses the official marketplace and update channel out of the
+box. Linux (x86_64, arm64) and macOS (arm64) archives, a multi-arch
+container image, and the quick start in the README.
+
+Since the second release candidate:
+
+- `curl -fsSL https://vyasa.site/install.sh | sh` installs the release
+  for your platform (checksum verified) into `~/vyasa` and puts `vyasa`
+  on your `PATH`; the one source is `install.sh` in this repository.
 - The website moved to its own repository, [vyasa-cms/website](https://github.com/vyasa-cms/website); it still builds its docs from `docs/` here.
 - Testing a site address (`/setup/verify-url` and the setup wizard's site
   step) only fetches public addresses, through the same guard as link
@@ -43,6 +58,3 @@ Second release candidate.
 First release candidate of the first public release: Linux and macOS
 archives, a container image and the quick start, for testing before 0.1.0.
 
-## [0.1.0] - unreleased
-
-First public release.

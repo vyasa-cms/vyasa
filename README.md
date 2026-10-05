@@ -67,10 +67,19 @@ docker compose exec app cat .run/setup-token # the one-time setup token
 ```
 
 Open <http://localhost:3000/admin/setup>, enter the token, and create the
-first administrator. Until 0.1.0 is released, start with
-`VYASA_VERSION=0.1.0-rc.2` in front of the `docker compose` commands (or in
-an `.env` file next to `docker-compose.yml`). The site is on <http://localhost:3000>, the admin on
-`/admin`.
+first administrator. The site is on <http://localhost:3000>, the admin on
+`/admin`. The compose file follows the latest release; pin a version with
+`VYASA_VERSION=0.1.0` in front of the commands (or in an `.env` file next
+to `docker-compose.yml`).
+
+Without Docker, the installer fetches the release for your platform,
+verifies it and puts `vyasa` on your `PATH`; it needs a PostgreSQL
+database to run against:
+
+```bash
+curl -fsSL https://vyasa.site/install.sh | sh
+cd ~/vyasa && VYASA_DATABASE_URL=postgres://vyasa:PASSWORD@localhost:5432/vyasa vyasa migrate && vyasa serve
+```
 
 Building from source and production deployment are covered in
 [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).

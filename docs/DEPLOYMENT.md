@@ -130,7 +130,20 @@ gh attestation verify vyasa-0.1.0-x86_64-unknown-linux-gnu.tar.gz --owner vyasa-
 
 ## Release archives
 
-Each release has an archive per platform (Linux x86_64 and arm64, macOS
+The quickest way to a running binary is the installer, which picks the
+archive for your platform, verifies its checksum and unpacks it into an
+install directory (`~/vyasa` by default) with `vyasa` linked onto your
+`PATH`:
+
+```bash
+curl -fsSL https://vyasa.site/install.sh | sh
+# VYASA_VERSION=0.1.0 pins a version; VYASA_HOME and VYASA_BIN move the
+# install directory and the command link. Read it first if you prefer:
+# curl -fsSL https://vyasa.site/install.sh | less
+```
+
+Then, from that directory, `vyasa migrate && vyasa serve` with
+`VYASA_DATABASE_URL` set. Doing the same by hand: each release has an archive per platform (Linux x86_64 and arm64, macOS
 arm64) with a `.sha256` next to it. The Linux binaries need glibc 2.34 or
 newer and the system CA certificates (`ca-certificates` on Debian and
 Ubuntu — minimal container images may not have it). Unpack it and run the server from that
