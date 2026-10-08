@@ -196,8 +196,8 @@ panel says so.
 
 | Platform | Page | Status in 0.2 |
 |---|---|---|
-| Cloudflare Containers (+ Hyperdrive, R2) | [deploy/cloudflare](../deploy/cloudflare/README.md) | verified live |
-| Fly.io | [deploy/fly](../deploy/fly/README.md) | verified live |
+| Cloudflare Containers (+ R2) | [deploy/cloudflare](../deploy/cloudflare/README.md) | walkthrough, checked live before release |
+| Fly.io | [deploy/fly](../deploy/fly/README.md) | walkthrough, checked live before release |
 | Kubernetes | [deploy/kubernetes](../deploy/kubernetes/README.md) | verified on kind |
 | Railway | [deploy/railway](../deploy/railway/README.md) | template, documented |
 | Render | [deploy/render](../deploy/render/README.md) | template, documented |
