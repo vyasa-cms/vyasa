@@ -40,12 +40,14 @@ COPY --from=builder /build/target/release/vyasa /usr/local/bin/vyasa
 COPY --from=admin-builder /admin/dist /opt/vyasa/admin/dist
 COPY themes-starter /opt/vyasa/themes-starter
 
-# Uploads and the search index are the only writable state; both belong on
-# a volume so an image upgrade does not discard them.
+# Uploads and the search index are the only durable state; mount volumes
+# there (docker-compose.yml does), or point VYASA_MEDIA_DIR and
+# VYASA_INDEX_DIR elsewhere. Nothing else is written outside VYASA_RUN_DIR,
+# so the image runs with a read-only root filesystem and a tmpfs on /tmp.
 RUN useradd --system --uid 10001 vyasa \
     && mkdir -p /opt/vyasa/media /opt/vyasa/index \
     && chown -R vyasa:vyasa /opt/vyasa
-VOLUME ["/opt/vyasa/media", "/opt/vyasa/index"]
+ENV VYASA_RUN_DIR=/tmp/vyasa-run
 USER vyasa
 
 EXPOSE 3000
