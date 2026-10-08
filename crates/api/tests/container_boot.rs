@@ -106,3 +106,52 @@ async fn a_weak_admin_password_stops_the_boot() {
     let err = String::from_utf8_lossy(&out.stderr);
     assert!(err.contains("VYASA_ADMIN_PASSWORD"), "{err}");
 }
+
+// ---- the search index rebuilds itself on boot --------------------------
+
+/// `n` published posts titled "Boot post 1..n" by a fresh admin.
+async fn seed_posts(pool: &sqlx::PgPool, n: i64) {
+    let author = common::seed_user(pool, vyasa_db::models::Role::Admin).await;
+    for i in 1..=n {
+        sqlx::query(
+            "INSERT INTO posts (id, author_id, type, status, slug, title, content, meta, published_at)
+             VALUES ($4, $1, 'post', 'published', $2, $3,
+                     '{\"schema_version\":1,\"blocks\":[{\"kind\":\"paragraph\",\"attrs\":{\"text\":\"Boot text.\"}}]}',
+                     '{}', now())",
+        )
+        .bind(author.id)
+        .bind(format!("boot-post-{}-{i}", author.id))
+        .bind(format!("Boot post {i}"))
+        .bind(900_000 + author.id * 100 + i)
+        .execute(pool)
+        .await
+        .expect("seed post");
+    }
+}
+
+fn hits(base: &str) -> usize {
+    let (_, body) = get(&format!("{base}/api/v1/search?q=Boot&limit=50"));
+    body["hits"].as_array().map_or(0, Vec::len)
+}
+
+#[tokio::test]
+async fn an_empty_index_is_rebuilt_on_boot() {
+    let db = TestDb::new().await;
+    seed_posts(db.pool(), 3).await;
+    // A fresh index directory: the container's disk did not survive.
+    let server = TestServer::start(common::BIN, &db);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while hits(server.base()) != 3 {
+        assert!(std::time::Instant::now() < deadline, "index never rebuilt");
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
+#[tokio::test]
+async fn readiness_does_not_wait_for_the_index() {
+    let db = TestDb::new().await;
+    seed_posts(db.pool(), 50).await;
+    let server = TestServer::start(common::BIN, &db);
+    let (s, body) = get(&format!("{}/readyz", server.base()));
+    assert_eq!(s, 200, "{body}");
+}
