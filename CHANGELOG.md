@@ -7,6 +7,8 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-08
+
 Vyasa runs well on container platforms. Cloudflare Containers, Fly.io,
 Railway, Render and Kubernetes get a working site from the official image
 and environment variables alone; see "Container platforms" in
@@ -27,7 +29,10 @@ and environment variables alone; see "Container platforms" in
   read-only root filesystem and a tmpfs on `/tmp`. `scripts/smoke-readonly.sh`
   boots the image that way in CI, with media in object storage.
 - `deploy/cloudflare`, `deploy/fly`, `deploy/kubernetes`, `deploy/railway`
-  and `deploy/render`: one page and config per platform.
+  and `deploy/render`: one page and config per platform. Cloudflare and
+  Fly were run live before this release, Kubernetes on a kind cluster;
+  Railway and Render are templates following the same contract.
+- `vyasa update apply` had its first real run, 0.1.0 → 0.2.0.
 
 ### Changed
 

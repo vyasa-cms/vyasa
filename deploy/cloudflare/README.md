@@ -1,9 +1,8 @@
 # Deploy to Cloudflare Containers
 
 A Worker that fronts one Container running the official image, with media
-in an R2 bucket and a hosted Postgres. Walkthrough for 0.2.0; the
-maintainer runs the checklist at the end on a real account before each
-release that touches it.
+in an R2 bucket and a hosted Postgres. Verified live for 0.2.0; the maintainer re-runs the checklist at the
+end before each release that touches it.
 
 **You bring:** a Cloudflare account on the Workers paid plan (Containers
 require it), a Postgres reachable from the internet with TLS
@@ -60,7 +59,7 @@ A `standard` instance (1/2 vCPU, 4 GiB) running continuously is the main
 line on the bill; see Cloudflare's Containers pricing. Neon's free tier
 and R2's free allowance cover a small site.
 
-## Verification checklist
+## Verification checklist (run for 0.2.0)
 
 Deploy with the steps above, sign in with the environment administrator,
 upload a file (visible in the R2 bucket), redeploy to force a restart,
