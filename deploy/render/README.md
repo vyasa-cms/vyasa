@@ -4,8 +4,11 @@ A Blueprint following the container contract in
 [docs/DEPLOYMENT.md](../../docs/DEPLOYMENT.md#container-platforms).
 Documented, not account-verified in 0.2.
 
-1. Copy `render.yaml` to the root of a repository you own (or point Render
-   at this directory) and create a **Blueprint** from it.
+1. Copy this directory (`render.yaml`, `Dockerfile`, `entrypoint.sh`) to
+   the root of a repository you own and create a **Blueprint** from it.
+   The Dockerfile is the official image plus an entrypoint that takes
+   ownership of the disk (Render mounts it as root) and drops to the
+   image's user before serving.
 2. Render asks for the two `sync: false` values: `VYASA_ADMIN_EMAIL` and
    `VYASA_ADMIN_PASSWORD`. They create the first administrator on the
    first boot; clear the password variable afterwards.
@@ -19,5 +22,5 @@ bucket instead, add the `VYASA_STORAGE__*` variables (`PROVIDER=s3`,
 `BUCKET`, `ENDPOINT`, `REGION`, `ACCESS_KEY_ID`, `SECRET_ACCESS_KEY`).
 
 Without the `ADMIN` variables the setup token is in the service log
-(search for `stp_`). Upgrade by changing the image tag; back up the
+(search for `stp_`). Upgrade by changing the image tag in `Dockerfile`; back up the
 database first — migrations are forward-only.

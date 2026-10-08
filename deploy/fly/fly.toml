@@ -3,8 +3,10 @@
 app = "vyasa"
 primary_region = "ams"
 
+# Built from the Dockerfile beside this file: the official image plus an
+# entrypoint that takes ownership of the volume (Fly mounts it as root).
 [build]
-  image = "ghcr.io/vyasa-cms/vyasa:0.2.0"
+  dockerfile = "Dockerfile"
 
 [env]
   PORT = "3000"

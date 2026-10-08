@@ -6,7 +6,9 @@ Documented, not account-verified in 0.2.
 
 1. New project → **Deploy from GitHub repo**, root directory `deploy/railway`
    (or copy this directory into your own repository). Railway builds the
-   one-line `Dockerfile`, which is the official image.
+   `Dockerfile`: the official image plus `entrypoint.sh`, which takes
+   ownership of the volume (Railway mounts it as root) and drops to the
+   image's user before serving.
 2. Add a **PostgreSQL** service. Railway sets `DATABASE_URL` on the app
    service when you reference it: in the app's Variables, add
    `DATABASE_URL=${{Postgres.DATABASE_URL}}`.

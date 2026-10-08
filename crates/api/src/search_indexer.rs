@@ -87,6 +87,27 @@ fn doc_for(
     })
 }
 
+/// How many entries the index should hold right now: published, not
+/// password-protected, of a type that is publicly searchable — the same
+/// predicate `doc_for` applies, so a protected post or a private type does
+/// not make the index look behind forever.
+///
+/// # Errors
+/// Propagates the repository error.
+pub async fn searchable_count(state: &AppState) -> Result<i64, vyasa_common::AppError> {
+    let served = served_custom_types(state).await;
+    let filter = PostFilter {
+        status: Some(PostStatus::Published),
+        readable_types: Some(served.into_iter().collect()),
+        limit: 1,
+        ..PostFilter::default()
+    };
+    // `all = false` adds the "published and not protected" clause.
+    vyasa_db::repo::PostsRepo::new(state.pool.clone())
+        .count_visible(&filter, false, None)
+        .await
+}
+
 /// The custom post types (plugins' and administrators') currently served
 /// publicly.
 async fn served_custom_types(state: &AppState) -> std::collections::HashSet<String> {
@@ -315,12 +336,7 @@ pub fn converge_on_boot(state: &AppState) {
     };
     let state = state.clone();
     tokio::spawn(async move {
-        let filter = PostFilter {
-            status: Some(PostStatus::Published),
-            limit: 1,
-            ..PostFilter::default()
-        };
-        let published = match state.posts.count(&filter).await {
+        let published = match searchable_count(&state).await {
             Ok(n) => u64::try_from(n).unwrap_or(0),
             Err(e) => {
                 tracing::warn!("could not check the search index: {e}");

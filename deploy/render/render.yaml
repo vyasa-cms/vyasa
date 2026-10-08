@@ -3,9 +3,11 @@
 services:
   - type: web
     name: vyasa
-    runtime: image
-    image:
-      url: ghcr.io/vyasa-cms/vyasa:0.2.0
+    # Built from the Dockerfile beside this file: the official image plus
+    # an entrypoint that takes ownership of the disk (mounted as root).
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
     plan: starter
     numInstances: 1
     healthCheckPath: /readyz

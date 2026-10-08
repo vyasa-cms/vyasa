@@ -169,8 +169,8 @@ share, so a working site needs the image and a Postgres and nothing else.
   traffic only on 200). Both are unauthenticated, outside `/api/v1`, and
   independent of the search index.
 - **Read-only root filesystem.** The server writes only under
-  `VYASA_MEDIA_DIR`, `VYASA_INDEX_DIR` and `VYASA_RUN_DIR` (setup token,
-  update staging; the image sets `/tmp/vyasa-run`). With a tmpfs on
+  `VYASA_MEDIA_DIR`, `VYASA_INDEX_DIR` and `VYASA_RUN_DIR` (the setup
+  token; the image sets `/tmp/vyasa-run`). With a tmpfs on
   `/tmp` the image runs with Docker's `--read-only` and Kubernetes'
   `readOnlyRootFilesystem: true`; `scripts/smoke-readonly.sh` proves it
   on every CI run.

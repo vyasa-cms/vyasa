@@ -14,9 +14,10 @@ interface Env {
 
 export class VyasaContainer extends Container<Env> {
   defaultPort = 3000;
-  // One always-on instance; a sleeping container would answer the first
-  // visitor with a cold boot and an index rebuild.
-  sleepAfter = "never";
+  // Every request renews this timer, so the container sleeps only after a
+  // day without visitors; the next visitor pays a cold boot and an index
+  // rebuild. (The library parses "<n>s|m|h" only.)
+  sleepAfter = "24h";
 
   constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);

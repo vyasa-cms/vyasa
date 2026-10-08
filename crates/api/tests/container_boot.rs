@@ -155,3 +155,45 @@ async fn readiness_does_not_wait_for_the_index() {
     let (s, body) = get(&format!("{}/readyz", server.base()));
     assert_eq!(s, 200, "{body}");
 }
+
+#[tokio::test]
+async fn the_index_is_in_step_with_what_it_indexes_not_with_every_published_row() {
+    // A password-protected post is published but never indexed; it must
+    // not make every boot think the index is behind and rebuild it.
+    let db = TestDb::new().await;
+    seed_posts(db.pool(), 3).await;
+    let admin = common::seed_user(db.pool(), vyasa_db::models::Role::Admin).await;
+    sqlx::query(
+        "INSERT INTO posts (id, author_id, type, status, slug, title, content, meta, password_hash, published_at)
+         VALUES ($1, $2, 'post', 'published', 'members-only', 'Boot post for members',
+                 '{\"schema_version\":1,\"blocks\":[]}', '{}', 'not-a-real-hash', now())",
+    )
+    .bind(900_000 + admin.id * 100 + 99)
+    .bind(admin.id)
+    .execute(db.pool())
+    .await
+    .expect("protected post");
+    let server = TestServer::start(common::BIN, &db);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while hits(server.base()) != 3 {
+        assert!(std::time::Instant::now() < deadline, "index never rebuilt");
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    let cookie = common::login_cookie(server.base(), &admin.email, &admin.password);
+    let report: serde_json::Value = ureq::get(&format!("{}/api/v1/site-health", server.base()))
+        .set("cookie", &cookie)
+        .call()
+        .expect("site health")
+        .into_json()
+        .expect("json");
+    let check = report["checks"]
+        .as_array()
+        .and_then(|c| c.iter().find(|c| c["name"] == "search_index"))
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(check["status"], "ok", "{check}");
+    assert_eq!(
+        check["detail"], "3 documents indexed for 3 published entries",
+        "the comparison counts what the index would hold: {check}"
+    );
+}

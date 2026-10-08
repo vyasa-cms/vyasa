@@ -22,8 +22,8 @@ and environment variables alone; see "Container platforms" in
   or only one variable set is a warning; a weak password stops the boot.
 - `GET /healthz` (liveness) and `GET /readyz` (readiness: database
   reachable, no migration pending) outside `/api/v1`, unauthenticated.
-- `run_dir` / `VYASA_RUN_DIR` (default `.run`) for the setup token and
-  update staging; the image sets `/tmp/vyasa-run`, so it runs with a
+- `run_dir` / `VYASA_RUN_DIR` (default `.run`) for the setup token; the
+  image sets `/tmp/vyasa-run`, so it runs with a
   read-only root filesystem and a tmpfs on `/tmp`. `scripts/smoke-readonly.sh`
   boots the image that way in CI, with media in object storage.
 - `deploy/cloudflare`, `deploy/fly`, `deploy/kubernetes`, `deploy/railway`

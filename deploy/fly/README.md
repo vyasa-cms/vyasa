@@ -27,6 +27,11 @@ Without the `ADMIN` secrets the boot prints a setup token to the log
 
 ## Notes
 
+- `Dockerfile` is the official image plus `entrypoint.sh`: Fly mounts the
+  volume owned by root while the image serves as uid 10001, so the
+  entrypoint starts as root, makes `/data/index` and `/data/media` the
+  image user's, and drops to that user before `vyasa serve`.
+
 - `fly postgres attach` sets `DATABASE_URL`; Vyasa honours it when
   `VYASA_DATABASE_URL` is unset.
 - The health check is `/readyz`: Fly routes traffic only once the database
@@ -38,7 +43,7 @@ Without the `ADMIN` secrets the boot prints a setup token to the log
   another S3 bucket instead, set the `VYASA_STORAGE__*` secrets
   (`PROVIDER=s3`, `BUCKET`, `ENDPOINT`, `REGION`, `ACCESS_KEY_ID`,
   `SECRET_ACCESS_KEY`); the volume then holds only the index.
-- Upgrade by changing the image tag in `fly.toml` and `fly deploy`. Back
+- Upgrade by changing the image tag in `Dockerfile` and `fly deploy`. Back
   up first (`fly postgres connect` + `pg_dump`): migrations are forward-only.
 
 ## Verification checklist

@@ -1,8 +1,7 @@
 # Development and small single-node deployments.
 #
-# Migrations are not run automatically: `docker compose run --rm app migrate`
-# once before the first `up`, and again after an upgrade. Running them from
-# the entrypoint would mean every restarted replica races to migrate.
+# `serve` applies pending migrations at boot under the migrator's lock;
+# `docker compose run --rm app migrate` shows them on their own first.
 
 services:
   app:

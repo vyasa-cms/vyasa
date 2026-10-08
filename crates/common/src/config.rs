@@ -326,8 +326,8 @@ pub struct VyasaConfig {
     /// `./registry`. Nothing is served unless the files exist, so an
     /// install that hosts no marketplace gains no public surface.
     pub registry_dir: PathBuf,
-    /// Where the server keeps its own small files: the setup token and
-    /// the pid file. A container puts it on a writable tmpfs.
+    /// Where the server writes the setup token on first boot. A container
+    /// puts it on a writable tmpfs.
     pub run_dir: PathBuf,
     /// Whether the playground and other dev-only endpoints are enabled.
     #[serde(default)]
