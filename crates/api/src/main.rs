@@ -40,6 +40,7 @@ mod mail;
 mod mcp;
 mod media_jobs;
 mod media_s3;
+mod media_storage;
 mod metrics;
 mod mfa;
 mod middleware;
@@ -1317,6 +1318,8 @@ async fn cmd_serve(config: &VyasaConfig) -> ExitCode {
         Err(err) => eprintln!("vyasa serve: could not count users: {err}"),
     }
     let state = AppState::new(config.clone(), pg_pool.clone());
+    // Object storage chosen in the admin, unless the environment set one.
+    media_storage::apply_saved(&state).await;
     if let Some(token) = first_boot_token {
         *state
             .setup_token
@@ -1345,6 +1348,7 @@ async fn cmd_serve(config: &VyasaConfig) -> ExitCode {
             ai_jobs::AiJobs::handler(state.clone()),
             // Mail resolves its relay per job: Settings can change it live.
             std::sync::Arc::new(mail::MailJobs(state.clone())),
+            std::sync::Arc::new(media_storage::MigrateJobs(state.clone())),
         ]))),
     );
 

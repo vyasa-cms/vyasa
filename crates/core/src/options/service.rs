@@ -58,6 +58,17 @@ pub const SITE_OPTION_KEYS: &[&str] = &[
     // the role a self-made account starts with.
     "registration_enabled",
     "registration_default_role",
+    // Media storage from the admin panel: the keys are sealed by the API
+    // layer before they get here; the migration row is the move job's
+    // progress.
+    "storage_provider",
+    "storage_bucket",
+    "storage_region",
+    "storage_endpoint",
+    "storage_path_style",
+    "storage_access_key_id",
+    "storage_secret_access_key",
+    "storage_migration",
 ];
 
 /// Options that decide where the site's mail goes and which address its
@@ -78,6 +89,14 @@ pub const FULL_ADMINISTRATOR_OPTION_KEYS: &[&str] = &[
     // Whether strangers may make accounts, and what those accounts may do.
     "registration_enabled",
     "registration_default_role",
+    // The keys that reach every byte the site serves.
+    "storage_provider",
+    "storage_bucket",
+    "storage_region",
+    "storage_endpoint",
+    "storage_path_style",
+    "storage_access_key_id",
+    "storage_secret_access_key",
 ];
 
 /// Boolean AI feature switches (the screening mode is a string).

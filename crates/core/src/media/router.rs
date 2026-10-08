@@ -15,9 +15,13 @@ use vyasa_db::content_models::MediaStorage;
 use super::storage::{LocalFsBackend, StorageBackend};
 
 /// Local disk plus an optional object store, swappable at runtime.
+///
+/// `active` is where new uploads go; the other store stays readable, so
+/// switching back to local disk does not orphan what sits in the bucket.
 pub struct StorageRouter {
     local: LocalFsBackend,
     object: RwLock<Option<Arc<dyn StorageBackend>>>,
+    active: RwLock<MediaStorage>,
 }
 
 impl std::fmt::Debug for StorageRouter {
@@ -25,6 +29,7 @@ impl std::fmt::Debug for StorageRouter {
         f.debug_struct("StorageRouter")
             .field("local", &self.local.base)
             .field("object", &self.object().is_some())
+            .field("active", &self.active_kind())
             .finish()
     }
 }
@@ -33,16 +38,49 @@ impl StorageRouter {
     /// A router over `local`, with `object` active when given.
     #[must_use]
     pub fn new(local: LocalFsBackend, object: Option<Arc<dyn StorageBackend>>) -> Self {
+        let active = if object.is_some() {
+            MediaStorage::S3
+        } else {
+            MediaStorage::Local
+        };
         Self {
             local,
             object: RwLock::new(object),
+            active: RwLock::new(active),
         }
     }
 
-    /// Replaces (or removes) the object store. Takes effect for the next
-    /// call on every holder of this router.
+    /// Replaces (or removes) the object store and makes it the target of
+    /// new uploads when given. Takes effect for the next call on every
+    /// holder of this router.
     pub fn set_object(&self, object: Option<Arc<dyn StorageBackend>>) {
-        *self.object.write().unwrap_or_else(std::sync::PoisonError::into_inner) = object;
+        let active = if object.is_some() {
+            MediaStorage::S3
+        } else {
+            MediaStorage::Local
+        };
+        *self
+            .object
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = object;
+        *self
+            .active
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = active;
+    }
+
+    /// Chooses where new uploads go without forgetting the other store.
+    /// `S3` without an object store falls back to local.
+    pub fn set_active(&self, kind: MediaStorage) {
+        let kind = if kind == MediaStorage::S3 && self.object().is_none() {
+            MediaStorage::Local
+        } else {
+            kind
+        };
+        *self
+            .active
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = kind;
     }
 
     /// The object store currently active, if any.
@@ -57,10 +95,23 @@ impl StorageRouter {
     /// Where new uploads go.
     #[must_use]
     pub fn active_kind(&self) -> MediaStorage {
-        if self.object().is_some() {
-            MediaStorage::S3
-        } else {
+        let active = *self
+            .active
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        if active == MediaStorage::S3 && self.object().is_none() {
             MediaStorage::Local
+        } else {
+            active
+        }
+    }
+
+    fn active_backend(&self) -> Arc<dyn StorageBackend> {
+        match self.active_kind() {
+            MediaStorage::S3 => self
+                .object()
+                .unwrap_or_else(|| Arc::new(self.local.clone())),
+            MediaStorage::Local => Arc::new(self.local.clone()),
         }
     }
 
@@ -87,18 +138,20 @@ impl StorageBackend for StorageRouter {
     }
 
     async fn put(&self, path: &str, bytes: &[u8]) -> Result<(), AppError> {
-        match self.object() {
-            Some(object) => object.put(path, bytes).await,
-            None => self.local.put(path, bytes).await,
-        }
+        self.active_backend().put(path, bytes).await
     }
 
     async fn get(&self, path: &str) -> Result<Vec<u8>, AppError> {
-        let Some(object) = self.object() else {
-            return self.local.get(path).await;
-        };
-        match object.get(path).await {
-            Err(AppError::NotFound { .. }) => self.local.get(path).await,
+        let (first, second): (Arc<dyn StorageBackend>, Option<Arc<dyn StorageBackend>>) =
+            match self.active_kind() {
+                MediaStorage::S3 => (self.active_backend(), Some(Arc::new(self.local.clone()))),
+                MediaStorage::Local => (Arc::new(self.local.clone()), self.object()),
+            };
+        match first.get(path).await {
+            Err(AppError::NotFound { .. }) => match second {
+                Some(second) => second.get(path).await,
+                None => Err(AppError::not_found("media", path)),
+            },
             other => other,
         }
     }
@@ -116,11 +169,19 @@ impl StorageBackend for StorageRouter {
 mod tests {
     use super::*;
 
-    fn two() -> (StorageRouter, LocalFsBackend, tempfile::TempDir, tempfile::TempDir) {
+    fn two() -> (
+        StorageRouter,
+        LocalFsBackend,
+        tempfile::TempDir,
+        tempfile::TempDir,
+    ) {
         let a = tempfile::tempdir().expect("tempdir");
         let b = tempfile::tempdir().expect("tempdir");
         let object = LocalFsBackend::new(b.path());
-        let router = StorageRouter::new(LocalFsBackend::new(a.path()), Some(Arc::new(object.clone())));
+        let router = StorageRouter::new(
+            LocalFsBackend::new(a.path()),
+            Some(Arc::new(object.clone())),
+        );
         (router, object, a, b)
     }
 
@@ -152,16 +213,25 @@ mod tests {
         assert!(object.get("1/1/f.txt").await.is_err());
         router.delete("1/1/f.txt").await.unwrap();
 
-        router.set_object(None);
+        // Back to local for new uploads: the bucket stays readable.
+        object.put("1/5/kept.txt", b"k").await.unwrap();
+        router.set_active(MediaStorage::Local);
         assert_eq!(router.kind(), MediaStorage::Local);
         router.put("1/4/l.txt", b"l").await.unwrap();
         assert!(router.local().get("1/4/l.txt").await.is_ok());
+        assert_eq!(router.get("1/5/kept.txt").await.unwrap(), b"k");
+        assert!(router.backend_for(MediaStorage::S3).is_some());
+
+        router.set_object(None);
         assert!(router.backend_for(MediaStorage::S3).is_none());
+        assert!(router.get("1/5/kept.txt").await.is_err());
     }
 
     #[tokio::test]
     async fn honours_the_shared_contract() {
         let (router, _o, _a, _b) = two();
-        super::super::storage::assert_backend_contract(&router).await.unwrap();
+        super::super::storage::assert_backend_contract(&router)
+            .await
+            .unwrap();
     }
 }
