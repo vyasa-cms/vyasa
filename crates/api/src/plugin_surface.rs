@@ -956,6 +956,8 @@ const RESERVED_SLUGS: &[&str] = &[
     "preview",
     "logo",
     "favicon",
+    "healthz",
+    "readyz",
 ];
 
 /// Whether a custom post type may use this slug.
