@@ -47,16 +47,18 @@ for _ in $(seq 60); do
 done
 mc ls m/media >/dev/null || { docker logs "ro-minio-$$" 2>&1 | tail -15 >&2; fail "the media bucket never appeared"; }
 
+storage_env="-e VYASA_STORAGE__PROVIDER=s3 -e VYASA_STORAGE__BUCKET=media
+    -e VYASA_STORAGE__REGION=auto -e VYASA_STORAGE__ENDPOINT=http://ro-minio-$$:9000
+    -e VYASA_STORAGE__ACCESS_KEY_ID=minio -e VYASA_STORAGE__SECRET_ACCESS_KEY=minio123
+    -e VYASA_STORAGE__PATH_STYLE=true"
+
 # $1: extra docker-run arguments (one string, word-split on purpose).
 run_app() {
     # shellcheck disable=SC2086
     docker run -d --name "ro-app-$$" --network "$net" --read-only --tmpfs /tmp \
         -p "127.0.0.1:$port:3000" \
         -e PORT=3000 -e DATABASE_URL="postgres://vyasa:vyasa@ro-pg-$$:5432/vyasa" \
-        -e VYASA_STORAGE__PROVIDER=s3 -e VYASA_STORAGE__BUCKET=media \
-        -e VYASA_STORAGE__REGION=auto -e VYASA_STORAGE__ENDPOINT="http://ro-minio-$$:9000" \
-        -e VYASA_STORAGE__ACCESS_KEY_ID=minio -e VYASA_STORAGE__SECRET_ACCESS_KEY=minio123 \
-        -e VYASA_STORAGE__PATH_STYLE=true \
+        -e VYASA_SECRET_KEY=readonly-smoke-secret-key \
         -e VYASA_MEDIA_DIR=/tmp/media -e VYASA_INDEX_DIR=/tmp/index \
         -e VYASA_LOG__FORMAT=json ${1:-} \
         "$tag" >/dev/null
@@ -67,7 +69,9 @@ run_app() {
 }
 
 # First boot with the run directory on the read-only root: the token file
-# cannot be written, and the token must still reach the log.
+# cannot be written, and the token must still reach the log. No storage in
+# the environment: media starts on the tmpfs and moves to the bucket from
+# the admin API below.
 run_app "-e VYASA_RUN_DIR=/opt/vyasa/.run"
 token=""
 for _ in $(seq 30); do
@@ -89,16 +93,49 @@ png="/tmp/ro-$$.png"
 base64 -d > "$png" <<'PNG'
 iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==
 PNG
-body=$(curl -sS -b "$jar" -H "origin: $B" -w '\n%{http_code}' -F "file=@$png;type=image/png" "$B/api/v1/media")
-case "$(tail -1 <<< "$body")" in 2??) ;; *) fail "upload failed: $body" ;; esac
+upload() {
+    local body
+    body=$(curl -sS -b "$jar" -H "origin: $B" -w '\n%{http_code}' -F "file=@$1;type=image/png" "$B/api/v1/media")
+    case "$(tail -1 <<< "$body")" in 2??) ;; *) fail "upload failed: $body" ;; esac
+    head -1 <<< "$body" | grep -oE '"id":"?[0-9]+' | head -1 | grep -oE '[0-9]+'
+}
+before=$(upload "$png")
+[ -n "$before" ] || fail "no id in the upload response"
+echo "upload ok on local disk (media $before)"
+
+# Point media at the bucket from the admin API: a probe object is written,
+# read and deleted before anything is saved, and the switch applies to the
+# running server.
+storage_body="{\"provider\":\"s3\",\"bucket\":\"media\",\"region\":\"auto\",\"endpoint\":\"http://ro-minio-$$:9000\",\"path_style\":true,\"access_key_id\":\"minio\",\"secret_access_key\":\"minio123\"}"
+settings=$(curl -sS -b "$jar" -H "origin: $B" -H 'content-type: application/json' -X PUT -d "$storage_body" "$B/api/v1/media/storage")
+grep -q '"source":"options"' <<< "$settings" || fail "storage settings not saved: $settings"
+# A second, different file lands in the bucket; the first still serves.
+printf 'x' >> "$png"
+after=$(upload "$png")
 rm -f "$png"
 objects=$(mc ls --recursive m/media | wc -l)
 [ "$objects" -gt 0 ] || fail "the upload did not land in the bucket"
-echo "upload ok ($objects object(s) in the bucket)"
+curl -fsS -o /dev/null "$B/api/v1/media/$before/raw" || fail "the file uploaded before the switch stopped serving"
+echo "upload ok in the bucket (media $after, $objects object(s)); the earlier one still serves"
 
-# A restart with a fresh tmpfs: the index is gone and must rebuild itself.
+# Move the first file across and wait for the job.
+curl -fsS -b "$jar" -H "origin: $B" -o /dev/null -X POST "$B/api/v1/media/storage/migrate" || fail "migrate did not start"
+state=""
+for _ in $(seq 60); do
+    state=$(curl -fsS -b "$jar" "$B/api/v1/media/storage" | grep -oE '"state":"[a-z]+"' | head -1)
+    [ "$state" = '"state":"done"' ] && break
+    sleep 1
+done
+[ "$state" = '"state":"done"' ] || fail "the move did not finish: $state"
+echo "move ok (everything in the bucket)"
+
+# A restart with a fresh tmpfs and the bucket set in the environment this
+# time (the environment wins over the saved settings): the index is gone
+# and must rebuild itself, and both files serve from the bucket.
 docker rm -f "ro-app-$$" >/dev/null
-run_app
+run_app "$storage_env"
+curl -fsS -o /dev/null "$B/api/v1/media/$before/raw" || fail "the moved file does not serve after the restart"
+curl -fsS -o /dev/null "$B/api/v1/media/$after/raw" || fail "the bucket file does not serve after the restart"
 n=0
 for _ in $(seq 60); do
     n=$(curl -fsS "$B/api/v1/search?q=Welcome" | grep -o '"id"' | wc -l || true)

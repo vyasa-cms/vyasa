@@ -7,6 +7,21 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Added
+
+- Media storage is configurable from the admin: Settings → Delivery →
+  Media storage takes an S3-compatible bucket (R2, S3, MinIO), tests the
+  connection, and switches new uploads to it without a restart. The keys
+  are sealed with `VYASA_SECRET_KEY`; `VYASA_STORAGE__*` in the
+  environment still wins and makes the page read-only. Files uploaded
+  before a switch keep serving from where they are; "Move existing
+  files" copies them across as a resumable background job. New routes:
+  `GET`/`PUT /api/v1/media/storage`, `POST /api/v1/media/storage/test`,
+  `POST /api/v1/media/storage/migrate`.
+- The Cloudflare package passes the R2 keys only when both secrets are
+  set, so a site can start on the container's disk and move to R2 from
+  the admin.
+
 ## [0.2.0] - 2026-10-08
 
 Vyasa runs well on container platforms. Cloudflare Containers, Fly.io,
