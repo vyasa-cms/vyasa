@@ -29,20 +29,23 @@ docker network create "$net" >/dev/null
 docker run -d --name "ro-pg-$$" --network "$net" \
     -e POSTGRES_USER=vyasa -e POSTGRES_PASSWORD=vyasa -e POSTGRES_DB=vyasa \
     postgres:17-alpine >/dev/null
+# MinIO's own images are no longer publicly pullable; Bitnami's frozen
+# legacy image is, ships mc, and creates the bucket itself.
 docker run -d --name "ro-minio-$$" --network "$net" \
     -e MINIO_ROOT_USER=minio -e MINIO_ROOT_PASSWORD=minio123 \
-    quay.io/minio/minio server /data >/dev/null
+    -e MINIO_DEFAULT_BUCKETS=media \
+    bitnamilegacy/minio:latest@sha256:451fe6858cb770cc9d0e77ba811ce287420f781c7c1b806a386f6896471a349c >/dev/null
 # Over TCP: the image's init-phase server answers the Unix socket and
 # then restarts, which is exactly when the app would connect.
 for _ in $(seq 30); do docker exec "ro-pg-$$" pg_isready -h 127.0.0.1 -U vyasa -q && break; sleep 1; done
-# The server image ships mc; no second image to pull.
+# The image ships mc; no second image to pull.
 mc() { docker exec "ro-minio-$$" mc "$@"; }
-for _ in $(seq 30); do
+for _ in $(seq 60); do
     mc alias set m http://127.0.0.1:9000 minio minio123 >/dev/null 2>&1 \
-        && mc mb -p m/media >/dev/null 2>&1 && break
+        && mc ls m/media >/dev/null 2>&1 && break
     sleep 1
 done
-mc ls m/media >/dev/null || fail "could not create the media bucket"
+mc ls m/media >/dev/null || { docker logs "ro-minio-$$" 2>&1 | tail -15 >&2; fail "the media bucket never appeared"; }
 
 # $1: extra docker-run arguments (one string, word-split on purpose).
 run_app() {
