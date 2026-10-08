@@ -110,12 +110,18 @@ export function StoragePanel() {
   const other = data ? (data.provider === "s3" ? data.counts.local : data.counts.s3) : 0;
   const migration = data?.migration ?? null;
   const running = migration?.state === "running";
+  // A move needs an object store on the server: the active one, or the
+  // saved one when uploads went back to local disk.
+  const canMove = !!data && other > 0 && (data.provider === "s3" || data.has_secret) && !data.keys_unreadable;
   const s3Form = v.provider === "s3";
   const canTest = s3Form && v.bucket.trim() !== "" && v.endpoint.trim() !== "" && (v.access_key_id !== "" || data?.has_secret) && (v.secret_access_key !== "" || data?.has_secret);
 
   return (
     <div className="space-y-4" data-testid="storage-panel">
       <p className="text-sm text-muted-foreground">{status}</p>
+      {data?.keys_unreadable ? (
+        <p className="text-xs text-destructive" data-testid="storage-keys-unreadable">The stored keys can no longer be read (the server secret changed). Uploads go to local disk until you enter the access key id and secret again and save.</p>
+      ) : null}
       {data?.ephemeral_disk && data.provider === "local" ? (
         <p className="text-xs text-warning" data-testid="storage-ephemeral">This server's disk does not survive a restart: uploads will be lost. Point media at a bucket.</p>
       ) : null}
@@ -157,7 +163,7 @@ export function StoragePanel() {
       ) : null}
       {!locked ? (
         <div className="flex flex-wrap items-center gap-2">
-          <Button type="button" size="sm" disabled={save.isPending || !touched} onClick={() => save.mutate(false)}>{save.isPending ? "Saving…" : "Save storage"}</Button>
+          <Button type="button" size="sm" disabled={save.isPending || !touched || running} title={running ? "Wait for the move to finish" : undefined} onClick={() => save.mutate(false)}>{save.isPending ? "Saving…" : "Save storage"}</Button>
           {s3Form ? (
             <Button type="button" size="sm" variant="outline" disabled={test.isPending || !canTest} onClick={() => test.mutate()}>{test.isPending ? "Testing…" : "Test connection"}</Button>
           ) : null}
@@ -168,7 +174,7 @@ export function StoragePanel() {
           <p className="text-xs text-muted-foreground">
             {data.counts.local} {data.counts.local === 1 ? "file" : "files"} on local disk, {data.counts.s3} in object storage.
           </p>
-          {other > 0 && !locked && (data.provider === "local" || data.has_secret) ? (
+          {canMove ? (
             <div className="flex flex-wrap items-center gap-2">
               <Button type="button" size="sm" variant="outline" disabled={running || migrate.isPending || touched} title={touched ? "Save the settings first" : undefined} onClick={() => migrate.mutate()}>
                 {running ? "Moving…" : `Move ${other} ${other === 1 ? "file" : "files"} to ${data.provider === "s3" ? "object storage" : "local disk"}`}

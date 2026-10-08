@@ -147,12 +147,15 @@ impl StorageBackend for StorageRouter {
                 MediaStorage::S3 => (self.active_backend(), Some(Arc::new(self.local.clone()))),
                 MediaStorage::Local => (Arc::new(self.local.clone()), self.object()),
             };
+        // Any failure of the active store falls through: a bucket that
+        // answers 403 for a missing key, or is down, must not hide files
+        // that sit on local disk.
         match first.get(path).await {
-            Err(AppError::NotFound { .. }) => match second {
-                Some(second) => second.get(path).await,
-                None => Err(AppError::not_found("media", path)),
+            Ok(bytes) => Ok(bytes),
+            Err(err) => match second {
+                Some(second) => second.get(path).await.map_err(|_| err),
+                None => Err(err),
             },
-            other => other,
         }
     }
 
@@ -162,6 +165,13 @@ impl StorageBackend for StorageRouter {
             object.delete(path).await?;
         }
         Ok(())
+    }
+
+    async fn delete_from(&self, kind: MediaStorage, path: &str) -> Result<(), AppError> {
+        match self.backend_for(kind) {
+            Some(backend) => backend.delete(path).await,
+            None => Ok(()),
+        }
     }
 }
 
@@ -200,6 +210,15 @@ mod tests {
             router.get("1/3/missing.txt").await,
             Err(AppError::NotFound { .. })
         ));
+        // Deleting from one store leaves the other's copy.
+        router.local().put("1/6/both.txt", b"a").await.unwrap();
+        object.put("1/6/both.txt", b"b").await.unwrap();
+        router
+            .delete_from(MediaStorage::Local, "1/6/both.txt")
+            .await
+            .unwrap();
+        assert!(router.local().get("1/6/both.txt").await.is_err());
+        assert_eq!(object.get("1/6/both.txt").await.unwrap(), b"b");
         drop(a);
     }
 

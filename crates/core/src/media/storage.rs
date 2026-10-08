@@ -15,6 +15,22 @@ pub trait StorageBackend: Send + Sync {
     /// Deletes the object at `path`. Succeeds if already gone.
     async fn delete(&self, path: &str) -> Result<(), AppError>;
 
+    /// Deletes `path` from the store recorded as `kind` only. A plain
+    /// backend holds one kind; a router that holds both overrides this so
+    /// a file replaced under the same path in a different store loses
+    /// its stale copy and keeps the new one.
+    async fn delete_from(
+        &self,
+        kind: vyasa_db::content_models::MediaStorage,
+        path: &str,
+    ) -> Result<(), AppError> {
+        if kind == self.kind() {
+            self.delete(path).await
+        } else {
+            Ok(())
+        }
+    }
+
     /// Which kind of store this is, for the `storage` column.
     ///
     /// The service used to write `Local` into every row regardless, so on

@@ -5581,6 +5581,12 @@ export interface components {
             ephemeral_disk: boolean;
             /** @description Whether a secret is stored and readable. */
             has_secret: boolean;
+            /**
+             * @description Settings say object storage but the stored keys cannot be opened
+             *     (the server secret changed): uploads go to local disk until the
+             *     keys are entered again.
+             */
+            keys_unreadable: boolean;
             migration?: components["schemas"]["MigrationProgress"] | null;
             path_style: boolean;
             /** @description `local` or `s3`: where new uploads go. */

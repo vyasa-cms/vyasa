@@ -375,6 +375,11 @@ impl QueryRoot {
         // Public allowlist — safe to expose without caps.
         const PUBLIC: &[&str] = &["site_title", "site_tagline", "site_url", "posts_per_page"];
         let is_public = PUBLIC.contains(&key.as_str());
+        // The media-storage rows (sealed keys among them) have their own
+        // endpoint and never come back through the generic read.
+        if vyasa_core::options::STORAGE_OPTION_KEYS.contains(&key.as_str()) {
+            return Ok(None);
+        }
         if !is_public {
             // Require ManageOptions to read non-public keys.
             let principal = gql.require_principal()?;

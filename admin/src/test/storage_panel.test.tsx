@@ -12,7 +12,7 @@ vi.mock("@/api/client", async (importOriginal) => {
 const mocked = vi.mocked(api);
 
 const base: StorageSettings = {
-  provider: "local", bucket: "", region: "auto", endpoint: "", path_style: true, access_key_id_hint: "", has_secret: false,
+  provider: "local", bucket: "", region: "auto", endpoint: "", path_style: true, access_key_id_hint: "", has_secret: false, keys_unreadable: false,
   source: "none", encrypted: true, counts: { local: 2, s3: 0 }, ephemeral_disk: true, migration: null,
 };
 
@@ -55,6 +55,13 @@ describe("storage panel", () => {
     // After the save the keys are stored and the old files can be moved.
     expect(await screen.findByRole("button", { name: "Move 2 files to object storage" })).toBeEnabled();
     expect((screen.getByLabelText("Secret access key") as HTMLInputElement).value).toBe("");
+  });
+
+  it("offers no move without a usable object store, and says when the keys cannot be read", async () => {
+    mocked.storageSettings.mockResolvedValue({ ...base, provider: "local", bucket: "b", source: "options", has_secret: false, keys_unreadable: true, counts: { local: 1, s3: 3 } });
+    mount();
+    expect(await screen.findByTestId("storage-keys-unreadable")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /Move/ })).not.toBeInTheDocument();
   });
 
   it("starts the move and shows its progress", async () => {

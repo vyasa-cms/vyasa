@@ -187,13 +187,7 @@ pub struct ArchiveMenuItem {
 }
 
 /// Options that never leave the site: secrets, progress, keys.
-const PRIVATE_OPTIONS: &[&str] = &[
-    "smtp_password",
-    "setup_progress",
-    "storage_access_key_id",
-    "storage_secret_access_key",
-    "storage_migration",
-];
+const PRIVATE_OPTIONS: &[&str] = &["smtp_password", "setup_progress"];
 
 /// Builds the archive from the live database.
 ///

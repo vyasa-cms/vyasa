@@ -247,6 +247,7 @@ export interface StorageSettings {
   path_style: boolean;
   access_key_id_hint: string;
   has_secret: boolean;
+  keys_unreadable: boolean;
   source: "options" | "environment" | "none";
   encrypted: boolean;
   counts: { local: number; s3: number };

@@ -104,6 +104,37 @@ fn put(base: &str, cookie: &str, body: &serde_json::Value) -> (u16, serde_json::
     (s, r.into_json().unwrap_or(serde_json::Value::Null))
 }
 
+fn raw_bytes(base: &str, id: i64) -> Vec<u8> {
+    let r = http(ureq::get(&format!("{base}/api/v1/media/{id}/raw")).call());
+    assert_eq!(r.status(), 200);
+    let mut out = Vec::new();
+    std::io::Read::read_to_end(&mut r.into_reader(), &mut out).unwrap();
+    out
+}
+
+fn replace(base: &str, cookie: &str, id: i64, name: &str) {
+    let boundary = "----vyasareplace";
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; filename=\"{name}\"\r\nContent-Type: image/png\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(&png(name));
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let r = http(
+        ureq::post(&format!("{base}/api/v1/media/{id}/replace"))
+            .set("Cookie", cookie)
+            .set(
+                "Content-Type",
+                &format!("multipart/form-data; boundary={boundary}"),
+            )
+            .send_bytes(&body),
+    );
+    assert_eq!(r.status(), 200, "{}", r.into_string().unwrap_or_default());
+}
+
 fn raw_status(base: &str, id: i64) -> u16 {
     http(ureq::get(&format!("{base}/api/v1/media/{id}/raw")).call()).status()
 }
@@ -133,6 +164,7 @@ async fn storage_of(db: &TestDb, id: i64) -> String {
 }
 
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn the_admin_switches_to_object_storage_and_moves_files_across() {
     let Some(env) = s3_env() else {
         eprintln!("skipping: no VYASA_TEST_S3_ENDPOINT");
@@ -191,6 +223,27 @@ async fn the_admin_switches_to_object_storage_and_moves_files_across() {
     assert_eq!(s["counts"]["local"], 1, "{s}");
     assert_eq!(s["counts"]["s3"], 1, "{s}");
 
+    // A file uploaded on disk and then replaced after the switch (same
+    // path, new store): the move must not resurrect the old bytes.
+    let edited = upload(base, &cookie, "edited.png");
+    // Uploaded while s3 is active; make it a local-era row the way an old
+    // upload would be, then replace it.
+    sqlx::query("UPDATE media SET storage = 'local' WHERE id = $1")
+        .bind(edited)
+        .execute(db.pool())
+        .await
+        .unwrap();
+    replace(base, &cookie, edited, "edited.png");
+    assert_eq!(storage_of(&db, edited).await, "s3");
+
+    // Changing the bucket while files sit in it is refused until the
+    // admin says to forget them.
+    let mut elsewhere = input(&env, &env.secret);
+    elsewhere["bucket"] = serde_json::Value::String(String::from("another-bucket"));
+    let (code, body) = put(base, &cookie, &elsewhere);
+    assert_eq!(code, 409, "{body}");
+    assert_eq!(settings(base, &cookie)["bucket"], env.bucket);
+
     // Move the old one across.
     let r = http(
         ureq::post(&format!("{base}/api/v1/media/storage/migrate"))
@@ -210,9 +263,14 @@ async fn the_admin_switches_to_object_storage_and_moves_files_across() {
     assert_eq!(done["migration"]["state"], "done", "{done}");
     assert_eq!(done["migration"]["done"], 1);
     assert_eq!(done["counts"]["local"], 0);
-    assert_eq!(done["counts"]["s3"], 2);
+    assert_eq!(done["counts"]["s3"], 3);
     assert_eq!(storage_of(&db, before).await, "s3");
     assert_eq!(raw_status(base, before), 200);
+    assert_eq!(
+        raw_bytes(base, edited),
+        png("edited.png"),
+        "the replaced bytes survive the move"
+    );
     // The source copy is gone from disk.
     let left_on_disk = walkdir_count(&dir.join("media"));
     assert_eq!(left_on_disk, 0, "files left on disk after the move");
@@ -242,7 +300,7 @@ async fn the_admin_switches_to_object_storage_and_moves_files_across() {
         std::thread::sleep(Duration::from_millis(250));
     };
     assert_eq!(done["migration"]["state"], "done", "{done}");
-    assert_eq!(done["counts"]["local"], 3, "{done}");
+    assert_eq!(done["counts"]["local"], 4, "{done}");
     assert_eq!(done["counts"]["s3"], 0);
     assert_eq!(raw_status(base, before), 200);
     assert_eq!(raw_status(base, after), 200);

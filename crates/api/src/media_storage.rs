@@ -103,6 +103,10 @@ pub struct StorageSettings {
     pub access_key_id_hint: String,
     /// Whether a secret is stored and readable.
     pub has_secret: bool,
+    /// Settings say object storage but the stored keys cannot be opened
+    /// (the server secret changed): uploads go to local disk until the
+    /// keys are entered again.
+    pub keys_unreadable: bool,
     pub source: Source,
     /// Whether stored keys are encrypted at rest.
     pub encrypted: bool,
@@ -112,8 +116,15 @@ pub struct StorageSettings {
     pub migration: Option<MigrationProgress>,
 }
 
+async fn put_option(state: &AppState, key: &str, value: String) -> Result<(), AppError> {
+    state
+        .options
+        .set(key, &serde_json::Value::String(value))
+        .await
+}
+
 /// What the admin sends.
-#[derive(Deserialize, utoipa::ToSchema, Default, Debug)]
+#[derive(Deserialize, utoipa::ToSchema, Default)]
 pub struct StorageInput {
     /// `local` or `s3`.
     pub provider: String,
@@ -136,6 +147,18 @@ pub struct StorageInput {
 
 fn default_path_style() -> bool {
     true
+}
+
+impl std::fmt::Debug for StorageInput {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("StorageInput")
+            .field("provider", &self.provider)
+            .field("bucket", &self.bucket)
+            .field("endpoint", &self.endpoint)
+            .field("has_access_key_id", &self.access_key_id.is_some())
+            .field("has_secret_access_key", &self.secret_access_key.is_some())
+            .finish_non_exhaustive()
+    }
 }
 
 /// The saved object store, with the secret opened, whether or not it is
@@ -231,6 +254,7 @@ pub async fn settings(state: &AppState) -> StorageSettings {
             path_style: env.path_style,
             access_key_id_hint: hint(&env.access_key_id),
             has_secret: env.secret_access_key.is_some(),
+            keys_unreadable: false,
             source: Source::Environment,
             encrypted,
             counts,
@@ -247,14 +271,19 @@ pub async fn settings(state: &AppState) -> StorageSettings {
         let has_secret = vault
             .open(&option_string(state, "storage_secret_access_key").await)
             .is_ok_and(|s| !s.is_empty());
+        let wants_s3 = provider == "s3";
+        let active_s3 = state.media_storage.active_kind() == MediaStorage::S3;
         return StorageSettings {
-            provider: if provider == "s3" { "s3" } else { "local" }.to_owned(),
+            // What the router does, not what was asked for: with
+            // unreadable keys uploads are on local disk whatever the row says.
+            provider: String::from(if active_s3 { "s3" } else { "local" }),
             bucket: option_string(state, "storage_bucket").await,
             region: option_string(state, "storage_region").await,
             endpoint: option_string(state, "storage_endpoint").await,
             path_style: option_string(state, "storage_path_style").await != "false",
             access_key_id_hint: hint(&key_id),
             has_secret,
+            keys_unreadable: wants_s3 && !active_s3,
             source: Source::Options,
             encrypted,
             counts,
@@ -270,6 +299,7 @@ pub async fn settings(state: &AppState) -> StorageSettings {
         path_style: true,
         access_key_id_hint: String::new(),
         has_secret: false,
+        keys_unreadable: false,
         source: Source::None,
         encrypted,
         counts,
@@ -388,17 +418,16 @@ pub async fn test(state: &AppState, input: &StorageInput) -> Result<(), AppError
 /// bucket that is about to be forgotten; 400 when the store refuses.
 pub async fn save(state: &AppState, input: StorageInput) -> Result<StorageSettings, AppError> {
     env_locked(state)?;
+    if migration(state).await.is_some_and(|m| m.state == "running") {
+        return Err(AppError::conflict(
+            "files are being moved; change the store when the move has finished",
+        ));
+    }
     match input.provider.as_str() {
         "local" => {
             // The saved object store is kept: files in it must stay
             // readable, and "Move existing files" can bring them back.
-            state
-                .options_service
-                .put(
-                    "storage_provider",
-                    serde_json::Value::String(String::from("local")),
-                )
-                .await?;
+            put_option(state, "storage_provider", String::from("local")).await?;
             state.media_storage.set_active(MediaStorage::Local);
             tracing::info!("media: local disk for new uploads (admin settings)");
             Ok(settings(state).await)
@@ -417,20 +446,21 @@ pub async fn save(state: &AppState, input: StorageInput) -> Result<StorageSettin
             }
             probe(&backend).await?;
             let vault = vault(state);
-            let put = |k: &'static str, v: String| async move {
-                state
-                    .options_service
-                    .put(k, serde_json::Value::String(v))
-                    .await
-            };
-            put("storage_provider", String::from("s3")).await?;
-            put("storage_bucket", config.bucket.clone()).await?;
-            put("storage_region", config.region.clone()).await?;
-            put("storage_endpoint", config.endpoint.clone()).await?;
-            put("storage_path_style", config.path_style.to_string()).await?;
-            put("storage_access_key_id", vault.seal(&config.access_key_id)?).await?;
             let secret = config.secret_access_key.as_ref().map_or("", Secret::expose);
-            put("storage_secret_access_key", vault.seal(secret)?).await?;
+            // Keys first, location last: a boot between two writes finds
+            // either the old location with the old keys or the new with the new.
+            put_option(
+                state,
+                "storage_access_key_id",
+                vault.seal(&config.access_key_id)?,
+            )
+            .await?;
+            put_option(state, "storage_secret_access_key", vault.seal(secret)?).await?;
+            put_option(state, "storage_region", config.region.clone()).await?;
+            put_option(state, "storage_path_style", config.path_style.to_string()).await?;
+            put_option(state, "storage_endpoint", config.endpoint.clone()).await?;
+            put_option(state, "storage_bucket", config.bucket.clone()).await?;
+            put_option(state, "storage_provider", String::from("s3")).await?;
             state.media_storage.set_object(Some(Arc::new(backend)));
             tracing::info!(bucket = %config.bucket, "media: object storage (admin settings)");
             Ok(settings(state).await)
@@ -496,8 +526,41 @@ async fn write_progress(state: &AppState, progress: &MigrationProgress) -> Resul
 /// the source copies are removed. Nothing is deleted before the row says
 /// the bytes are in their new place.
 pub async fn run_migration(state: &AppState) -> Result<(), String> {
-    let to = state.media_storage.active_kind();
+    let mut progress = migration(state).await.unwrap_or(MigrationProgress {
+        state: String::from("running"),
+        total: 0,
+        done: 0,
+        failed: 0,
+        to: state.media_storage.active_kind(),
+        started_at: chrono::Utc::now().to_rfc3339(),
+        finished_at: None,
+        last_error: None,
+    });
+    // The direction is the one the admin asked for, not whatever is
+    // active now: a switch made while the job waited must not reverse it.
+    let to = progress.to;
     let from = other(to);
+    let outcome = run_migration_inner(state, &mut progress, from, to).await;
+    progress.state = String::from(match &outcome {
+        Ok(()) if progress.failed == 0 => "done",
+        _ => "failed",
+    });
+    if let Err(err) = &outcome {
+        progress.last_error = Some(err.clone());
+    }
+    progress.finished_at = Some(chrono::Utc::now().to_rfc3339());
+    write_progress(state, &progress)
+        .await
+        .map_err(|e| e.to_string())?;
+    outcome
+}
+
+async fn run_migration_inner(
+    state: &AppState,
+    progress: &mut MigrationProgress,
+    from: MediaStorage,
+    to: MediaStorage,
+) -> Result<(), String> {
     let (Some(src), Some(dst)) = (
         state.media_storage.backend_for(from),
         state.media_storage.backend_for(to),
@@ -505,17 +568,6 @@ pub async fn run_migration(state: &AppState) -> Result<(), String> {
         return Err("no destination store".to_owned());
     };
     let repo = MediaRepo::new(state.pool.clone());
-    let mut progress = migration(state).await.unwrap_or(MigrationProgress {
-        state: String::from("running"),
-        total: 0,
-        done: 0,
-        failed: 0,
-        to,
-        started_at: chrono::Utc::now().to_rfc3339(),
-        finished_at: None,
-        last_error: None,
-    });
-    progress.to = to;
     let mut after_id = 0;
     loop {
         let rows = repo
@@ -534,19 +586,31 @@ pub async fn run_migration(state: &AppState) -> Result<(), String> {
                     .map(str::to_owned),
             );
             match move_paths(src.as_ref(), dst.as_ref(), &paths).await {
-                Ok(()) => {
-                    if let Err(err) = repo.update_storage(row.id, to).await {
+                Ok(()) => match repo.update_storage(row.id, from, to).await {
+                    Ok(true) => {
+                        for path in &paths {
+                            if let Err(err) = src.delete(path).await {
+                                tracing::warn!(media_id = row.id, path, %err, "media move: source copy left behind");
+                            }
+                        }
+                        progress.done += 1;
+                    }
+                    Ok(false) => {
+                        // Deleted, replaced or moved meanwhile: the copy just
+                        // written is an orphan, not a file anyone asked for.
+                        for path in &paths {
+                            let _ = dst.delete(path).await;
+                        }
+                        tracing::info!(
+                            media_id = row.id,
+                            "media move: row changed under the job, skipped"
+                        );
+                    }
+                    Err(err) => {
                         progress.failed += 1;
                         progress.last_error = Some(format!("media {}: {err}", row.id));
-                        continue;
                     }
-                    for path in &paths {
-                        if let Err(err) = src.delete(path).await {
-                            tracing::warn!(media_id = row.id, path, %err, "media move: source copy left behind");
-                        }
-                    }
-                    progress.done += 1;
-                }
+                },
                 Err(err) => {
                     tracing::warn!(media_id = row.id, %err, "media move failed");
                     progress.failed += 1;
@@ -554,19 +618,11 @@ pub async fn run_migration(state: &AppState) -> Result<(), String> {
                 }
             }
             if (progress.done + progress.failed) % 10 == 0 {
-                let _ = write_progress(state, &progress).await;
+                let _ = write_progress(state, progress).await;
             }
         }
     }
-    progress.state = String::from(if progress.failed == 0 {
-        "done"
-    } else {
-        "failed"
-    });
-    progress.finished_at = Some(chrono::Utc::now().to_rfc3339());
-    write_progress(state, &progress)
-        .await
-        .map_err(|e| e.to_string())
+    Ok(())
 }
 
 async fn move_paths(

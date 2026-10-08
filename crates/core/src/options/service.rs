@@ -58,9 +58,15 @@ pub const SITE_OPTION_KEYS: &[&str] = &[
     // the role a self-made account starts with.
     "registration_enabled",
     "registration_default_role",
-    // Media storage from the admin panel: the keys are sealed by the API
-    // layer before they get here; the migration row is the move job's
-    // progress.
+];
+
+/// Option rows the media-storage settings own (`/api/v1/media/storage`).
+/// They are not site options: the generic read returns every site option
+/// to any `manage_options` holder, the generic write skips the probe and
+/// the sealing, and export/import would carry one site's bucket into
+/// another. They live in the same table, written by the storage module
+/// through the repository.
+pub const STORAGE_OPTION_KEYS: &[&str] = &[
     "storage_provider",
     "storage_bucket",
     "storage_region",
@@ -89,14 +95,6 @@ pub const FULL_ADMINISTRATOR_OPTION_KEYS: &[&str] = &[
     // Whether strangers may make accounts, and what those accounts may do.
     "registration_enabled",
     "registration_default_role",
-    // The keys that reach every byte the site serves.
-    "storage_provider",
-    "storage_bucket",
-    "storage_region",
-    "storage_endpoint",
-    "storage_path_style",
-    "storage_access_key_id",
-    "storage_secret_access_key",
 ];
 
 /// Boolean AI feature switches (the screening mode is a string).
