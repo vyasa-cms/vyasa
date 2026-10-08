@@ -65,6 +65,9 @@ pub const RESERVED_TYPE_SLUGS: &[&str] = &[
     "robots",
     "llms",
     "indexnow",
+    // Health endpoints for container platforms (0.2).
+    "healthz",
+    "readyz",
     // Reserved for plugins' types since phase 33; kept in step.
     "date",
 ];

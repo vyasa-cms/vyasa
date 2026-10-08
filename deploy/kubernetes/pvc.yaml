@@ -1,0 +1,12 @@
+# Uploads and the search index. One volume, ReadWriteOnce: there is one
+# instance per site (see README).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: vyasa-data
+  namespace: vyasa
+spec:
+  accessModes: ["ReadWriteOnce"]
+  resources:
+    requests:
+      storage: 5Gi

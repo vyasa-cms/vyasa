@@ -1,0 +1,39 @@
+# Vyasa on Fly.io: one machine, the official image, a volume for uploads
+# and the search index, Fly Postgres attached. See README.md.
+app = "vyasa"
+primary_region = "ams"
+
+# Built from the Dockerfile beside this file: the official image plus an
+# entrypoint that takes ownership of the volume (Fly mounts it as root).
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  PORT = "3000"
+  VYASA_RUN_DIR = "/tmp/vyasa-run"
+  VYASA_INDEX_DIR = "/data/index"
+  VYASA_MEDIA_DIR = "/data/media"
+  VYASA_LOG__FORMAT = "json"
+
+[[mounts]]
+  source = "vyasa_data"
+  destination = "/data"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  # One always-on instance: the search index is local to the process.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "30s"
+    interval = "10s"
+    timeout = "5s"
+    method = "GET"
+    path = "/readyz"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

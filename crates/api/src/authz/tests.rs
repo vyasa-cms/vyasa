@@ -57,6 +57,7 @@ fn dummy_config(dir: &Path) -> VyasaConfig {
         media_dir: dir.join("media"),
         index_dir: dir.join("index"),
         registry_dir: dir.join("registry"),
+        run_dir: dir.join(".run"),
         debug: true,
         package_trusted_keys: Vec::new(),
         marketplace: vyasa_common::config::SourceConfig::default(),

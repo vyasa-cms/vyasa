@@ -18,6 +18,7 @@ mod ai_registry;
 mod analytics;
 mod audit;
 mod authz;
+mod boot;
 mod cache_invalidator;
 mod cdn;
 mod client_ip;
@@ -1270,6 +1271,27 @@ async fn cmd_serve(config: &VyasaConfig) -> ExitCode {
         eprintln!("vyasa serve: {err}");
         return ExitCode::FAILURE;
     }
+    // A container platform can hand us the first administrator.
+    match boot::first_admin_from_env(&pg_pool).await {
+        Ok(boot::FirstAdmin::Created(email)) => {
+            println!("vyasa serve: created the first administrator {email} from VYASA_ADMIN_EMAIL");
+        }
+        Ok(boot::FirstAdmin::UsersExist) => {
+            eprintln!(
+                "vyasa serve: VYASA_ADMIN_EMAIL/VYASA_ADMIN_PASSWORD ignored: users already exist (remove the variables)"
+            );
+        }
+        Ok(boot::FirstAdmin::HalfConfigured) => {
+            eprintln!(
+                "vyasa serve: VYASA_ADMIN_EMAIL/VYASA_ADMIN_PASSWORD ignored: set both or neither"
+            );
+        }
+        Ok(boot::FirstAdmin::NotConfigured) => {}
+        Err(err) => {
+            eprintln!("vyasa serve: VYASA_ADMIN_PASSWORD/VYASA_ADMIN_EMAIL: {err}");
+            return ExitCode::FAILURE;
+        }
+    }
     // First-run: no users yet → mint the setup token the wizard asks for.
     let mut first_boot_token: Option<String> = None;
     match vyasa_db::repo::UsersRepo::new(pg_pool.clone())
@@ -1278,14 +1300,17 @@ async fn cmd_serve(config: &VyasaConfig) -> ExitCode {
     {
         Ok(0) => {
             let token = setup::mint_token();
-            let run_dir = std::path::Path::new(".run");
+            let run_dir = config.run_dir.as_path();
             let _ = std::fs::create_dir_all(run_dir);
             let _ = std::fs::write(run_dir.join("setup-token"), &token);
             println!(
                 "vyasa serve: no users exist yet. Open /admin/setup in a browser and enter this token:"
             );
             println!("    {token}");
-            println!("    (also written to .run/setup-token; or run `vyasa admin create`)");
+            println!(
+                "    (also written to {}/setup-token; or run `vyasa admin create`)",
+                run_dir.display()
+            );
             first_boot_token = Some(token);
         }
         Ok(_) => {}

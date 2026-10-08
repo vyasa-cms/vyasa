@@ -1,0 +1,27 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "vyasa",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-09-01",
+  "observability": { "enabled": true },
+  "containers": [
+    {
+      "class_name": "VyasaContainer",
+      "image": "./Dockerfile",
+      // One instance per site: the search index is local to the container.
+      "max_instances": 1,
+      "instance_type": "standard"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [{ "name": "VYASA", "class_name": "VyasaContainer" }]
+  },
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["VyasaContainer"] }],
+  "vars": {
+    "R2_BUCKET": "vyasa-media",
+    "R2_ENDPOINT": "https://<account-id>.r2.cloudflarestorage.com"
+  }
+  // Secrets (wrangler secret put): DATABASE_URL, VYASA_SECRET_KEY,
+  // R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, VYASA_ADMIN_EMAIL,
+  // VYASA_ADMIN_PASSWORD.
+}

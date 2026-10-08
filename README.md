@@ -63,7 +63,7 @@ mkdir vyasa && cd vyasa
 curl -fsSLO https://raw.githubusercontent.com/vyasa-cms/vyasa/main/docker-compose.yml
 docker compose run --rm app migrate          # create the database schema
 docker compose up -d
-docker compose exec app cat .run/setup-token # the one-time setup token
+docker compose exec app cat /tmp/vyasa-run/setup-token   # the one-time setup token
 ```
 
 Open <http://localhost:3000/admin/setup>, enter the token, and create the
@@ -83,6 +83,8 @@ cd ~/vyasa && VYASA_DATABASE_URL=postgres://vyasa:PASSWORD@localhost:5432/vyasa 
 
 Building from source and production deployment are covered in
 [CONTRIBUTING.md](CONTRIBUTING.md) and [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md).
+Deploying to Cloudflare Containers, Fly.io, Railway, Render or Kubernetes:
+[Container platforms](docs/DEPLOYMENT.md#container-platforms).
 Configuration comes from `vyasa.toml` if present, overridden by `VYASA_*`
 environment variables — `__` separates nesting, so `VYASA_LOG__LEVEL=debug`.
 

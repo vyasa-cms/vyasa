@@ -41,6 +41,7 @@ fn dummy_config() -> VyasaConfig {
         media_dir: PathBuf::from("/tmp"),
         index_dir: PathBuf::from("/tmp"),
         registry_dir: PathBuf::from("/tmp"),
+        run_dir: PathBuf::from("/tmp"),
         debug: true,
         package_trusted_keys: Vec::new(),
         marketplace: vyasa_common::config::SourceConfig::default(),

@@ -9,6 +9,7 @@ pub mod cacheable;
 pub mod comment_form;
 mod errors;
 pub mod form_submit;
+pub mod health;
 pub mod page_meta;
 pub mod plugin_routes;
 pub mod routes;
@@ -62,6 +63,9 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route("/atom.xml", get(crate::feeds::atom_route))
         .route("/sitemap.xml", get(seo::sitemap))
         .route("/robots.txt", get(seo::robots))
+        // Liveness and readiness for whatever runs the container.
+        .route("/healthz", get(health::healthz))
+        .route("/readyz", get(health::readyz))
         .route("/llms.txt", get(seo::llms_txt))
         .route("/indexnow.txt", get(seo::indexnow_key))
         // A marketplace this site hosts. Both 404 unless the operator

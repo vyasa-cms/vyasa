@@ -49,9 +49,17 @@ vyasa admin create --email you@example.com   # prompts for a password
 vyasa serve
 ```
 
-`migrate` is deliberately a separate command rather than something `serve`
-does at boot: two instances starting together would otherwise race to
-migrate the same database.
+`serve` also applies pending migrations at boot, under the database lock
+the migrator takes, so two instances starting together serialise and the
+second finds nothing to do. `vyasa migrate` stays useful when the
+server's database role may not alter the schema: run it once with a
+privileged URL, and `serve` finds the schema current. A boot that cannot
+migrate stops with the Postgres error rather than serve an old schema.
+
+Without `admin create`, the first boot prints a setup token (and writes it
+to `<run_dir>/setup-token`) for the browser wizard at `/admin/setup`. A
+headless install sets `VYASA_ADMIN_EMAIL` and `VYASA_ADMIN_PASSWORD`
+instead; see [Container platforms](#container-platforms).
 
 ## Behind a reverse proxy
 
@@ -100,11 +108,15 @@ docker compose run --rm app migrate
 docker compose up -d
 ```
 
-Migrations are not run from the entrypoint, for the reason above. Run them
-once before the first `up`, and again after upgrading the image.
+`serve` applies pending migrations at boot, so the explicit `migrate` is
+a habit rather than a requirement: it shows the migration output on its
+own and fails early when the database is not reachable. After upgrading
+the image, `up -d` is enough.
 
 Uploads and the index are on named volumes: an image upgrade that did not
-preserve them would silently discard every uploaded file.
+preserve them would silently discard every uploaded file. The setup token
+is at `/tmp/vyasa-run/setup-token` inside the container (the image sets
+`VYASA_RUN_DIR` there) and in the container's log.
 
 ### Image tags and verification
 
@@ -127,6 +139,68 @@ build provenance attestation:
 gh attestation verify oci://ghcr.io/vyasa-cms/vyasa:0.1.0 --owner vyasa-cms
 gh attestation verify vyasa-0.1.0-x86_64-unknown-linux-gnu.tar.gz --owner vyasa-cms
 ```
+
+## Container platforms
+
+Cloudflare Containers, Fly.io, Railway, Render and Kubernetes all run the
+official image the same way: environment variables in, one HTTP port out,
+a disk that may not survive a restart. Vyasa follows the conventions they
+share, so a working site needs the image and a Postgres and nothing else.
+
+**The contract**
+
+- **Port.** `PORT` is honoured when `VYASA_BIND_ADDR` is unset: the server
+  binds `0.0.0.0:$PORT`. `VYASA_BIND_ADDR` always wins.
+- **Database.** `DATABASE_URL` is honoured when `VYASA_DATABASE_URL` is
+  unset. `sslmode=require` and `sslmode=verify-full` URLs work as given.
+- **Migrations** run at boot under the migrator's database lock (above).
+- **The first administrator** can come from the environment: when
+  `VYASA_ADMIN_EMAIL` and `VYASA_ADMIN_PASSWORD` are both set and the
+  users table is empty, the boot creates that administrator exactly as
+  `vyasa admin create` does and marks setup done. Once users exist the
+  variables are ignored with a warning, so remove the password variable
+  after the first boot. Without them, the setup token is printed to the
+  log (`wrangler tail`, `fly logs`, `kubectl logs`) for the browser wizard.
+- **Health.** `GET /healthz` answers `200 {"status":"ok"}` as soon as the
+  server is bound (liveness: a restart cures what it reports).
+  `GET /readyz` answers `200 {"status":"ready"}` when the database answers
+  and no migration is pending, else `503` with `"reason"` set to
+  `"database unreachable"` or `"migrations pending"` (readiness: route
+  traffic only on 200). Both are unauthenticated, outside `/api/v1`, and
+  independent of the search index.
+- **Read-only root filesystem.** The server writes only under
+  `VYASA_MEDIA_DIR`, `VYASA_INDEX_DIR` and `VYASA_RUN_DIR` (the setup
+  token; the image sets `/tmp/vyasa-run`). With a tmpfs on
+  `/tmp` the image runs with Docker's `--read-only` and Kubernetes'
+  `readOnlyRootFilesystem: true`; `scripts/smoke-readonly.sh` proves it
+  on every CI run.
+- **Media in object storage.** `VYASA_STORAGE__PROVIDER=s3` with the
+  bucket, endpoint and keys (R2, S3, MinIO, any S3 API) removes the need
+  for a media volume; `VYASA_MEDIA_DIR` is then scratch only.
+- **The search index rebuilds itself.** When the index on disk does not
+  match the database — empty after a restart on ephemeral disk, or stale —
+  the boot rebuilds it in the background from Postgres, logging start and
+  finish. Small and medium sites need no index volume at all; a large
+  site wants one so a restart does not answer empty searches for the
+  seconds or minutes a rebuild takes.
+- **One instance per site.** The search index is local to the process.
+  Run one instance (the platform pages set this); the job queue lives in
+  Postgres, so restarts and redeploys lose nothing.
+- **Logs.** `VYASA_LOG__FORMAT=json` for the platforms' log search.
+
+The self-updater (`vyasa update apply`) is for binary installs. On a
+container platform, upgrade by moving the image tag; the admin's update
+panel says so.
+
+**Platform pages**, each the single page for that platform:
+
+| Platform | Page | Status in 0.2 |
+|---|---|---|
+| Cloudflare Containers (+ R2) | [deploy/cloudflare](../deploy/cloudflare/README.md) | walkthrough, checked live before release |
+| Fly.io | [deploy/fly](../deploy/fly/README.md) | walkthrough, checked live before release |
+| Kubernetes | [deploy/kubernetes](../deploy/kubernetes/README.md) | verified on kind |
+| Railway | [deploy/railway](../deploy/railway/README.md) | template, documented |
+| Render | [deploy/render](../deploy/render/README.md) | template, documented |
 
 ## Release archives
 

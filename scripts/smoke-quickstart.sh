@@ -37,11 +37,11 @@ done
 
 token=""
 for _ in $(seq 1 30); do
-    token=$(docker compose exec -T app cat .run/setup-token 2>/dev/null || true)
+    token=$(docker compose exec -T app cat /tmp/vyasa-run/setup-token 2>/dev/null || true)
     [ -n "$token" ] && break
     sleep 1
 done
-[ -n "$token" ] || { echo "no setup token in .run/setup-token" >&2; exit 1; }
+[ -n "$token" ] || { echo "no setup token in /tmp/vyasa-run/setup-token" >&2; exit 1; }
 
 headers=$(curl -s -o /dev/null -D - -X POST http://127.0.0.1:3000/api/v1/setup/claim \
     -H 'content-type: application/json' -H 'origin: http://127.0.0.1:3000' \

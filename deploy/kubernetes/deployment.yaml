@@ -1,0 +1,84 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vyasa
+  namespace: vyasa
+  labels:
+    app: vyasa
+spec:
+  # One instance per site: the search index is local to the process.
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app: vyasa
+  template:
+    metadata:
+      labels:
+        app: vyasa
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+      containers:
+        - name: vyasa
+          image: ghcr.io/vyasa-cms/vyasa:0.2.0
+          ports:
+            - name: http
+              containerPort: 3000
+          env:
+            - name: PORT
+              value: "3000"
+            - name: VYASA_RUN_DIR
+              value: /tmp/vyasa-run
+            - name: VYASA_INDEX_DIR
+              value: /data/index
+            - name: VYASA_MEDIA_DIR
+              value: /data/media
+            - name: VYASA_LOG__FORMAT
+              value: json
+          envFrom:
+            - secretRef:
+                name: vyasa
+          securityContext:
+            readOnlyRootFilesystem: true
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            - name: tmp
+              mountPath: /tmp
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            periodSeconds: 5
+          startupProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            failureThreshold: 60
+            periodSeconds: 2
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 1Gi
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: vyasa-data
+        - name: tmp
+          emptyDir: {}

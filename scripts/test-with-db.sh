@@ -48,7 +48,7 @@ docker run -d --name "$S3_CONTAINER" \
     -e MINIO_ROOT_USER=vyasatest \
     -e MINIO_ROOT_PASSWORD=vyasatestsecret \
     -p "${S3_PORT}:9000" \
-    quay.io/minio/minio server /data >/dev/null
+    bitnamilegacy/minio:latest@sha256:451fe6858cb770cc9d0e77ba811ce287420f781c7c1b806a386f6896471a349c >/dev/null
 
 echo -n "==> waiting for it"
 for _ in $(seq 1 60); do

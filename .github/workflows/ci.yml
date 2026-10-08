@@ -160,5 +160,11 @@ jobs:
           context: .
           platforms: linux/amd64
           push: false
+          load: true
+          tags: vyasa:ci
           cache-from: type=gha,scope=ci-amd64
           cache-to: type=gha,mode=max,scope=ci-amd64
+      # The image the way a container platform runs it: read-only root,
+      # PORT and DATABASE_URL, media in object storage, index rebuilt
+      # after a restart.
+      - run: scripts/smoke-readonly.sh vyasa:ci

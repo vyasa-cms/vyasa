@@ -1,0 +1,199 @@
+//! What a container platform relies on at boot: health endpoints, the
+//! first administrator from the environment, and a search index that
+//! rebuilds itself.
+#![allow(clippy::expect_used, clippy::unwrap_used, clippy::panic)]
+
+mod common;
+
+use vyasa_testkit::{TestDb, TestServer};
+
+fn get(url: &str) -> (u16, serde_json::Value) {
+    match ureq::get(url).call() {
+        Ok(r) | Err(ureq::Error::Status(_, r)) => {
+            let status = r.status();
+            (status, r.into_json().unwrap_or(serde_json::Value::Null))
+        }
+        Err(e) => panic!("transport {e}"),
+    }
+}
+
+#[tokio::test]
+async fn healthz_and_readyz_answer_on_a_fresh_install() {
+    let db = TestDb::new().await;
+    let server = TestServer::start(common::BIN, &db);
+    let (s, body) = get(&format!("{}/healthz", server.base()));
+    assert_eq!((s, body["status"].as_str()), (200, Some("ok")), "{body}");
+    let (s, body) = get(&format!("{}/readyz", server.base()));
+    assert_eq!((s, body["status"].as_str()), (200, Some("ready")), "{body}");
+}
+
+#[tokio::test]
+async fn readyz_reports_pending_migrations() {
+    let db = TestDb::new().await;
+    let server = TestServer::start(common::BIN, &db);
+    // A newer binary's migration missing here: forget the last applied
+    // one so the migrator sees it pending.
+    sqlx::query(
+        "DELETE FROM _sqlx_migrations WHERE version = (SELECT max(version) FROM _sqlx_migrations)",
+    )
+    .execute(db.pool())
+    .await
+    .unwrap();
+    let (s, body) = get(&format!("{}/readyz", server.base()));
+    assert_eq!(s, 503, "{body}");
+    assert_eq!(body["reason"], "migrations pending", "{body}");
+}
+
+// ---- the first administrator from the environment ----------------------
+
+#[tokio::test]
+async fn the_first_admin_can_come_from_the_environment() {
+    let db = TestDb::new().await;
+    let server = TestServer::builder(common::BIN, &db)
+        .env("VYASA_ADMIN_EMAIL", "ops@example.com")
+        .env("VYASA_ADMIN_PASSWORD", "a-long-enough-password")
+        .start();
+    let cookie = common::login_cookie(server.base(), "ops@example.com", "a-long-enough-password");
+    assert!(cookie.starts_with("vy_session="), "{cookie}");
+    let (s, body) = get(&format!("{}/api/v1/setup/status", server.base()));
+    assert_eq!(s, 200);
+    assert_eq!(body["needs_admin"], false, "{body}");
+}
+
+#[tokio::test]
+async fn admin_variables_are_ignored_when_users_exist() {
+    let db = TestDb::new().await;
+    let _existing = common::seed_user(db.pool(), vyasa_db::models::Role::Admin).await;
+    let server = TestServer::builder(common::BIN, &db)
+        .env("VYASA_ADMIN_EMAIL", "ops@example.com")
+        .env("VYASA_ADMIN_PASSWORD", "a-long-enough-password")
+        .start();
+    let r = ureq::post(&format!("{}/api/v1/auth/login", server.base())).send_json(
+        serde_json::json!({ "email": "ops@example.com", "password": "a-long-enough-password" }),
+    );
+    assert!(
+        matches!(r, Err(ureq::Error::Status(401, _))),
+        "no second administrator was created"
+    );
+}
+
+#[tokio::test]
+async fn half_set_admin_variables_are_ignored_with_a_warning() {
+    let db = TestDb::new().await;
+    let server = TestServer::builder(common::BIN, &db)
+        .env("VYASA_ADMIN_EMAIL", "ops@example.com")
+        .start();
+    let (s, body) = get(&format!("{}/api/v1/setup/status", server.base()));
+    assert_eq!(s, 200);
+    assert_eq!(
+        body["needs_admin"], true,
+        "the setup-token path still applies: {body}"
+    );
+}
+
+#[tokio::test]
+async fn a_weak_admin_password_stops_the_boot() {
+    let db = TestDb::new().await;
+    let out = std::process::Command::new(common::BIN)
+        .arg("serve")
+        .env("VYASA_DATABASE_URL", db.url())
+        .env("VYASA_BIND_ADDR", "127.0.0.1:0")
+        .env("VYASA_ADMIN_EMAIL", "ops@example.com")
+        .env("VYASA_ADMIN_PASSWORD", "short")
+        .output()
+        .expect("run the binary");
+    assert!(!out.status.success(), "the boot must stop");
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert!(err.contains("VYASA_ADMIN_PASSWORD"), "{err}");
+}
+
+// ---- the search index rebuilds itself on boot --------------------------
+
+/// `n` published posts titled "Boot post 1..n" by a fresh admin.
+async fn seed_posts(pool: &sqlx::PgPool, n: i64) {
+    let author = common::seed_user(pool, vyasa_db::models::Role::Admin).await;
+    for i in 1..=n {
+        sqlx::query(
+            "INSERT INTO posts (id, author_id, type, status, slug, title, content, meta, published_at)
+             VALUES ($4, $1, 'post', 'published', $2, $3,
+                     '{\"schema_version\":1,\"blocks\":[{\"kind\":\"paragraph\",\"attrs\":{\"text\":\"Boot text.\"}}]}',
+                     '{}', now())",
+        )
+        .bind(author.id)
+        .bind(format!("boot-post-{}-{i}", author.id))
+        .bind(format!("Boot post {i}"))
+        .bind(900_000 + author.id * 100 + i)
+        .execute(pool)
+        .await
+        .expect("seed post");
+    }
+}
+
+fn hits(base: &str) -> usize {
+    let (_, body) = get(&format!("{base}/api/v1/search?q=Boot&limit=50"));
+    body["hits"].as_array().map_or(0, Vec::len)
+}
+
+#[tokio::test]
+async fn an_empty_index_is_rebuilt_on_boot() {
+    let db = TestDb::new().await;
+    seed_posts(db.pool(), 3).await;
+    // A fresh index directory: the container's disk did not survive.
+    let server = TestServer::start(common::BIN, &db);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while hits(server.base()) != 3 {
+        assert!(std::time::Instant::now() < deadline, "index never rebuilt");
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
+#[tokio::test]
+async fn readiness_does_not_wait_for_the_index() {
+    let db = TestDb::new().await;
+    seed_posts(db.pool(), 50).await;
+    let server = TestServer::start(common::BIN, &db);
+    let (s, body) = get(&format!("{}/readyz", server.base()));
+    assert_eq!(s, 200, "{body}");
+}
+
+#[tokio::test]
+async fn the_index_is_in_step_with_what_it_indexes_not_with_every_published_row() {
+    // A password-protected post is published but never indexed; it must
+    // not make every boot think the index is behind and rebuild it.
+    let db = TestDb::new().await;
+    seed_posts(db.pool(), 3).await;
+    let admin = common::seed_user(db.pool(), vyasa_db::models::Role::Admin).await;
+    sqlx::query(
+        "INSERT INTO posts (id, author_id, type, status, slug, title, content, meta, password_hash, published_at)
+         VALUES ($1, $2, 'post', 'published', 'members-only', 'Boot post for members',
+                 '{\"schema_version\":1,\"blocks\":[]}', '{}', 'not-a-real-hash', now())",
+    )
+    .bind(900_000 + admin.id * 100 + 99)
+    .bind(admin.id)
+    .execute(db.pool())
+    .await
+    .expect("protected post");
+    let server = TestServer::start(common::BIN, &db);
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+    while hits(server.base()) != 3 {
+        assert!(std::time::Instant::now() < deadline, "index never rebuilt");
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+    let cookie = common::login_cookie(server.base(), &admin.email, &admin.password);
+    let report: serde_json::Value = ureq::get(&format!("{}/api/v1/site-health", server.base()))
+        .set("cookie", &cookie)
+        .call()
+        .expect("site health")
+        .into_json()
+        .expect("json");
+    let check = report["checks"]
+        .as_array()
+        .and_then(|c| c.iter().find(|c| c["name"] == "search_index"))
+        .cloned()
+        .unwrap_or_default();
+    assert_eq!(check["status"], "ok", "{check}");
+    assert_eq!(
+        check["detail"], "3 documents indexed for 3 published entries",
+        "the comparison counts what the index would hold: {check}"
+    );
+}

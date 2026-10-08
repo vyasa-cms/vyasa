@@ -72,11 +72,11 @@ pub async fn get(State(state): State<AppState>, headers: HeaderMap) -> ApiResult
     let https = crate::feeds::origin_from_headers(&headers).starts_with("https://");
     let mut checks = crate::setup::checks(&state, https).await;
 
-    let published = count(
-        pool,
-        "SELECT count(*) FROM posts WHERE status = 'published' AND type IN ('post', 'page')",
-    )
-    .await;
+    // What the index would hold if it were in step, by the indexer's own
+    // predicate: a protected post is published but never indexed.
+    let published = crate::search_indexer::searchable_count(&state)
+        .await
+        .unwrap_or(0);
     let indexed = state.search_index.as_ref().map(|i| i.doc_count());
     let dead = count(pool, "SELECT count(*) FROM jobs WHERE status = 'dead'").await;
     let queued = count(pool, "SELECT count(*) FROM jobs WHERE status = 'queued'").await;
