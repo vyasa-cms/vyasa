@@ -2,6 +2,8 @@ allowBuilds:
   esbuild: false
 
 overrides:
+  # GHSA-68fv-2mgg-jv7q (event-loop DoS via indexed source-map sections)
+  source-map-js: ">=1.2.2"
   dompurify: ">=3.4.16"
   js-yaml: "^4.3.2"
   brace-expansion@2: "^2.1.7"
