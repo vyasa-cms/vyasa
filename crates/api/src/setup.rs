@@ -93,6 +93,7 @@ pub async fn checks(state: &AppState, arrived_over_https: bool) -> Vec<Check> {
     for (name, dir) in [
         ("index_dir", &state.config.index_dir),
         ("registry_dir", &state.config.registry_dir),
+        ("run_dir", &state.config.run_dir),
     ] {
         let writable = tokio::fs::create_dir_all(dir).await.is_ok()
             && tokio::fs::write(dir.join(".vyasa-probe"), b"ok")

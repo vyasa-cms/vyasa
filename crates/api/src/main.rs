@@ -1278,14 +1278,17 @@ async fn cmd_serve(config: &VyasaConfig) -> ExitCode {
     {
         Ok(0) => {
             let token = setup::mint_token();
-            let run_dir = std::path::Path::new(".run");
+            let run_dir = config.run_dir.as_path();
             let _ = std::fs::create_dir_all(run_dir);
             let _ = std::fs::write(run_dir.join("setup-token"), &token);
             println!(
                 "vyasa serve: no users exist yet. Open /admin/setup in a browser and enter this token:"
             );
             println!("    {token}");
-            println!("    (also written to .run/setup-token; or run `vyasa admin create`)");
+            println!(
+                "    (also written to {}/setup-token; or run `vyasa admin create`)",
+                run_dir.display()
+            );
             first_boot_token = Some(token);
         }
         Ok(_) => {}

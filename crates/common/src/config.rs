@@ -326,6 +326,9 @@ pub struct VyasaConfig {
     /// `./registry`. Nothing is served unless the files exist, so an
     /// install that hosts no marketplace gains no public surface.
     pub registry_dir: PathBuf,
+    /// Where the server keeps its own small files: the setup token and
+    /// the pid file. A container puts it on a writable tmpfs.
+    pub run_dir: PathBuf,
     /// Whether the playground and other dev-only endpoints are enabled.
     #[serde(default)]
     pub debug: bool,
@@ -444,6 +447,7 @@ struct RawConfig {
     media_dir: Option<PathBuf>,
     index_dir: Option<PathBuf>,
     registry_dir: Option<PathBuf>,
+    run_dir: Option<PathBuf>,
     debug: Option<bool>,
     plugin_trusted_keys: Option<Vec<String>>,
     package_trusted_keys: Option<Vec<String>>,
@@ -469,7 +473,7 @@ impl TryFrom<RawConfig> for VyasaConfig {
         let database_url = raw.database_url.ok_or_else(|| {
             crate::AppError::validation(
                 "missing required configuration: database_url \
-                 (set VYASA_DATABASE_URL or database_url in vyasa.toml)",
+                 (set VYASA_DATABASE_URL — or DATABASE_URL — or database_url in vyasa.toml)",
             )
         })?;
         let bind_addr = raw.bind_addr.unwrap_or_else(|| "0.0.0.0:3000".to_string());
@@ -521,6 +525,7 @@ impl TryFrom<RawConfig> for VyasaConfig {
             registry_dir: raw
                 .registry_dir
                 .unwrap_or_else(|| PathBuf::from("registry")),
+            run_dir: raw.run_dir.unwrap_or_else(|| PathBuf::from(".run")),
             debug: raw.debug.unwrap_or(false),
             package_trusted_keys,
             marketplace: raw.marketplace.unwrap_or_default(),
@@ -571,6 +576,19 @@ impl VyasaConfig {
     /// Returns [`crate::AppError::Validation`] when required fields are
     /// missing or values are invalid.
     pub fn load_from_file(path: &str) -> Result<Self, crate::AppError> {
+        Self::load_from_file_with_env(path, &|name| std::env::var(name).ok())
+    }
+
+    /// [`Self::load_from_file`] with the platform variables (`PORT`,
+    /// `DATABASE_URL`) read through `platform_env`, so tests need not
+    /// touch the process environment.
+    ///
+    /// # Errors
+    /// As [`Self::load_from_file`].
+    pub fn load_from_file_with_env(
+        path: &str,
+        platform_env: &dyn Fn(&str) -> Option<String>,
+    ) -> Result<Self, crate::AppError> {
         let merged = config::Config::builder()
             .add_source(config::File::with_name(path).required(false))
             .add_source(
@@ -595,9 +613,21 @@ impl VyasaConfig {
             .map_err(|err| {
                 crate::AppError::validation(format!("failed to load configuration: {err}"))
             })?;
-        let raw: RawConfig = merged
+        let mut raw: RawConfig = merged
             .try_deserialize()
             .map_err(|err| crate::AppError::validation(format!("invalid configuration: {err}")))?;
+        // Platforms hand out DATABASE_URL and PORT; Vyasa's own names win.
+        if raw.database_url.is_none() {
+            raw.database_url = platform_env("DATABASE_URL").filter(|s| !s.trim().is_empty());
+        }
+        if raw.bind_addr.is_none() {
+            if let Some(port) = platform_env("PORT").filter(|s| !s.trim().is_empty()) {
+                let number: u16 = port.trim().parse().map_err(|_| {
+                    crate::AppError::validation(format!("PORT={port} is not a port number"))
+                })?;
+                raw.bind_addr = Some(format!("0.0.0.0:{number}"));
+            }
+        }
         raw.try_into()
     }
 }
@@ -655,6 +685,85 @@ mod tests {
         assert_eq!(
             cfg.package_trusted_keys,
             vec!["b".repeat(64), "a".repeat(64)]
+        );
+    }
+
+    fn temp_path(tag: &str) -> String {
+        std::env::temp_dir()
+            .join(format!("vyasa-config-{tag}-{}.toml", std::process::id()))
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    /// Loads `toml` (plus a database_url) with the given platform variables.
+    fn config_with_env(
+        toml: &str,
+        tag: &str,
+        env: &[(&str, &str)],
+    ) -> Result<VyasaConfig, AppError> {
+        let path = temp_path(tag);
+        std::fs::write(
+            &path,
+            format!("database_url = \"postgres://u:p@localhost/x\"\n{toml}"),
+        )
+        .expect("write config");
+        let lookup = |name: &str| {
+            env.iter()
+                .find(|(k, _)| *k == name)
+                .map(|(_, v)| (*v).to_owned())
+        };
+        VyasaConfig::load_from_file_with_env(&path, &lookup)
+    }
+
+    #[test]
+    fn port_is_used_when_bind_addr_is_unset() {
+        let cfg = config_with_env("", "port", &[("PORT", "8080")]).expect("load");
+        assert_eq!(cfg.bind_addr, "0.0.0.0:8080");
+    }
+
+    #[test]
+    fn vyasa_bind_addr_wins_over_port() {
+        let cfg = config_with_env(
+            "bind_addr = \"127.0.0.1:3100\"\n",
+            "port-wins",
+            &[("PORT", "8080")],
+        )
+        .expect("load");
+        assert_eq!(cfg.bind_addr, "127.0.0.1:3100");
+    }
+
+    #[test]
+    fn a_bad_port_is_refused() {
+        let err = config_with_env("", "bad-port", &[("PORT", "http")]).expect_err("refused");
+        assert!(err.to_string().contains("PORT=http"), "{err}");
+    }
+
+    #[test]
+    fn database_url_is_a_fallback() {
+        let path = temp_path("dburl");
+        std::fs::write(&path, "").expect("write");
+        let lookup = |name: &str| {
+            (name == "DATABASE_URL")
+                .then(|| "postgres://u:p@db.example/x?sslmode=require".to_owned())
+        };
+        let cfg = VyasaConfig::load_from_file_with_env(&path, &lookup).expect("load");
+        assert_eq!(
+            cfg.database_url.expose(),
+            "postgres://u:p@db.example/x?sslmode=require"
+        );
+    }
+
+    #[test]
+    fn run_dir_defaults_and_overrides() {
+        assert_eq!(
+            config_from("", "run-default").expect("load").run_dir,
+            std::path::PathBuf::from(".run")
+        );
+        assert_eq!(
+            config_from("run_dir = \"/var/run/vyasa\"\n", "run-set")
+                .expect("load")
+                .run_dir,
+            std::path::PathBuf::from("/var/run/vyasa")
         );
     }
 
