@@ -11,6 +11,7 @@ import { notify } from "@/components/ui/toast";
 import { useConfirm } from "@/components/ui/dialog";
 import { MonacoPane } from "@/components/editor/MonacoPane";
 import { MailRelayPanel } from "@/components/MailRelayPanel";
+import { StoragePanel } from "@/components/StoragePanel";
 import { ExportImportPanel } from "@/components/ExportImportPanel";
 import { useCapabilities, CAPABILITY_ORDER } from "@/lib/capabilities";
 import { cn } from "@/lib/utils";
@@ -358,7 +359,7 @@ const SECTIONS: Section[] = [
   {
     id: "delivery",
     title: "Delivery",
-    description: "Caching in front of the site and the room uploads may take. Storage and CDN themselves are set in the environment; Site health shows what is configured.",
+    description: "Caching in front of the site, the room uploads may take, and where their bytes live.",
     step: "delivery",
     keys: [
       { key: "edge_cache_seconds", label: "Edge cache", hint: "How long a CDN may keep a page. 0 without a CDN; 60 is a good start with one. Up to 86400.", placeholder: "0", kind: "number", unit: "seconds" },
@@ -720,6 +721,13 @@ export function SettingsPage() {
                         <h3 className="text-sm font-medium">Mail relay</h3>
                         <p className="mb-3 mt-0.5 max-w-[70ch] text-xs text-muted-foreground">Where password resets, notifications and the newsletter go out. Saves on its own, separately from the fields above.</p>
                         <MailRelayPanel />
+                      </div>
+                    ) : null}
+                    {section.id === "delivery" ? (
+                      <div className="2xl:col-span-2 border-t pt-4">
+                        <h3 className="text-sm font-medium">Media storage</h3>
+                        <p className="mb-3 mt-0.5 max-w-[70ch] text-xs text-muted-foreground">Local disk, or an S3-compatible bucket (Cloudflare R2, AWS S3, MinIO). Saves on its own, separately from the fields above.</p>
+                        <StoragePanel />
                       </div>
                     ) : null}
                     {section.id === "assistants" ? (

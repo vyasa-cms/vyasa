@@ -1175,6 +1175,64 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/media/storage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /api/v1/media/storage` */
+        get: operations["get"];
+        /**
+         * `PUT /api/v1/media/storage` — a full administrator only: the keys
+         *     reach every byte the site serves.
+         */
+        put: operations["put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media/storage/migrate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * `POST /api/v1/media/storage/migrate` — move files that sit in the
+         *     store that is not active.
+         */
+        post: operations["migrate"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/media/storage/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /** `POST /api/v1/media/storage/test` — one probe object, nothing saved. */
+        post: operations["test"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/media/trash/empty": {
         parameters: {
             query?: never;
@@ -4908,6 +4966,31 @@ export interface components {
             /** @description Unused recovery codes left. */
             recovery_codes_left: number;
         };
+        /** @description How far the move job got. */
+        MigrationProgress: {
+            /**
+             * Format: int64
+             * @description Rows moved so far.
+             */
+            done: number;
+            /**
+             * Format: int64
+             * @description Rows that could not be moved; they are retried on the next run.
+             */
+            failed: number;
+            finished_at?: string | null;
+            last_error?: string | null;
+            started_at: string;
+            /** @description `running`, `done` or `failed`. */
+            state: string;
+            /** @description Where the bytes are going: `local` or `s3`. */
+            to: string;
+            /**
+             * Format: int64
+             * @description Rows to move when the job started.
+             */
+            total: number;
+        };
         /** @description New-model body. */
         NewModelBody: {
             /**
@@ -5438,7 +5521,7 @@ export interface components {
             site_url_verified: boolean;
         };
         /**
-         * @description Where the effective relay comes from.
+         * @description Where the active configuration comes from.
          * @enum {string}
          */
         Source: "options" | "environment" | "none";
@@ -5463,6 +5546,48 @@ export interface components {
          * @enum {string}
          */
         Stage: "preflight" | "downloading" | "verifying" | "backing_up" | "swapping" | "migrating" | "restarting" | "done" | "failed" | "rolled_back";
+        /** @description Files per store. */
+        StorageCounts: {
+            /** Format: int64 */
+            local: number;
+            /** Format: int64 */
+            s3: number;
+        };
+        /** @description What the admin sends. */
+        StorageInput: {
+            /** @description Omitted: keep the stored one. */
+            access_key_id?: string | null;
+            bucket?: string;
+            endpoint?: string;
+            /** @description Allow changing bucket or endpoint while files sit in the old one. */
+            forget_existing?: boolean;
+            path_style?: boolean;
+            /** @description `local` or `s3`. */
+            provider: string;
+            region?: string;
+            /** @description Omitted: keep the stored one. */
+            secret_access_key?: string | null;
+        };
+        /** @description The settings, without the secret and with the key id masked. */
+        StorageSettings: {
+            /** @description The last four characters of the access key id, or empty. */
+            access_key_id_hint: string;
+            bucket: string;
+            counts: components["schemas"]["StorageCounts"];
+            /** @description Whether stored keys are encrypted at rest. */
+            encrypted: boolean;
+            endpoint: string;
+            /** @description Local disk does not survive a restart here (a container platform). */
+            ephemeral_disk: boolean;
+            /** @description Whether a secret is stored and readable. */
+            has_secret: boolean;
+            migration?: components["schemas"]["MigrationProgress"] | null;
+            path_style: boolean;
+            /** @description `local` or `s3`: where new uploads go. */
+            provider: string;
+            region: string;
+            source: components["schemas"]["Source"];
+        };
         /** @description One answer as the inbox shows it. */
         Submission: {
             /** Format: date-time */
@@ -8180,6 +8305,141 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["MediaStatsResponse"];
                 };
+            };
+        };
+    };
+    get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The active store, without its secret */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageSettings"];
+                };
+            };
+        };
+    };
+    put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageInput"];
+            };
+        };
+        responses: {
+            /** @description Saved and active */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["StorageSettings"];
+                };
+            };
+            /** @description The store refused the probe */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not a full administrator */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Set in the environment, or files would be forgotten */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    migrate: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Started */
+            202: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MigrationProgress"];
+                };
+            };
+            /** @description Not a full administrator */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Already running */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+        };
+    };
+    test: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["StorageInput"];
+            };
+        };
+        responses: {
+            /** @description Write, read and delete succeeded */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description The store refused */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Not a full administrator */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
