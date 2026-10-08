@@ -2,6 +2,7 @@
 
 pub mod derivatives;
 pub mod service;
+pub mod router;
 pub mod storage;
 
 pub use derivatives::{
@@ -10,4 +11,5 @@ pub use derivatives::{
 pub use service::{
     check_upload, sanitize_file_name, sha256_hex, CropBox, ImageEdit, MediaService, MAX_BYTES,
 };
+pub use router::StorageRouter;
 pub use storage::{assert_backend_contract, LocalFsBackend, StorageBackend};
