@@ -7,6 +7,36 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+Vyasa runs well on container platforms. Cloudflare Containers, Fly.io,
+Railway, Render and Kubernetes get a working site from the official image
+and environment variables alone; see "Container platforms" in
+[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md#container-platforms).
+
+### Added
+
+- `PORT` is honoured when `VYASA_BIND_ADDR` is unset, and `DATABASE_URL`
+  when `VYASA_DATABASE_URL` is unset; Vyasa's own names always win.
+- `VYASA_ADMIN_EMAIL` and `VYASA_ADMIN_PASSWORD` create the first
+  administrator at boot when the users table is empty, exactly as
+  `vyasa admin create` does, and mark setup done. Users already present
+  or only one variable set is a warning; a weak password stops the boot.
+- `GET /healthz` (liveness) and `GET /readyz` (readiness: database
+  reachable, no migration pending) outside `/api/v1`, unauthenticated.
+- `run_dir` / `VYASA_RUN_DIR` (default `.run`) for the setup token and
+  update staging; the image sets `/tmp/vyasa-run`, so it runs with a
+  read-only root filesystem and a tmpfs on `/tmp`. `scripts/smoke-readonly.sh`
+  boots the image that way in CI, with media in object storage.
+- `deploy/cloudflare`, `deploy/fly`, `deploy/kubernetes`, `deploy/railway`
+  and `deploy/render`: one page and config per platform.
+
+### Changed
+
+- The image no longer declares `VOLUME`s for media and the index; mount
+  volumes there yourself (the compose file does) or use object storage.
+  The setup token inside the container is at `/tmp/vyasa-run/setup-token`.
+- The docs now say what the code has done since 0.1.0: `serve` applies
+  pending migrations at boot under the migrator's lock.
+
 ## [0.1.0] - 2026-10-05
 
 The first public release: an AI-native content management system in one
