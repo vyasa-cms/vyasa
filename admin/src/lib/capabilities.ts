@@ -202,6 +202,7 @@ export const CAPABILITIES: Record<string, CapabilityInfo> = {
       "exporting a site archive",
       "the audit log",
       "seeing the mail relay's settings (not its password)",
+      "seeing where media is stored (not the bucket's keys)",
       "AI models, providers, their keys, and AI usage",
       "checking for updates, and seeing which marketplace and update channel the server uses",
       "rebuilding the search index",
@@ -213,12 +214,13 @@ export const CAPABILITIES: Record<string, CapabilityInfo> = {
     ],
     fullAdministratorOnly: [
       "changing the mail relay or sending a test message through it",
+      "changing where media is stored, testing a bucket, or moving files between stores",
       "changing the site address",
       "changing where updates and marketplace packages come from, or whose signature is trusted",
       "applying updates",
       "importing a site archive",
     ],
-    areas: ["ai", "audience", "audit-log", "content-types", "export", "import", "mail", "options", "privacy", "redirects", "registry", "search", "site-health", "updates"],
+    areas: ["ai", "audience", "audit-log", "content-types", "export", "import", "mail", "media", "options", "privacy", "redirects", "registry", "search", "site-health", "updates"],
   },
   view_admin: {
     label: "Use the admin screens",

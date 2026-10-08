@@ -60,6 +60,23 @@ pub const SITE_OPTION_KEYS: &[&str] = &[
     "registration_default_role",
 ];
 
+/// Option rows the media-storage settings own (`/api/v1/media/storage`).
+/// They are not site options: the generic read returns every site option
+/// to any `manage_options` holder, the generic write skips the probe and
+/// the sealing, and export/import would carry one site's bucket into
+/// another. They live in the same table, written by the storage module
+/// through the repository.
+pub const STORAGE_OPTION_KEYS: &[&str] = &[
+    "storage_provider",
+    "storage_bucket",
+    "storage_region",
+    "storage_endpoint",
+    "storage_path_style",
+    "storage_access_key_id",
+    "storage_secret_access_key",
+    "storage_migration",
+];
+
 /// Options that decide where the site's mail goes and which address its
 /// links carry. Whoever writes one can take the site over (a
 /// password-reset link sent through their relay, or to their address), so

@@ -7,7 +7,7 @@ use sqlx::PgPool;
 use tokio::sync::Notify;
 use vyasa_common::VyasaConfig;
 use vyasa_core::comment::CommentService;
-use vyasa_core::media::{LocalFsBackend, MediaService};
+use vyasa_core::media::{LocalFsBackend, MediaService, StorageRouter};
 use vyasa_core::post::revisions::RevisionService;
 use vyasa_core::post::PostService;
 use vyasa_core::taxonomy::TermService;
@@ -47,6 +47,9 @@ pub struct AppState {
     pub comments: CommentService,
     /// Media service.
     pub media: MediaService,
+    /// Where media bytes go: local disk plus the object store active now
+    /// (from the environment, or from the settings saved in the admin).
+    pub media_storage: Arc<StorageRouter>,
     /// Options repository (public option reads for GraphQL `option`).
     pub options: OptionsRepo,
     /// Theme storage (install/activate/rollback).
@@ -121,23 +124,26 @@ pub struct AppState {
     pub publisher_notify: Arc<Notify>,
 }
 
-/// Object storage when configured, local disk otherwise.
+/// Local disk, with object storage active when the environment configures
+/// it. Settings saved in the admin are applied after construction (see
+/// `media_storage::apply_saved`), so the environment always wins.
 ///
 /// Local disk is right for one server and wrong for several: each node
 /// would hold different files, so an upload that landed on one would 404
 /// from the other.
-fn storage_backend(config: &VyasaConfig) -> Arc<dyn vyasa_core::media::StorageBackend> {
-    match config
+fn storage_router(config: &VyasaConfig) -> Arc<StorageRouter> {
+    let object = config
         .storage
         .as_ref()
         .and_then(crate::media_s3::S3Backend::new)
-    {
-        Some(s3) => {
-            tracing::info!("media: object storage");
-            Arc::new(s3)
-        }
-        None => Arc::new(LocalFsBackend::new(config.media_dir.clone())),
-    }
+        .map(|s3| {
+            tracing::info!("media: object storage (environment)");
+            Arc::new(s3) as Arc<dyn vyasa_core::media::StorageBackend>
+        });
+    Arc::new(StorageRouter::new(
+        LocalFsBackend::new(config.media_dir.clone()),
+        object,
+    ))
 }
 
 /// Outbound client for embed previews: short timeout, no redirects, only
@@ -191,9 +197,10 @@ impl AppState {
             OptionsRepo::new(pool.clone()),
             PostsRepo::new(pool.clone()),
         );
+        let media_storage = storage_router(&config);
         let media = MediaService::new(
             MediaRepo::new(pool.clone()),
-            storage_backend(&config),
+            media_storage.clone(),
             pool.clone(),
         );
         let options = OptionsRepo::new(pool.clone());
@@ -257,6 +264,7 @@ impl AppState {
             terms,
             comments,
             media,
+            media_storage,
             options,
             menus,
             options_service,

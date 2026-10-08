@@ -32,6 +32,7 @@ pub mod search;
 pub mod seo;
 pub mod setup;
 pub mod site_health;
+pub mod storage_settings;
 pub mod terms;
 pub mod theme_studio;
 pub mod themes;
@@ -514,6 +515,16 @@ fn media_routes() -> Guarded {
             },
             |methods| methods.layer(upload_limit()),
         )
+        .at("/media/storage", |r| {
+            r.get(Cap(ManageOptions), storage_settings::get)
+                .put(Cap(ManageOptions), storage_settings::put)
+        })
+        .at("/media/storage/test", |r| {
+            r.post(Cap(ManageOptions), storage_settings::test)
+        })
+        .at("/media/storage/migrate", |r| {
+            r.post(Cap(ManageOptions), storage_settings::migrate)
+        })
         .at("/media/stats", |r| {
             r.get(AnyOf(MEDIA_READERS), media::stats)
         })

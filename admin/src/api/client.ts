@@ -238,6 +238,47 @@ export interface PatternInput {
   blocks: unknown[];
 }
 
+/** Where media bytes go, as the admin panel sees it: never the secret. */
+export interface StorageSettings {
+  provider: "local" | "s3";
+  bucket: string;
+  region: string;
+  endpoint: string;
+  path_style: boolean;
+  access_key_id_hint: string;
+  has_secret: boolean;
+  keys_unreadable: boolean;
+  source: "options" | "environment" | "none";
+  encrypted: boolean;
+  counts: { local: number; s3: number };
+  ephemeral_disk: boolean;
+  migration: MigrationProgress | null;
+}
+
+/** How far "Move existing files" got. */
+export interface MigrationProgress {
+  state: "running" | "done" | "failed";
+  total: number;
+  done: number;
+  failed: number;
+  to: "local" | "s3";
+  started_at: string;
+  finished_at: string | null;
+  last_error: string | null;
+}
+
+/** What the storage panel sends; omitted keys keep the stored ones. */
+export interface StorageInput {
+  provider: "local" | "s3";
+  bucket?: string;
+  region?: string;
+  endpoint?: string;
+  path_style?: boolean;
+  access_key_id?: string;
+  secret_access_key?: string;
+  forget_existing?: boolean;
+}
+
 /** The mail relay as the admin panel sees it: never the password. */
 export interface MailSettings {
   host: string;
@@ -1463,6 +1504,20 @@ export const api = {
   },
   mailTest(to: string): Promise<void> {
     return request("/api/v1/mail/test", { method: "POST", body: JSON.stringify({ to }) });
+  },
+
+  /* --------------------------------------------------------- storage */
+  storageSettings(): Promise<StorageSettings> {
+    return request("/api/v1/media/storage");
+  },
+  storageSettingsSave(input: StorageInput): Promise<StorageSettings> {
+    return request("/api/v1/media/storage", { method: "PUT", body: JSON.stringify(input) });
+  },
+  storageTest(input: StorageInput): Promise<void> {
+    return request("/api/v1/media/storage/test", { method: "POST", body: JSON.stringify(input) });
+  },
+  storageMigrate(): Promise<MigrationProgress> {
+    return request("/api/v1/media/storage/migrate", { method: "POST" });
   },
 
   registrySources(): Promise<{ marketplace: SourceInfo; updates: SourceInfo }> {

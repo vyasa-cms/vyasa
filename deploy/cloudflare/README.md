@@ -7,7 +7,10 @@ end before each release that touches it.
 **You bring:** a Cloudflare account on the Workers paid plan (Containers
 require it), a Postgres reachable from the internet with TLS
 ([Neon](https://neon.tech)'s free tier is used in the walkthrough), and an
-R2 bucket with an S3 API token.
+R2 bucket. Its S3 API token goes in either as two Worker secrets (below)
+or later, from the admin's Settings → Delivery → Media storage; until one
+of those is done uploads land on the container's disk and are lost on
+restart.
 
 ## Steps
 
@@ -22,7 +25,7 @@ wrangler r2 bucket create vyasa-media
 # wrangler.jsonc under vars.R2_ENDPOINT.
 wrangler secret put DATABASE_URL          # postgres://…?sslmode=require (Neon's pooled URL)
 wrangler secret put VYASA_SECRET_KEY      # openssl rand -hex 32
-wrangler secret put R2_ACCESS_KEY_ID
+wrangler secret put R2_ACCESS_KEY_ID      # optional: or paste the keys into the admin later
 wrangler secret put R2_SECRET_ACCESS_KEY
 wrangler secret put VYASA_ADMIN_EMAIL
 wrangler secret put VYASA_ADMIN_PASSWORD  # delete after the first boot
@@ -46,7 +49,8 @@ browser wizard at `/admin/setup`.
   is deliberate: the search index is local to the container.
 - The container's disk is ephemeral: `/tmp` holds the run directory, the
   index and media scratch, and media itself lives in R2 through the S3
-  API. On every restart the index rebuilds itself from Postgres in the
+  API (the storage variables are only passed when both R2 secrets exist,
+  so the admin page stays editable until then). On every restart the index rebuilds itself from Postgres in the
   background; small and medium sites notice nothing.
 - `DATABASE_URL` is a secret with the database's own TLS URL. Hyperdrive
   bindings are reachable from Workers, not from inside a container, so
