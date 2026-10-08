@@ -167,6 +167,58 @@ impl MediaRepo {
         .map_err(|err| AppError::db(format!("media stats failed: {err}")))
     }
 
+    /// How many live rows each store holds.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Db`] on database failure.
+    pub async fn count_by_storage(&self) -> Result<Vec<(MediaStorage, i64)>, AppError> {
+        sqlx::query_as::<_, (MediaStorage, i64)>(
+            "SELECT storage, count(*) FROM media WHERE trashed_at IS NULL GROUP BY storage",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| AppError::db(format!("media count by storage failed: {err}")))
+    }
+
+    /// Rows (live or trashed) whose bytes sit in `storage`, by id, after
+    /// `after_id`: the move job's cursor.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Db`] on database failure.
+    pub async fn list_by_storage(
+        &self,
+        storage: MediaStorage,
+        after_id: i64,
+        limit: i64,
+    ) -> Result<Vec<MediaRow>, AppError> {
+        sqlx::query_as::<_, MediaRow>(sqlx::AssertSqlSafe(format!(
+            "SELECT {MEDIA_COLUMNS} FROM media WHERE storage = $1 AND id > $2 ORDER BY id ASC LIMIT $3"
+        )))
+        .bind(storage)
+        .bind(after_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| AppError::db(format!("media list by storage failed: {err}")))
+    }
+
+    /// Records that a row's bytes now live in `storage`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Db`] on database failure.
+    pub async fn update_storage(&self, id: i64, storage: MediaStorage) -> Result<(), AppError> {
+        sqlx::query("UPDATE media SET storage = $1 WHERE id = $2")
+            .bind(storage)
+            .bind(id)
+            .execute(&self.pool)
+            .await
+            .map_err(|err| AppError::db(format!("media storage update failed: {err}")))?;
+        Ok(())
+    }
+
     /// The row holding these exact bytes, if the library has one.
     ///
     /// # Errors
