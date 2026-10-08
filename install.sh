@@ -4,7 +4,7 @@
 #
 #   curl -fsSL https://vyasa.site/install.sh | sh
 #
-#   VYASA_VERSION=0.1.0  pins a version        (default: the latest release)
+#   VYASA_VERSION=0.2.0  pins a version        (default: the latest release)
 #   VYASA_HOME=~/vyasa   where it is installed  (default: $HOME/vyasa)
 #   VYASA_BIN=~/.local/bin  where `vyasa` is linked (default: /usr/local/bin
 #                        when writable, else $HOME/.local/bin)

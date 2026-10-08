@@ -1,9 +1,8 @@
 # Deploy to Fly.io
 
 One machine running the official image, a volume for uploads and the
-search index, and Fly Postgres attached. Walkthrough for 0.2.0; the
-maintainer runs the checklist at the end on a real account before each
-release that touches it.
+search index, and Fly Postgres attached. Verified live for 0.2.0; the maintainer re-runs the checklist at the
+end before each release that touches it.
 
 ```bash
 cd deploy/fly
@@ -46,7 +45,7 @@ Without the `ADMIN` secrets the boot prints a setup token to the log
 - Upgrade by changing the image tag in `Dockerfile` and `fly deploy`. Back
   up first (`fly postgres connect` + `pg_dump`): migrations are forward-only.
 
-## Verification checklist
+## Verification checklist (run for 0.2.0)
 
 Launch with the steps above, sign in with the environment administrator,
 upload a file, `fly machine restart <id>`, confirm `/readyz` returns 200

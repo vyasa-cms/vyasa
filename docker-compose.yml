@@ -6,7 +6,7 @@
 services:
   app:
     # The published image; `docker compose up --build` builds this checkout
-    # instead. Pin a release with VYASA_VERSION=0.1.0.
+    # instead. Pin a release with VYASA_VERSION=0.2.0.
     image: ghcr.io/vyasa-cms/vyasa:${VYASA_VERSION:-latest}
     build: .
     ports:
