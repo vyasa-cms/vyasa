@@ -16,7 +16,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 schemars = "0.8"
 serde_path_to_error = "0.1"
-tera = "1"
+tera = "2"
 ammonia = "4"
 vyasa-core = { path = "../core" }
 thiserror = "2"
