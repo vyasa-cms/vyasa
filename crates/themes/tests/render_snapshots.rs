@@ -904,3 +904,50 @@ fn timed_block_renders_only_inside_its_window() {
     assert!(html.contains("Now"), "{html}");
     assert!(!html.contains("Gone") && !html.contains("Later"), "{html}");
 }
+
+#[test]
+fn footer_credit_shows_by_default_and_follows_the_option() {
+    let engine = Engine::builtin().expect("engine");
+    let mut layout = Layout::default();
+    *layout.for_template_mut(TemplateType::Single) =
+        vec![lb("body", "content"), lb("foot", "footer")];
+    let render = |site: &SiteMeta| {
+        futures::executor::block_on(render_page(vyasa_themes::RenderRequest {
+            engine: &engine,
+            layout: &layout,
+            registry: &builtin_registry(),
+            tokens: &TokenSet::default(),
+            template: TemplateType::Single,
+            site,
+            page: &PageContext::default(),
+            queries: fake_queries::FakeQueries::shared(),
+            post_id: None,
+            content_blocks: None,
+            reply_to: None,
+            editor: false,
+        }))
+        .expect("renders")
+    };
+    let on = render(&SiteMeta::default());
+    assert!(
+        on.contains(
+            "<p class=\"vy-credit\">Made with \
+             <a href=\"https://vyasa.site\" rel=\"noopener\">Vyasa</a></p></footer>"
+        ),
+        "credit closes the footer: {on}"
+    );
+    let copyright = on.find("vy-footer-inner").expect("copyright line");
+    assert!(
+        copyright < on.find("<p class=\"vy-credit\">").unwrap(),
+        "after the © line"
+    );
+    let off = render(&SiteMeta {
+        footer_credit: false,
+        ..SiteMeta::default()
+    });
+    assert!(
+        !off.contains("<p class=\"vy-credit\">"),
+        "no credit when off"
+    );
+    assert!(off.contains("vy-footer-inner"), "footer itself stays");
+}

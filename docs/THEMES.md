@@ -160,6 +160,17 @@ properties; because those inherit, a card inside a dark band is dark
 without anyone reasoning about the cascade. Contrast is checked inside a
 scope exactly as it is at the root.
 
+### The footer credit
+
+Unless the site turns it off (`footer_credit` option, Settings > Advanced),
+the page ends its `<footer>` with
+`<p class="vy-credit">Made with <a href="https://vyasa.site" rel="noopener">Vyasa</a></p>`.
+The engine adds it to the finished page, after whatever the footer holds, so
+a theme gets it without doing anything, including one with its own base
+template. A theme styles it through `.vy-credit`, which by default is small,
+muted and inherits the theme's tokens. A theme must keep a `<footer>`
+element, or there is nowhere to put it.
+
 ### A page that composes itself
 
 A page may carry its own section tree in `posts.layout`, in which case it

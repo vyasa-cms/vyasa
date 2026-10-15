@@ -43,6 +43,8 @@ interface SettingKey {
   /** Unit shown after a numeric field. */
   unit?: string;
   options?: { value: string; label: string }[];
+  /** A toggle that reads as on until the option is saved. */
+  defaultOn?: boolean;
   /** The wizard step this belongs to, for "rerun this step". */
 }
 
@@ -404,6 +406,7 @@ const SECTIONS: Section[] = [
     title: "Advanced",
     description: "Styles applied on top of your theme.",
     keys: [
+      { key: "footer_credit", label: "Show 'Made with Vyasa' in the footer", hint: "A small link under the copyright line on every page. On by default; turn it off any time.", kind: "toggle", defaultOn: true },
       { key: "custom_css", label: "Custom CSS", hint: "Scoped to your site's content, so it can't affect this admin.", kind: "css" },
     ],
   },
@@ -509,7 +512,7 @@ export function SettingsPage() {
   React.useEffect(() => {
     if (opts.data === undefined || dirtyRef.current) return;
     const next: Record<string, string> = {};
-    for (const k of ALL_KEYS) next[k.key] = toForm(k.kind, (opts.data as Record<string, unknown>)[k.key]);
+    for (const k of ALL_KEYS) next[k.key] = toForm(k.kind, (opts.data as Record<string, unknown>)[k.key] ?? (k.defaultOn ? true : undefined));
     setValues(next);
     setSaved(next);
     const stored = (opts.data as Record<string, unknown>)["brand_kit"];

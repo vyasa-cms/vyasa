@@ -7,6 +7,15 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-15
+
+### Added
+
+- Every theme's footer now ends with a small "Made with Vyasa" link
+  (`<p class="vy-credit">`). It is on by default and is switched off with
+  the new `footer_credit` option, or under Settings > Advanced > "Show
+  'Made with Vyasa' in the footer".
+
 ## [0.2.0] - 2026-10-08
 
 Vyasa runs well on container platforms. Cloudflare Containers, Fly.io,

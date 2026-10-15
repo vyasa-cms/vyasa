@@ -58,6 +58,8 @@ pub const SITE_OPTION_KEYS: &[&str] = &[
     // the role a self-made account starts with.
     "registration_enabled",
     "registration_default_role",
+    // The small "Made with Vyasa" line under the footer; on unless set false.
+    "footer_credit",
 ];
 
 /// Options that decide where the site's mail goes and which address its
@@ -550,6 +552,9 @@ impl OptionsService {
                 ));
             }
             k if k.starts_with("registration_") => return registration_option(k, value),
+            "footer_credit" if !value.is_boolean() => {
+                return Err(AppError::validation("footer_credit must be true or false"));
+            }
             "newsletter_enabled" if !value.is_boolean() => {
                 return Err(AppError::validation(
                     "newsletter_enabled must be true or false",
@@ -682,6 +687,12 @@ impl OptionsService {
             tagline: self.string_of("site_tagline").await?,
             logo_media_id: self.id_of("site_logo_media_id").await,
             favicon_media_id: self.id_of("site_favicon_media_id").await,
+            // Unset means on: the credit is the default, switching it off is a choice.
+            footer_credit: self
+                .raw("footer_credit")
+                .await?
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
         })
     }
 
@@ -804,7 +815,7 @@ impl OptionsService {
 }
 
 /// Site identity values as consumed by themes and feeds.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SiteIdentity {
     /// Site title.
     pub title: String,
@@ -814,6 +825,20 @@ pub struct SiteIdentity {
     pub logo_media_id: Option<i64>,
     /// Favicon media id.
     pub favicon_media_id: Option<i64>,
+    /// Whether the footer carries the "Made with Vyasa" line (default on).
+    pub footer_credit: bool,
+}
+
+impl Default for SiteIdentity {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            tagline: String::new(),
+            logo_media_id: None,
+            favicon_media_id: None,
+            footer_credit: true,
+        }
+    }
 }
 
 /// The shape of the two registration options. A custom role's slug
