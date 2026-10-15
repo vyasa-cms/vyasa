@@ -7,6 +7,8 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-15
+
 ### Added
 
 - Every theme's footer now ends with a small "Made with Vyasa" link

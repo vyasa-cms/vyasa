@@ -99,7 +99,10 @@ body.vy {
 }
 
 .vy-credit {
-  margin: calc(var(--vy-space-unit) * 2) 0 0;
+  width: 100%;
+  max-width: var(--vy-content-width);
+  margin: calc(var(--vy-space-unit) * 2) auto 0;
+  padding-inline: calc(var(--vy-space-unit) * 5);
   font-size: 0.8em;
   color: var(--vy-color-text-muted);
 }

@@ -126,18 +126,18 @@ is at `/tmp/vyasa-run/setup-token` inside the container (the image sets
 |---|---|
 | `latest` | every stable release |
 | `0.2` | every `0.2.x` release |
-| `0.2.0` | never (one release) |
-| `0.2.0-rc.1` | never (a release candidate; candidates never move `latest`) |
+| `0.2.1` | never (one release) |
+| `0.2.1-rc.1` | never (a release candidate; candidates never move `latest`) |
 
-Pin a version with `VYASA_VERSION=0.2.0 docker compose up -d`. Back up the
+Pin a version with `VYASA_VERSION=0.2.1 docker compose up -d`. Back up the
 database before moving to a newer version: migrations are forward-only.
 
 Every image and release archive published from the public repository carries a
 build provenance attestation:
 
 ```bash
-gh attestation verify oci://ghcr.io/vyasa-cms/vyasa:0.2.0 --owner vyasa-cms
-gh attestation verify vyasa-0.2.0-x86_64-unknown-linux-gnu.tar.gz --owner vyasa-cms
+gh attestation verify oci://ghcr.io/vyasa-cms/vyasa:0.2.1 --owner vyasa-cms
+gh attestation verify vyasa-0.2.1-x86_64-unknown-linux-gnu.tar.gz --owner vyasa-cms
 ```
 
 ## Container platforms
@@ -211,7 +211,7 @@ install directory (`~/vyasa` by default) with `vyasa` linked onto your
 
 ```bash
 curl -fsSL https://vyasa.site/install.sh | sh
-# VYASA_VERSION=0.2.0 pins a version; VYASA_HOME and VYASA_BIN move the
+# VYASA_VERSION=0.2.1 pins a version; VYASA_HOME and VYASA_BIN move the
 # install directory and the command link. Read it first if you prefer:
 # curl -fsSL https://vyasa.site/install.sh | less
 ```
