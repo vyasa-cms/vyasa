@@ -8,7 +8,7 @@ rust-version.workspace = true
 description = "Vyasa full-text search (Tantivy)"
 
 [dependencies]
-tantivy = "0.25"
+tantivy = "0.26"
 tracing = "0.1"
 vyasa-common = { path = "../common" }
 vyasa-core = { path = "../core" }
