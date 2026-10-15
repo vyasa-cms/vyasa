@@ -635,6 +635,15 @@ impl VyasaConfig {
 #[cfg(test)]
 mod tests {
     use super::{LogFormat, VyasaConfig};
+
+    /// Loading reads `VYASA_*` from the process environment, and one test
+    /// mutates it; every load in this module holds this lock so the tests
+    /// never race on the environment.
+    static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn env_lock() -> std::sync::MutexGuard<'static, ()> {
+        ENV_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
     use crate::AppError;
 
     fn config_from(toml: &str, tag: &str) -> Result<VyasaConfig, AppError> {
@@ -647,6 +656,7 @@ mod tests {
             format!("database_url = \"postgres://u:p@localhost/x\"\n{toml}"),
         )
         .expect("write config");
+        let _env = env_lock();
         VyasaConfig::load_from_file(&path)
     }
 
@@ -712,6 +722,7 @@ mod tests {
                 .find(|(k, _)| *k == name)
                 .map(|(_, v)| (*v).to_owned())
         };
+        let _env = env_lock();
         VyasaConfig::load_from_file_with_env(&path, &lookup)
     }
 
@@ -746,6 +757,7 @@ mod tests {
             (name == "DATABASE_URL")
                 .then(|| "postgres://u:p@db.example/x?sslmode=require".to_owned())
         };
+        let _env = env_lock();
         let cfg = VyasaConfig::load_from_file_with_env(&path, &lookup).expect("load");
         assert_eq!(
             cfg.database_url.expose(),
@@ -778,6 +790,7 @@ mod tests {
     /// parallel tests never race on the process environment.
     #[test]
     fn config_load_defaults_file_and_env_precedence() {
+        let _env = env_lock();
         let path = temp_config_path();
         // 1. Nothing set at all: missing database_url is a validation error.
         std::env::remove_var("VYASA_DATABASE_URL");
