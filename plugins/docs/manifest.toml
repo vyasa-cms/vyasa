@@ -1,0 +1,18 @@
+name = "vyasa-docs"
+version = "0.1.0"
+min_host_api = 2
+description = "Documentation sites: a Docs section synced from a GitHub repository, with a sidebar, contents, pager, versions, search, tabs, steps and callouts."
+author = "Vyasa Team"
+homepage = "https://github.com/vyasa-cms/vyasa/tree/main/plugins/docs"
+license = "MIT OR Apache-2.0"
+capabilities = [
+    "log:write",
+    "kv:read",
+    "kv:write",
+    "entries:sync",
+    "db:publish:posts",
+    "net:fetch:api.github.com",
+    "net:fetch:raw.githubusercontent.com",
+    "tasks:extended",
+    "assets:script",
+]
