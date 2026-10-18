@@ -1101,6 +1101,24 @@ impl PostsRepo {
         commit(tx).await
     }
 
+    /// The published, unprotected children of entry `parent_id`, in reading
+    /// order (`position`, then id).
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn published_children(&self, parent_id: i64) -> Result<Vec<PostRow>, AppError> {
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {POST_COLUMNS} FROM posts
+             WHERE parent_id = $1 AND status = 'published' AND password_hash IS NULL
+               AND type = (SELECT type FROM posts WHERE id = $1)
+             ORDER BY position, id"
+        )))
+        .bind(parent_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("children lookup failed: {e}")))
+    }
+
     /// The live entry of `post_type` at `path`.
     ///
     /// # Errors

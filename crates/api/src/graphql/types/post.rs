@@ -145,6 +145,44 @@ impl GqlPost {
     async fn parent_id(&self) -> Option<i64> {
         self.0.parent_id
     }
+    /// Order among siblings of a hierarchical type (0 elsewhere).
+    async fn position(&self) -> i32 {
+        self.0.position
+    }
+    /// Slash-joined slugs from the root; `null` unless the type is hierarchical.
+    async fn path(&self) -> Option<&str> {
+        self.0.path.as_deref()
+    }
+    /// The parent entry, when the caller may see it.
+    async fn parent(&self, ctx: &Context<'_>) -> async_graphql::Result<Option<GqlPost>> {
+        let gql = ctx.data::<crate::graphql::context::GqlContext>()?;
+        let Some(parent_id) = self.0.parent_id else {
+            return Ok(None);
+        };
+        let Ok(row) = gql.state.posts.get(parent_id).await else {
+            return Ok(None);
+        };
+        if !crate::graphql::schema::can_see(gql, &row)
+            || !crate::policy::may_read_type(&gql.state, gql.principal.as_ref(), row.post_type)
+                .await
+        {
+            return Ok(None);
+        }
+        Ok(Some(GqlPost(row)))
+    }
+    /// Published, unprotected children in reading order.
+    async fn children(&self, ctx: &Context<'_>) -> async_graphql::Result<Vec<GqlPost>> {
+        let gql = ctx.data::<crate::graphql::context::GqlContext>()?;
+        if !crate::policy::may_read_type(&gql.state, gql.principal.as_ref(), self.0.post_type).await
+        {
+            return Ok(Vec::new());
+        }
+        let rows = vyasa_db::repo::PostsRepo::new(gql.state.pool.clone())
+            .published_children(self.0.id)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        Ok(rows.into_iter().map(GqlPost).collect())
+    }
     async fn created_at(&self) -> chrono::DateTime<chrono::Utc> {
         self.0.created_at
     }

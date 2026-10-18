@@ -432,3 +432,56 @@ async fn export_then_import_keeps_a_hierarchical_tree_with_cousins_and_order() {
     assert_eq!(paths, ["api", "api/install", "guides", "guides/install"]);
     // Public addresses of nested entries are asserted in Task 6.
 }
+
+#[tokio::test]
+async fn graphql_exposes_position_path_parent_children_and_the_tree() {
+    let (_db, server, a) = site().await;
+    let base = server.base();
+    let g = post(base, &a, "guide", "Guides", None);
+    let i = post(base, &a, "guide", "Install", Some(&g));
+    let (_, draft) = call(
+        "POST",
+        base,
+        &a,
+        "/api/v1/posts",
+        Some(
+            json!({"type": "guide", "title": "Hidden", "status": "draft", "parent_id": g, "content": doc("h")}),
+        ),
+    );
+    let _ = (i, draft);
+    let q = json!({"query": format!("{{ post(id: {g}) {{ path position children {{ title path parent {{ title }} }} }}
+        postTree(postType: \"guide\") {{ depth parentId post {{ title }} }} }}")});
+    let (status, body) = call("POST", base, &a, "/api/graphql", Some(q));
+    assert_eq!(status, 200, "{body}");
+    let data = &body["data"];
+    assert_eq!(data["post"]["path"], "guides");
+    let kids = data["post"]["children"].as_array().unwrap();
+    assert_eq!(
+        kids.len(),
+        1,
+        "the draft is not a visible child even to its editor: {data}"
+    );
+    assert_eq!(kids[0]["title"], "Install");
+    assert_eq!(kids[0]["parent"]["title"], "Guides");
+    let tree: Vec<_> = data["postTree"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|n| {
+            (
+                n["post"]["title"].as_str().unwrap(),
+                n["depth"].as_i64().unwrap(),
+            )
+        })
+        .collect();
+    assert_eq!(tree, [("Guides", 1), ("Install", 2)]);
+    // Anonymous callers see the same published tree.
+    let resp = http(
+        ureq::post(&format!("{base}/api/graphql"))
+            .send_json(json!({"query": "{ postTree(postType: \"guide\") { post { title } } }"})),
+    );
+    assert_eq!(
+        json_of(resp)["data"]["postTree"].as_array().unwrap().len(),
+        2
+    );
+}

@@ -186,6 +186,22 @@ type GqlPost {
 	fieldsMissing: [String!]
 	authorId: Int!
 	parentId: Int
+	"""
+	Order among siblings of a hierarchical type (0 elsewhere).
+	"""
+	position: Int!
+	"""
+	Slash-joined slugs from the root; `null` unless the type is hierarchical.
+	"""
+	path: String
+	"""
+	The parent entry, when the caller may see it.
+	"""
+	parent: GqlPost
+	"""
+	Published, unprotected children in reading order.
+	"""
+	children: [GqlPost!]!
 	createdAt: DateTime!
 	updatedAt: DateTime!
 	publishedAt: DateTime
@@ -202,6 +218,24 @@ type GqlPost {
 	Featured media derived from `meta.featured_media_id` via batched loader.
 	"""
 	featuredMedia: GqlMedia
+}
+
+"""
+One node of a type's published tree.
+"""
+type GqlPostTreeNode {
+	"""
+	The entry.
+	"""
+	post: GqlPost!
+	"""
+	Nesting depth, 1 at the top.
+	"""
+	depth: Int!
+	"""
+	Parent entry id.
+	"""
+	parentId: Int
 }
 
 """
@@ -438,6 +472,10 @@ type QueryRoot {
 	Fetch a single post by id — respects draft/private visibility.
 	"""
 	post(id: Int!): GqlPost
+	"""
+	The published tree of a hierarchical type, in reading order.
+	"""
+	postTree(postType: String!, first: Int): [GqlPostTreeNode!]!
 	"""
 	Full-text search over published posts.
 	
