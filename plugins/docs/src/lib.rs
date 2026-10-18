@@ -9,4 +9,5 @@ pub mod components;
 pub mod frontmatter;
 pub mod github;
 pub mod plan;
+pub mod sync;
 pub mod webhook;
