@@ -312,7 +312,7 @@ export interface PluginAuditRow {
 export interface PluginField {
   key: string;
   label: string;
-  kind: "text" | "textarea" | "number" | "boolean" | "select";
+  kind: "text" | "textarea" | "number" | "boolean" | "select" | "secret";
   help: string | null;
   options: string[];
   default: unknown;

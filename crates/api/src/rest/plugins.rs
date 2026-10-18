@@ -459,11 +459,24 @@ pub async fn setting_put(
     Path((id, key)): Path<(i64, String)>,
     Json(value): Json<serde_json::Value>,
 ) -> ApiResult<StatusCode> {
-    state
-        .plugins_repo
-        .setting_put(id, &key, &value)
+    let is_secret = secret_aware_fields(&state, id)
         .await
-        .map_err(ApiError)?;
+        .iter()
+        .any(|f| f.kind == "secret" && f.key == key);
+    if is_secret && value.as_str() == Some("") {
+        // An empty secret clears it, so "not set" is a missing row.
+        state
+            .plugins_repo
+            .setting_delete(id, &key)
+            .await
+            .map_err(ApiError)?;
+    } else {
+        state
+            .plugins_repo
+            .setting_put(id, &key, &value)
+            .await
+            .map_err(ApiError)?;
+    }
     // A plugin reads its settings once, at `init`, so a saved setting did
     // nothing until the next restart. Re-activating hands it the new
     // configuration now.
@@ -481,6 +494,14 @@ pub async fn setting_get(
     State(state): State<AppState>,
     Path((id, key)): Path<(i64, String)>,
 ) -> ApiResult<Json<serde_json::Value>> {
+    // A secret is write-only here too.
+    if secret_aware_fields(&state, id)
+        .await
+        .iter()
+        .any(|f| f.kind == "secret" && f.key == key)
+    {
+        return Ok(Json(serde_json::Value::Null));
+    }
     let value = state
         .plugins_repo
         .setting_get(id, &key)
@@ -523,6 +544,7 @@ pub async fn surface(State(state): State<AppState>) -> ApiResult<Json<serde_json
                 "method": r.method,
                 "path": format!("/api/v1/plugin/{}/{}", r.plugin_name, r.path),
                 "pluginId": r.plugin_id.to_string(),
+                "headers": r.headers,
             })
         })
         .collect();
@@ -621,5 +643,79 @@ pub async fn settings_all(
     Path(id): Path<i64>,
 ) -> ApiResult<Json<serde_json::Value>> {
     let pairs = state.plugins_repo.settings(id).await.map_err(ApiError)?;
-    Ok(Json(serde_json::Value::Object(pairs.into_iter().collect())))
+    let fields = secret_aware_fields(&state, id).await;
+    Ok(Json(masked_settings(&fields, pairs)))
+}
+
+/// The fields of the plugin's settings form, empty when it has none loaded.
+async fn secret_aware_fields(
+    state: &AppState,
+    plugin_id: i64,
+) -> Vec<crate::plugin_surface::AdminField> {
+    state
+        .plugin_surface
+        .admin_forms()
+        .await
+        .into_iter()
+        .filter(|f| f.plugin_id == plugin_id)
+        .flat_map(|f| f.fields)
+        .collect()
+}
+
+/// Stored settings as an operator reads them: a `secret` field's value is
+/// never included, and `__secrets` says, per secret key, whether one is set.
+fn masked_settings(
+    fields: &[crate::plugin_surface::AdminField],
+    stored: Vec<(String, serde_json::Value)>,
+) -> serde_json::Value {
+    let secret = |key: &str| fields.iter().any(|f| f.kind == "secret" && f.key == key);
+    let mut out = serde_json::Map::new();
+    let mut flags = serde_json::Map::new();
+    for f in fields.iter().filter(|f| f.kind == "secret") {
+        flags.insert(f.key.clone(), serde_json::Value::Bool(false));
+    }
+    for (key, value) in stored {
+        if secret(&key) {
+            let set = value.as_str().is_none_or(|s| !s.is_empty()) && !value.is_null();
+            flags.insert(key, serde_json::Value::Bool(set));
+        } else {
+            out.insert(key, value);
+        }
+    }
+    if !flags.is_empty() {
+        out.insert("__secrets".to_owned(), serde_json::Value::Object(flags));
+    }
+    serde_json::Value::Object(out)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::plugin_surface::AdminField;
+
+    fn field(key: &str, kind: &str) -> AdminField {
+        AdminField {
+            key: key.to_owned(),
+            label: key.to_owned(),
+            kind: kind.to_owned(),
+            help: None,
+            options: Vec::new(),
+            default: serde_json::Value::Null,
+        }
+    }
+
+    #[test]
+    fn secret_values_are_never_returned() {
+        let fields = vec![field("token", "secret"), field("branch", "text")];
+        let stored = vec![
+            ("token".to_owned(), serde_json::json!("hunter2")),
+            ("branch".to_owned(), serde_json::json!("main")),
+        ];
+        let out = masked_settings(&fields, stored);
+        assert_eq!(out["branch"], "main");
+        assert!(out.get("token").is_none(), "{out}");
+        assert_eq!(out["__secrets"]["token"], true);
+        let unset = masked_settings(&fields, vec![]);
+        assert_eq!(unset["__secrets"]["token"], false);
+    }
 }

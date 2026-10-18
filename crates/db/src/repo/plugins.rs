@@ -384,6 +384,20 @@ impl PluginsRepo {
         Ok(())
     }
 
+    /// Per-plugin settings kv: remove one value.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn setting_delete(&self, plugin_id: i64, key: &str) -> Result<(), AppError> {
+        sqlx::query("DELETE FROM plugin_settings WHERE plugin_id = $1 AND key = $2")
+            .bind(plugin_id)
+            .bind(key)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::db(format!("plugin setting delete failed: {e}")))?;
+        Ok(())
+    }
+
     /// Audit summary counts per kind for a plugin.
     ///
     /// # Errors

@@ -37,6 +37,9 @@ pub struct RouteDecl {
     /// Path below the mount point, without a leading slash. `*` matches
     /// the rest of the path.
     pub path: String,
+    /// Extra request headers the plugin asked to receive (lower-case
+    /// `x-…` names, at most 8), on top of the usual negotiation headers.
+    pub headers: Vec<String>,
 }
 
 /// A served asset: its bytes and the hash in its URL.
@@ -82,7 +85,8 @@ pub struct AdminField {
     pub key: String,
     /// Label shown to the operator.
     pub label: String,
-    /// One of `text`, `textarea`, `number`, `boolean`, `select`.
+    /// One of `text`, `textarea`, `number`, `boolean`, `select`, `secret`
+    /// (write-only: its value is never returned by a settings read).
     pub kind: String,
     /// Optional help text.
     pub help: Option<String>,
@@ -901,6 +905,28 @@ fn collect_taxonomies(
     Ok(skipped)
 }
 
+/// Headers a route may ask to receive: `x-` names in the usual grammar.
+/// Sessions and credentials can never be asked for (`cookie` and
+/// `authorization` are not `x-`), and the list is short.
+fn extra_headers(value: Option<&serde_json::Value>) -> Vec<String> {
+    let Some(items) = value.and_then(serde_json::Value::as_array) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for raw in items.iter().filter_map(serde_json::Value::as_str) {
+        let name = raw.to_ascii_lowercase();
+        let tail = name.strip_prefix("x-").unwrap_or("");
+        let ok = (1..=40).contains(&tail.len())
+            && tail
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        if ok && !out.contains(&name) && out.len() < 8 {
+            out.push(name);
+        }
+    }
+    out
+}
+
 fn collect_routes(inner: &mut Inner, plugin_id: i64, name: &str, json: &str) {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
         return;
@@ -932,6 +958,7 @@ fn collect_routes(inner: &mut Inner, plugin_id: i64, name: &str, json: &str) {
             plugin_name: name.to_owned(),
             method,
             path,
+            headers: extra_headers(item.get("headers")),
         });
     }
 }
@@ -995,7 +1022,7 @@ fn collect_admin(inner: &mut Inner, plugin_id: i64, name: &str, value: &serde_js
             .and_then(serde_json::Value::as_str)
             .unwrap_or("text");
         let kind = match kind {
-            "text" | "textarea" | "number" | "boolean" | "select" => kind,
+            "text" | "textarea" | "number" | "boolean" | "select" | "secret" => kind,
             other => {
                 tracing::warn!(
                     plugin = name,
@@ -1026,10 +1053,16 @@ fn collect_admin(inner: &mut Inner, plugin_id: i64, name: &str, value: &serde_js
                         .collect()
                 })
                 .unwrap_or_default(),
-            default: field
-                .get("default")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null),
+            // A secret cannot ship a default: it would be a credential in
+            // the plugin's package, shown to every operator.
+            default: if kind == "secret" {
+                serde_json::Value::Null
+            } else {
+                field
+                    .get("default")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null)
+            },
         });
     }
     if fields.is_empty() {
@@ -1740,5 +1773,43 @@ mod tests {
         collect_layouts(&mut inner, 1, "p", "[1,2]");
         collect_layouts(&mut inner, 1, "p", "{\"layout-mine\": \"nope\"}");
         assert!(inner.layouts.is_empty());
+    }
+
+    #[test]
+    fn a_route_may_declare_extra_headers_within_the_grammar() {
+        let mut inner = Inner::default();
+        collect_routes(
+            &mut inner,
+            1,
+            "p",
+            &serde_json::json!([
+                {"method": "POST", "path": "hook", "headers": ["x-hub-signature-256", "X-GitHub-Event", "cookie", "authorization", "Set-Cookie", "x-", "not-x-prefixed", "x-ok_but-underscore"]}
+            ])
+            .to_string(),
+        );
+        assert_eq!(
+            inner.routes[0].headers,
+            vec!["x-hub-signature-256", "x-github-event"]
+        );
+    }
+
+    #[test]
+    fn the_secret_field_type_is_accepted_and_has_no_default() {
+        let mut inner = Inner::default();
+        collect_admin(
+            &mut inner,
+            1,
+            "p",
+            &serde_json::json!({"fields": [
+                {"key": "token", "label": "Token", "type": "secret", "default": "leak"},
+                {"key": "n", "label": "N", "type": "number"}]}),
+        );
+        let form = &inner.admin[0];
+        assert_eq!(form.fields[0].kind, "secret");
+        assert_eq!(
+            form.fields[0].default,
+            serde_json::Value::Null,
+            "a secret cannot ship a default"
+        );
     }
 }
