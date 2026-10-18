@@ -54,6 +54,9 @@ pub struct ArchiveContentType {
     pub public: bool,
     #[serde(default = "yes")]
     pub has_archive: bool,
+    /// Whether entries nest. Absent from older archives.
+    #[serde(default)]
+    pub hierarchical: bool,
 }
 
 const fn yes() -> bool {
@@ -124,6 +127,9 @@ pub struct ArchivePost {
     pub author_id: i64,
     #[serde(default)]
     pub parent_id: Option<i64>,
+    /// Order among siblings. Absent from older archives.
+    #[serde(default)]
+    pub position: i32,
     #[serde(default)]
     pub meta: serde_json::Value,
     #[serde(default)]
@@ -276,6 +282,7 @@ pub async fn build(state: &AppState, site_url: &str) -> Result<Archive, AppError
                 excerpt: p.excerpt,
                 author_id: p.author_id,
                 parent_id: p.parent_id,
+                position: p.position,
                 fields: crate::entry_fields::stored(&p.meta),
                 meta: crate::entry_fields::meta_without_fields(p.meta),
                 published_at: p.published_at.map(|d| d.to_rfc3339()),
@@ -352,6 +359,7 @@ pub async fn build(state: &AppState, site_url: &str) -> Result<Archive, AppError
             description: t.description,
             public: t.public,
             has_archive: t.has_archive,
+            hierarchical: t.hierarchical,
         })
         .collect();
     let content_fields = vyasa_db::repo::ContentFieldsRepo::new(state.pool.clone())
@@ -599,7 +607,7 @@ async fn import_content_model(state: &AppState, archive: &Archive, report: &mut 
                     description: t.description.clone(),
                     public: t.public,
                     has_archive: t.has_archive,
-                    hierarchical: false,
+                    hierarchical: t.hierarchical,
                 },
                 &plugin_slugs,
             )
@@ -996,8 +1004,29 @@ pub async fn import(
                 }
             }
         };
-        if let Ok(existing) = posts_repo.get_by_slug(post_type, &p.slug).await {
-            post_map.insert(p.id, existing.id);
+        // Slugs are only unique among siblings of a hierarchical type, so
+        // there an entry already imported is recognised by its import key.
+        let existing = if post_type.is_hierarchical() {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT id FROM posts
+                 WHERE type = $1 AND status <> 'trash' AND meta->>'import_key' = $2
+                 LIMIT 1",
+            )
+            .bind(post_type.as_str())
+            .bind(import_key("post", p.id))
+            .fetch_optional(&pool)
+            .await
+            .ok()
+            .flatten()
+        } else {
+            posts_repo
+                .get_by_slug(post_type, &p.slug)
+                .await
+                .ok()
+                .map(|row| row.id)
+        };
+        if let Some(existing) = existing {
+            post_map.insert(p.id, existing);
             report.skipped += 1;
             continue;
         }
@@ -1052,8 +1081,15 @@ pub async fn import(
                 published_at: parse(&p.published_at),
                 scheduled_for: parse(&p.scheduled_for),
                 password_hash: None,
-                path_prefix: None,
-                position: 0,
+                // A hierarchical entry goes in under a throwaway path (unique
+                // per entry, so cousins sharing a slug do not collide) until
+                // its parents are linked and the paths are rebuilt below.
+                path_prefix: post_type.is_hierarchical().then(|| format!("~{}/", p.id)),
+                position: if post_type.is_hierarchical() {
+                    p.position
+                } else {
+                    0
+                },
             })
             .await
         {
@@ -1084,6 +1120,18 @@ pub async fn import(
                 .bind(parent)
                 .execute(&pool)
                 .await;
+        }
+    }
+    let nested: std::collections::HashSet<PostType> = inserted
+        .iter()
+        .map(|(_, _, post_type)| *post_type)
+        .filter(|t| t.is_hierarchical())
+        .collect();
+    for post_type in nested {
+        if let Err(e) = state.posts.rebuild_paths(post_type).await {
+            report
+                .warnings
+                .push(format!("tree of {}: {e}", post_type.as_str()));
         }
     }
 

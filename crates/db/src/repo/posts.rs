@@ -1025,6 +1025,12 @@ pub struct TreeRow {
     pub path: Option<String>,
     /// Lifecycle status.
     pub status: PostStatus,
+    /// Title.
+    pub title: String,
+    /// Whether the entry is password-protected.
+    pub locked: bool,
+    /// Author.
+    pub author_id: i64,
 }
 
 /// A new place for one entry.
@@ -1047,7 +1053,8 @@ impl PostsRepo {
     /// [`AppError::Db`] on failure.
     pub async fn tree_rows(&self, post_type: PostType) -> Result<Vec<TreeRow>, AppError> {
         sqlx::query_as(
-            "SELECT id, parent_id, position, slug, path, status FROM posts
+            "SELECT id, parent_id, position, slug, path, status, title,
+                    password_hash IS NOT NULL AS locked, author_id FROM posts
              WHERE type = $1 AND status <> 'trash'
              ORDER BY parent_id NULLS FIRST, position, id",
         )

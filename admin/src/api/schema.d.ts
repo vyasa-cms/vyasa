@@ -1612,6 +1612,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/post-types/{type}/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * `GET /api/v1/post-types/{type}/tree` — the entries of a hierarchical
+         *     type in reading order. Public callers see published, unprotected
+         *     entries; `status=all` (needs `edit_posts`) lists everything.
+         */
+        get: operations["get"];
+        /**
+         * `PUT /api/v1/post-types/{type}/tree` — reorder and re-parent entries
+         *     in one request, applied as a whole. Published entries whose address
+         *     changes keep a redirect from the old one.
+         */
+        put: operations["put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/posts": {
         parameters: {
             query?: never;
@@ -4252,6 +4278,11 @@ export interface components {
             /** @description Optional password for private posts. */
             password?: string | null;
             /**
+             * Format: int32
+             * @description Order among siblings of a hierarchical type; omit to append.
+             */
+            position?: number | null;
+            /**
              * Format: date-time
              * @description Scheduled time (required when status is `scheduled`).
              */
@@ -4916,6 +4947,23 @@ export interface components {
             /** @description Unused recovery codes left. */
             recovery_codes_left: number;
         };
+        /** @description One requested move. */
+        MoveJson: {
+            /** @description Entry id. */
+            id: string;
+            /** @description New parent, `null` for the top. */
+            parent_id?: string | null;
+            /**
+             * Format: int32
+             * @description New position.
+             */
+            position: number;
+        };
+        /** @description `PUT …/tree` body. */
+        MovesBody: {
+            /** @description The moves, applied as a whole. */
+            moves: components["schemas"]["MoveJson"][];
+        };
         /** @description New-model body. */
         NewModelBody: {
             /**
@@ -5095,6 +5143,13 @@ export interface components {
              * @description Optional parent.
              */
             parent_id?: number | null;
+            /** @description Slash-joined slugs from the root; present on hierarchical types only. */
+            path?: string | null;
+            /**
+             * Format: int32
+             * @description Order among siblings of a hierarchical type.
+             */
+            position: number;
             /** @description Canonical public path under the current permalink setting. */
             public_url?: string | null;
             /**
@@ -5629,6 +5684,41 @@ export interface components {
             /** @description Its title. */
             title: string;
         };
+        /** @description One node of the tree. */
+        TreeNodeJson: {
+            /** @description Nesting depth, 1 at the top. */
+            depth: number;
+            /** @description Entry id, as a string. */
+            id: string;
+            /** @description Parent id, as a string. */
+            parent_id?: string | null;
+            /** @description Slash-joined slugs from the root. */
+            path: string;
+            /**
+             * Format: int32
+             * @description Order among siblings.
+             */
+            position: number;
+            /** @description URL segment. */
+            slug: string;
+            /** @description Lifecycle status. */
+            status: string;
+            /** @description Title. */
+            title: string;
+            /** @description Public address. */
+            url: string;
+        };
+        /** @description The tree answer. */
+        TreeResponse: {
+            /** @description Always true (a type that is not hierarchical answers 400). */
+            hierarchical: boolean;
+            /** @description Nodes in reading order. */
+            nodes: components["schemas"]["TreeNodeJson"][];
+            /** @description More nodes exist than were returned. */
+            truncated: boolean;
+            /** @description The post type. */
+            type: string;
+        };
         /** @description Partial update for a menu item. Absent fields are left alone. */
         UpdateItemBody: {
             /** @description Move the item to the top level, clearing any parent. */
@@ -5681,8 +5771,18 @@ export interface components {
              *     `fields`.
              */
             meta?: unknown;
+            /**
+             * Format: int64
+             * @description New parent (hierarchical types): omit to keep, `null` to move to the top.
+             */
+            parent_id?: number | null;
             /** @description New password (`""` clears). */
             password?: string | null;
+            /**
+             * Format: int32
+             * @description New position among siblings (hierarchical types).
+             */
+            position?: number | null;
             /**
              * Format: date-time
              * @description New scheduled time. Omit to keep it, send `null` to clear it.
@@ -9001,6 +9101,113 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get: {
+        parameters: {
+            query?: {
+                /** @description `all` returns every status; it needs `edit_posts`. */
+                status?: string | null;
+            };
+            header?: never;
+            path: {
+                /** @description Post type slug */
+                type: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tree */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TreeResponse"];
+                };
+            };
+            /** @description Not a hierarchical type */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description status=all without edit_posts */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Post type slug */
+                type: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MovesBody"];
+            };
+        };
+        responses: {
+            /** @description The new tree */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TreeResponse"];
+                };
+            };
+            /** @description A rule the final tree breaks */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Missing edit_posts / edit_others */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description An id is not an entry of the type */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description A path is taken */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
             };
         };
     };

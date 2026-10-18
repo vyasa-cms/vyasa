@@ -123,6 +123,8 @@ plugin's own route, public, decided by the plugin.
 | POST | /plugins/{id}/disable | manage_plugins |
 | POST | /plugins/{id}/enable | manage_plugins |
 | POST | /plugins/{id}/rollback | manage_plugins |
+| GET | /post-types/{type}/tree | public |
+| PUT | /post-types/{type}/tree | edit_posts |
 | GET | /posts | authenticated |
 | POST | /posts | edit_posts |
 | POST | /posts/batch | edit_posts |

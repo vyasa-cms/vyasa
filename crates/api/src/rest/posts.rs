@@ -46,6 +46,10 @@ pub struct PostResponse {
     /// Optional parent.
     #[serde(default, deserialize_with = "crate::flexible_id::option")]
     pub parent_id: Option<i64>,
+    /// Order among siblings of a hierarchical type.
+    pub position: i32,
+    /// Slash-joined slugs from the root; present on hierarchical types only.
+    pub path: Option<String>,
     /// Extension metadata (SEO and the like). Field values are not in
     /// here: they are `fields`.
     pub meta: serde_json::Value,
@@ -98,6 +102,8 @@ impl From<vyasa_db::content_models::PostRow> for PostResponse {
             excerpt: row.excerpt,
             author_id: row.author_id,
             parent_id: row.parent_id,
+            position: row.position,
+            path: row.path,
             // Filled by `response_with` from the type's definitions; the
             // raw stored object would carry a deleted field's values.
             fields: serde_json::Value::Object(serde_json::Map::new()),
@@ -136,6 +142,8 @@ pub struct CreatePostRequest {
     /// Optional parent id.
     #[serde(default, deserialize_with = "crate::flexible_id::option")]
     pub parent_id: Option<i64>,
+    /// Order among siblings of a hierarchical type; omit to append.
+    pub position: Option<i32>,
     /// Scheduled time (required when status is `scheduled`).
     pub scheduled_for: Option<DateTime<Utc>>,
     /// Optional password for private posts.
@@ -195,6 +203,13 @@ pub struct UpdatePostRequest {
     /// New section tree; omit to keep, `[]` or `null` to clear so the entry
     /// renders through its theme template again.
     pub layout: Option<serde_json::Value>,
+    /// New parent (hierarchical types): omit to keep, `null` to move to the top.
+    #[serde(default, deserialize_with = "crate::flexible_id::double_option")]
+    #[schema(value_type = Option<i64>)]
+    #[allow(clippy::option_option)]
+    pub parent_id: Option<Option<i64>>,
+    /// New position among siblings (hierarchical types).
+    pub position: Option<i32>,
     /// When set, the update applies only if the post has not changed since
     /// this moment; otherwise 409, so two tabs cannot silently overwrite
     /// each other.
@@ -596,7 +611,7 @@ pub async fn create(
                 password: body.password,
                 term_ids: body.term_ids,
                 layout,
-                position: None,
+                position: body.position,
             },
             body.fields,
         )
@@ -823,8 +838,8 @@ pub async fn update(
                 password: body.password.clone(),
                 term_ids: body.term_ids.clone(),
                 layout,
-                parent_id: None,
-                position: None,
+                parent_id: body.parent_id,
+                position: body.position,
             },
         )
         .await?;
