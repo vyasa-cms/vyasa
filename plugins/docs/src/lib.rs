@@ -4,5 +4,6 @@
 //! (`cargo test`); only `guest.rs`, compiled for `wasm32-wasip2`, touches the
 //! host. The design is `docs/plugin-api.md` ("Content sync") and the README
 //! beside this file.
+pub mod blocks;
 pub mod components;
 pub mod frontmatter;
