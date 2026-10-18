@@ -335,6 +335,10 @@ export interface PluginSurface {
     icon: string | null;
     pluginId: string;
     pluginName: string;
+    /** The block's attribute schema (a JSON-Schema subset), when declared. */
+    attrsSchema?: unknown;
+    /** Present when the block's children are editable regions. */
+    container?: unknown;
   }[];
   routes: { method: string; path: string; pluginId: string }[];
   forms: PluginForm[];

@@ -531,6 +531,7 @@ pub async fn surface(State(state): State<AppState>) -> ApiResult<Json<serde_json
             serde_json::json!({
                 "kind": d.kind, "title": d.title, "icon": d.icon,
                 "pluginId": d.plugin_id.to_string(), "pluginName": d.plugin_name,
+                "attrsSchema": d.attrs_schema, "container": d.container,
             })
         })
         .collect();
