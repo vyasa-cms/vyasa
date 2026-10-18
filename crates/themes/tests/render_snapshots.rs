@@ -536,6 +536,7 @@ fn regions_extra_overrides_layout_content() {
         page: vec![lb("f-page", "post-content")],
         search: vec![lb("f-search", "search-box")],
         not_found: vec![lb("f-nf", "content")],
+        types: std::collections::BTreeMap::new(),
     };
 
     let page = PageContext {
