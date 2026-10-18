@@ -12,7 +12,7 @@ use vyasa_common::AppError;
 use vyasa_db::content_models::{is_valid_custom_type, PostType, Taxonomy};
 use vyasa_db::repo::{
     ContentFieldsRepo, ContentTypeRow, ContentTypeUpdate, ContentTypesRepo, NewContentType,
-    TypeDeletion,
+    PostsRepo, TypeDeletion,
 };
 
 use super::CONTENT_LOCK;
@@ -104,6 +104,8 @@ pub struct NewType {
     pub public: bool,
     /// Whether `/{slug}/` lists the entries.
     pub has_archive: bool,
+    /// Whether entries nest under one another.
+    pub hierarchical: bool,
 }
 
 /// Changes to a content type; `None` keeps a value. There is no slug: it
@@ -120,6 +122,9 @@ pub struct TypeChanges {
     pub public: Option<bool>,
     /// New archive flag.
     pub has_archive: Option<bool>,
+    /// New hierarchical flag. Turning it off is refused while any entry
+    /// still has a parent.
+    pub hierarchical: Option<bool>,
 }
 
 /// Checks a slug for a new content type: the grammar, then built-in and
@@ -211,6 +216,7 @@ fn left_over_fields(slug: &str, left: &[vyasa_db::repo::ContentFieldRow]) -> App
 pub struct ContentTypesService {
     types: ContentTypesRepo,
     fields: ContentFieldsRepo,
+    posts: PostsRepo,
 }
 
 impl ContentTypesService {
@@ -219,7 +225,8 @@ impl ContentTypesService {
     pub fn new(pool: PgPool) -> Self {
         Self {
             types: ContentTypesRepo::new(pool.clone()),
-            fields: ContentFieldsRepo::new(pool),
+            fields: ContentFieldsRepo::new(pool.clone()),
+            posts: PostsRepo::new(pool),
         }
     }
 
@@ -322,7 +329,7 @@ impl ContentTypesService {
                     description: &description,
                     public: input.public,
                     has_archive: input.has_archive,
-                    hierarchical: false,
+                    hierarchical: input.hierarchical,
                 })
                 .await?;
             if let Err(e) = PostType::register_admin(&slug) {
@@ -333,6 +340,7 @@ impl ContentTypesService {
                 }
                 return Err(e);
             }
+            PostType::set_traits(&slug, row.hierarchical, None)?;
             Ok(row)
         })
         .await
@@ -361,19 +369,44 @@ impl ContentTypesService {
             .description
             .map(|v| text("the description", v.trim(), MAX_DESCRIPTION))
             .transpose()?;
-        self.types
-            .update(
-                slug,
-                &ContentTypeUpdate {
-                    singular: singular.as_deref(),
-                    plural: plural.as_deref(),
-                    description: description.as_deref(),
-                    public: changes.public,
-                    has_archive: changes.has_archive,
-                    hierarchical: None,
-                },
-            )
-            .await
+        let types = self.types.clone();
+        let posts = self.posts.clone();
+        let slug = slug.to_owned();
+        let (public, has_archive, hierarchical) =
+            (changes.public, changes.has_archive, changes.hierarchical);
+        to_completion(async move {
+            let _turn = CONTENT_LOCK.lock().await;
+            let current = types.get(&slug).await?;
+            let flip = hierarchical.filter(|h| *h != current.hierarchical);
+            if flip == Some(false) && types.count_nested_entries(&slug).await? > 0 {
+                return Err(AppError::validation(
+                    "entries still have parents; unnest them first",
+                ));
+            }
+            let row = types
+                .update(
+                    &slug,
+                    &ContentTypeUpdate {
+                        singular: singular.as_deref(),
+                        plural: plural.as_deref(),
+                        description: description.as_deref(),
+                        public,
+                        has_archive,
+                        hierarchical: flip,
+                    },
+                )
+                .await?;
+            if let (Some(on), Ok(post_type)) = (flip, PostType::parse(&slug)) {
+                if on {
+                    posts.backfill_paths(post_type).await?;
+                } else {
+                    posts.clear_paths(post_type).await?;
+                }
+                PostType::set_traits(&slug, on, None)?;
+            }
+            Ok(row)
+        })
+        .await
     }
 
     /// Entries of the type in any status, trash included — what a refused
@@ -398,7 +431,7 @@ impl ContentTypesService {
         let slug = slug.to_owned();
         to_completion(async move {
             let _turn = CONTENT_LOCK.lock().await;
-            types.get(&slug).await?;
+            let row = types.get(&slug).await?;
             let entries = types.count_entries(&slug).await?;
             if entries > 0 {
                 return Err(in_use(&slug, entries));
@@ -410,7 +443,9 @@ impl ContentTypesService {
             let outcome = types.delete_if_unused(&slug).await;
             let relive = || {
                 if was_live {
-                    if let Err(e) = PostType::register_admin(&slug) {
+                    if let Err(e) = PostType::register_admin(&slug)
+                        .and_then(|_| PostType::set_traits(&slug, row.hierarchical, None))
+                    {
                         tracing::warn!(slug, "content type left the registry: {e}");
                     }
                 }
@@ -446,8 +481,9 @@ impl ContentTypesService {
         let _turn = CONTENT_LOCK.lock().await;
         let mut skipped = Vec::new();
         for row in self.types.list().await? {
-            let made =
-                check_type_slug(&row.slug).and_then(|()| PostType::register_admin(&row.slug));
+            let made = check_type_slug(&row.slug)
+                .and_then(|()| PostType::register_admin(&row.slug))
+                .and_then(|_| PostType::set_traits(&row.slug, row.hierarchical, None));
             if let Err(e) = made {
                 tracing::error!(slug = row.slug, "content type not registered: {e}");
                 skipped.push((row.slug, e));

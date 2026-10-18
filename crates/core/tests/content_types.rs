@@ -74,6 +74,7 @@ fn new_type(slug: &str) -> NewType {
         description: String::new(),
         public: true,
         has_archive: true,
+        hierarchical: false,
     }
 }
 

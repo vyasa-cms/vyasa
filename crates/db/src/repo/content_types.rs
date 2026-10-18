@@ -205,6 +205,19 @@ impl ContentTypesRepo {
             .map_err(|err| AppError::db(format!("content type entry count failed: {err}")))
     }
 
+    /// Entries of the type, in any status, that have a parent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Db`] on database failure.
+    pub async fn count_nested_entries(&self, slug: &str) -> Result<i64, AppError> {
+        sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE type = $1 AND parent_id IS NOT NULL")
+            .bind(slug)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|err| AppError::db(format!("nested entry count failed: {err}")))
+    }
+
     /// Deletes a type and its field definitions, in one transaction, when
     /// no entry of it exists in any status. The type's row is locked
     /// while the entries are counted.

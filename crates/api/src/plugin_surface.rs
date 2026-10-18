@@ -137,6 +137,10 @@ pub struct PostTypeDecl {
     pub public: bool,
     /// Whether `/{slug}/` lists them.
     pub has_archive: bool,
+    /// Whether entries nest under one another.
+    pub hierarchical: bool,
+    /// First segment of the public addresses (the slug unless declared).
+    pub base: String,
     /// Owning plugin.
     pub plugin_id: i64,
 }
@@ -740,7 +744,10 @@ fn collect_taxonomies(
         }
         // A taxonomy and a post type both claim `/{slug}/…`, so one may
         // never shadow the other.
-        if inner.taxonomies.contains_key(slug) || inner.post_types.contains_key(slug) {
+        if inner.taxonomies.contains_key(slug)
+            || inner.post_types.contains_key(slug)
+            || inner.post_types.values().any(|d| d.base == slug)
+        {
             tracing::warn!(plugin = name, "ignoring taxonomy {slug:?}: taken");
             continue;
         }
@@ -978,6 +985,7 @@ pub fn is_valid_taxonomy_slug(slug: &str) -> bool {
     is_valid_post_type_slug(slug)
 }
 
+#[allow(clippy::too_many_lines)]
 fn collect_post_types(
     inner: &mut Inner,
     plugin_id: i64,
@@ -1006,6 +1014,30 @@ fn collect_post_types(
             tracing::warn!(plugin = name, "post type {slug:?} is already taken");
             continue;
         }
+        let base = item
+            .get("base")
+            .and_then(serde_json::Value::as_str)
+            .filter(|b| !b.is_empty())
+            .unwrap_or(slug);
+        if base != slug {
+            // A base is a URL segment like a slug: same grammar, and no
+            // other type, base or taxonomy may already hold it.
+            if !is_valid_post_type_slug(base) {
+                skipped.push(unusable_slug(name, "URL base", base));
+                continue;
+            }
+            let held = inner
+                .post_types
+                .values()
+                .any(|d| d.slug == base || d.base == base)
+                || decls.iter().any(|d| d.slug == base || d.base == base)
+                || inner.taxonomies.contains_key(base)
+                || PostType::owner(base) == Some(TypeOwner::Admin);
+            if held {
+                skipped.push(unusable_slug(name, "URL base", base));
+                continue;
+            }
+        }
         let singular = item
             .get("singular")
             .and_then(serde_json::Value::as_str)
@@ -1027,6 +1059,11 @@ fn collect_post_types(
                 .or_else(|| item.get("has_archive"))
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(true),
+            hierarchical: item
+                .get("hierarchical")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+            base: base.to_owned(),
             plugin_id,
         });
     }
@@ -1067,6 +1104,9 @@ fn collect_post_types(
     };
     for (decl, ok) in kept.into_iter().zip(registered) {
         if ok {
+            if let Err(e) = PostType::set_traits(&decl.slug, decl.hierarchical, Some(&decl.base)) {
+                tracing::error!(plugin = name, "post type {:?}: {e}", decl.slug);
+            }
             inner.post_types.insert(decl.slug.clone(), decl);
         }
     }
@@ -1482,5 +1522,69 @@ mod tests {
         assert_eq!(form.fields[0].key, "url");
         // An unknown widget type falls back to text rather than vanishing.
         assert_eq!(form.fields[1].kind, "text");
+    }
+
+    #[test]
+    fn a_post_type_may_declare_hierarchy_and_a_base() {
+        let mut inner = Inner::default();
+        collect_post_types(
+            &mut inner,
+            1,
+            "p",
+            &serde_json::json!([{"slug": "doc-decl", "singular": "Doc", "hierarchical": true, "base": "docs-decl"}]),
+            Collect::Boot,
+        )
+        .expect("collected");
+        let d = &inner.post_types["doc-decl"];
+        assert!(d.hierarchical);
+        assert_eq!(d.base, "docs-decl");
+        let t = vyasa_db::content_models::PostType::parse("doc-decl").expect("registered");
+        assert!(t.is_hierarchical());
+        assert_eq!(t.base(), "docs-decl");
+    }
+
+    #[test]
+    fn a_base_that_clashes_is_reported_not_registered() {
+        let mut inner = Inner::default();
+        collect_post_types(
+            &mut inner,
+            1,
+            "p",
+            &serde_json::json!([{"slug": "alpha-decl"}]),
+            Collect::Boot,
+        )
+        .expect("collected");
+        let skipped = collect_post_types(
+            &mut inner,
+            2,
+            "q",
+            &serde_json::json!([
+                {"slug": "beta-decl", "base": "alpha-decl"},
+                {"slug": "gamma-decl", "base": "feed"},
+                {"slug": "delta-decl", "base": "Not A Base"}
+            ]),
+            Collect::Enable,
+        )
+        .expect("a clash degrades, it does not refuse");
+        assert_eq!(skipped.len(), 3, "{skipped:?}");
+        assert!(!inner.post_types.contains_key("beta-decl"));
+        assert!(!inner.post_types.contains_key("gamma-decl"));
+        assert!(!inner.post_types.contains_key("delta-decl"));
+    }
+
+    #[test]
+    fn a_base_defaults_to_the_slug_and_is_not_hierarchical() {
+        let mut inner = Inner::default();
+        collect_post_types(
+            &mut inner,
+            1,
+            "p",
+            &serde_json::json!([{"slug": "plain-decl"}]),
+            Collect::Boot,
+        )
+        .expect("collected");
+        let d = &inner.post_types["plain-decl"];
+        assert!(!d.hierarchical);
+        assert_eq!(d.base, "plain-decl");
     }
 }

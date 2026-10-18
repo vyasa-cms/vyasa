@@ -599,6 +599,7 @@ async fn import_content_model(state: &AppState, archive: &Archive, report: &mut 
                     description: t.description.clone(),
                     public: t.public,
                     has_archive: t.has_archive,
+                    hierarchical: false,
                 },
                 &plugin_slugs,
             )

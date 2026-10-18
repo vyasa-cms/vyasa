@@ -29,6 +29,7 @@ use crate::plugin_surface::PluginSurface;
 
 /// A custom post type as the router and listings need it, whoever owns it.
 #[derive(Clone, Debug, serde::Serialize)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct TypeDecl {
     /// URL and storage slug.
     pub slug: String,
@@ -40,6 +41,10 @@ pub struct TypeDecl {
     pub public: bool,
     /// Whether `/{slug}` lists them.
     pub has_archive: bool,
+    /// Whether entries nest under one another.
+    pub hierarchical: bool,
+    /// First segment of the public addresses (the slug unless declared).
+    pub base: String,
     /// Created by an administrator (rather than declared by a plugin).
     pub admin: bool,
 }
@@ -52,6 +57,8 @@ impl From<crate::plugin_surface::PostTypeDecl> for TypeDecl {
             plural: d.plural,
             public: d.public,
             has_archive: d.has_archive,
+            hierarchical: d.hierarchical,
+            base: d.base,
             admin: false,
         }
     }
@@ -60,11 +67,13 @@ impl From<crate::plugin_surface::PostTypeDecl> for TypeDecl {
 impl From<vyasa_db::repo::ContentTypeRow> for TypeDecl {
     fn from(r: vyasa_db::repo::ContentTypeRow) -> Self {
         Self {
+            base: r.slug.clone(),
             slug: r.slug,
             singular: r.singular,
             plural: r.plural,
             public: r.public,
             has_archive: r.has_archive,
+            hierarchical: r.hierarchical,
             admin: true,
         }
     }
@@ -83,6 +92,17 @@ pub async fn served_type(surface: &PluginSurface, pool: &PgPool, slug: &str) -> 
             .ok()
             .map(TypeDecl::from),
     }
+}
+
+/// The live custom type whose public addresses start with `base`.
+#[allow(dead_code)] // used by the public router (Task 6)
+pub async fn served_type_by_base(
+    surface: &PluginSurface,
+    pool: &PgPool,
+    base: &str,
+) -> Option<TypeDecl> {
+    let t = PostType::find_by_base(base)?;
+    served_type(surface, pool, t.as_str()).await
 }
 
 /// Every live custom type: plugins' first (in slug order), then

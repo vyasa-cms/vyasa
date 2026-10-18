@@ -23,6 +23,7 @@ use crate::state::AppState;
 
 /// One content type as the designer sees it.
 #[derive(Debug, Clone, Serialize, utoipa::ToSchema)]
+#[allow(clippy::struct_excessive_bools)]
 pub struct ContentType {
     /// The `posts.type` value and URL segment.
     pub slug: String,
@@ -34,6 +35,10 @@ pub struct ContentType {
     pub public: bool,
     /// Whether `/{slug}` lists entries.
     pub has_archive: bool,
+    /// Whether entries nest under one another.
+    pub hierarchical: bool,
+    /// First segment of the public addresses (the slug unless declared).
+    pub base: String,
     /// True when a plugin registered it (and it goes away with the plugin).
     pub plugin: bool,
     /// Who owns it: `builtin`, `plugin` or `admin` (only `admin` types
@@ -65,6 +70,8 @@ pub async fn list_types(state: &AppState) -> Result<Vec<ContentType>, vyasa_comm
             plural: "Posts".into(),
             public: true,
             has_archive: true,
+            hierarchical: false,
+            base: "post".into(),
             plugin: false,
             owner: "builtin".into(),
             description: String::new(),
@@ -76,6 +83,8 @@ pub async fn list_types(state: &AppState) -> Result<Vec<ContentType>, vyasa_comm
             plural: "Pages".into(),
             public: true,
             has_archive: false,
+            hierarchical: false,
+            base: "page".into(),
             plugin: false,
             owner: "builtin".into(),
             description: String::new(),
@@ -90,6 +99,8 @@ pub async fn list_types(state: &AppState) -> Result<Vec<ContentType>, vyasa_comm
             plural: decl.plural,
             public: decl.public,
             has_archive: decl.has_archive,
+            hierarchical: decl.hierarchical,
+            base: decl.base,
             plugin: true,
             owner: "plugin".into(),
             description: String::new(),
@@ -103,11 +114,13 @@ pub async fn list_types(state: &AppState) -> Result<Vec<ContentType>, vyasa_comm
         }
         out.push(ContentType {
             count: n(&row.slug),
+            base: row.slug.clone(),
             slug: row.slug,
             singular: row.singular,
             plural: row.plural,
             public: row.public,
             has_archive: row.has_archive,
+            hierarchical: row.hierarchical,
             plugin: false,
             owner: "admin".into(),
             description: row.description,
@@ -224,6 +237,8 @@ pub struct AdminType {
     pub public: bool,
     /// Whether `/{slug}` lists the entries.
     pub has_archive: bool,
+    /// Whether entries nest under one another.
+    pub hierarchical: bool,
     /// Creation time.
     pub created_at: chrono::DateTime<chrono::Utc>,
     /// Last change.
@@ -239,6 +254,7 @@ impl From<vyasa_db::repo::ContentTypeRow> for AdminType {
             description: r.description,
             public: r.public,
             has_archive: r.has_archive,
+            hierarchical: r.hierarchical,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }
@@ -264,6 +280,9 @@ pub struct CreateTypeRequest {
     /// Whether `/{slug}` lists the entries (default true).
     #[serde(default = "yes")]
     pub has_archive: bool,
+    /// Whether entries nest under one another (default false).
+    #[serde(default)]
+    pub hierarchical: bool,
 }
 
 const fn yes() -> bool {
@@ -287,6 +306,8 @@ pub struct UpdateTypeRequest {
     pub public: Option<bool>,
     /// New archive flag.
     pub has_archive: Option<bool>,
+    /// New hierarchical flag; turning it off is refused while entries have parents.
+    pub hierarchical: Option<bool>,
 }
 
 /// Refuses a slug that is not an administrator's type, saying whose it
@@ -366,6 +387,7 @@ pub async fn create(
                 description: body.description,
                 public: body.public,
                 has_archive: body.has_archive,
+                hierarchical: body.hierarchical,
             },
             &plugins,
         )
@@ -403,7 +425,7 @@ pub async fn update(
 ) -> ApiResult<Json<AdminType>> {
     admin_only(&slug)?;
     let visibility_changes = body.public.is_some();
-    let archive_changes = body.has_archive.is_some();
+    let archive_changes = body.has_archive.is_some() || body.hierarchical.is_some();
     if body.slug.as_deref().is_some_and(|s| s != slug) {
         return Err(ApiError(AppError::validation(
             "a content type's slug cannot change: it is in URLs and templates",
@@ -418,6 +440,7 @@ pub async fn update(
                 description: body.description,
                 public: body.public,
                 has_archive: body.has_archive,
+                hierarchical: body.hierarchical,
             },
         )
         .await?;

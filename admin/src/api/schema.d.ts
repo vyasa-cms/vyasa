@@ -3736,6 +3736,8 @@ export interface components {
             description: string;
             /** @description Whether `/{slug}` lists the entries. */
             has_archive: boolean;
+            /** @description Whether entries nest under one another. */
+            hierarchical: boolean;
             /** @description Plural label. */
             plural: string;
             /** @description Whether entries get public URLs. */
@@ -4150,6 +4152,8 @@ export interface components {
         };
         /** @description One content type as the designer sees it. */
         ContentType: {
+            /** @description First segment of the public addresses (the slug unless declared). */
+            base: string;
             /**
              * Format: int64
              * @description Published entries right now.
@@ -4159,6 +4163,8 @@ export interface components {
             description: string;
             /** @description Whether `/{slug}` lists entries. */
             has_archive: boolean;
+            /** @description Whether entries nest under one another. */
+            hierarchical: boolean;
             /**
              * @description Who owns it: `builtin`, `plugin` or `admin` (only `admin` types
              *     can be relabelled or deleted here).
@@ -4304,6 +4310,8 @@ export interface components {
             description?: string;
             /** @description Whether `/{slug}` lists the entries (default true). */
             has_archive?: boolean;
+            /** @description Whether entries nest under one another (default false). */
+            hierarchical?: boolean;
             /** @description Plural label, 1 to 120 characters. */
             plural: string;
             /** @description Whether entries get public URLs (default true). */
@@ -5771,6 +5779,8 @@ export interface components {
             description?: string | null;
             /** @description New archive flag. */
             has_archive?: boolean | null;
+            /** @description New hierarchical flag; turning it off is refused while entries have parents. */
+            hierarchical?: boolean | null;
             /** @description New plural label. */
             plural?: string | null;
             /** @description New public flag. */

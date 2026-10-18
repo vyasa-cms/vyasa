@@ -1332,6 +1332,7 @@ async fn field_definitions_are_read_once_per_request() {
                 description: String::new(),
                 public: true,
                 has_archive: true,
+                hierarchical: false,
             },
             &[] as &[String],
         )
