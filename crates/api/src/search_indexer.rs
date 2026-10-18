@@ -84,6 +84,7 @@ fn doc_for(
             }
             body
         },
+        terms: Vec::new(),
     })
 }
 

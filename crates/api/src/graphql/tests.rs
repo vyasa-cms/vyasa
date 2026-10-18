@@ -1008,6 +1008,7 @@ async fn protected_content_and_key_grants_are_enforced_before_pagination() {
             slug: protected.slug.clone(),
             title: "Confidential".into(),
             body: "Confidential protected body".into(),
+            terms: Vec::new(),
         })
         .unwrap();
     assert_eq!(index.search("Confidential", None, 10, 0).unwrap().len(), 1);
