@@ -158,6 +158,9 @@ fn post_routes() -> Guarded {
         .at("/posts/slug/{type}/{slug}", |r| {
             r.get(Authenticated, posts::get_by_slug)
         })
+        .at("/posts/{id}/detach", |r| {
+            r.post(Cap(EditPosts), posts::detach)
+        })
         .at("/posts/{id}/restore", |r| {
             r.post(Cap(EditPosts), posts::restore)
         })

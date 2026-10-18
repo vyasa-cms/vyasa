@@ -140,6 +140,7 @@ plugin's own route, public, decided by the plugin.
 | GET | /posts/{id}/comments | public |
 | POST | /posts/{id}/comments | public |
 | POST | /posts/{id}/compose | edit_posts |
+| POST | /posts/{id}/detach | edit_posts |
 | POST | /posts/{id}/duplicate | edit_posts |
 | POST | /posts/{id}/embed | edit_posts |
 | GET | /posts/{id}/language | authenticated |

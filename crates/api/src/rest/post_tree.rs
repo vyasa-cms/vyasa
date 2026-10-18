@@ -240,6 +240,8 @@ pub async fn put(
             .into_iter()
             .map(|(id, _, _)| id),
     );
+    let touched_ids: Vec<i64> = touched.iter().copied().collect();
+    crate::rest::posts::refuse_managed(&state, &touched_ids).await?;
     let someone_elses = touched.iter().any(|id| {
         known
             .get(id)

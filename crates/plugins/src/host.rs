@@ -611,19 +611,47 @@ impl host::Host for HostCtx {
         })
     }
 
-    async fn put_entry(&mut self, _input: host::EntryInput) -> Result<host::PutResult, String> {
-        Err(String::from("not implemented"))
+    async fn put_entry(&mut self, input: host::EntryInput) -> Result<host::PutResult, String> {
+        let out = crate::hostdata::put_entry(
+            &self.data_ctx(),
+            crate::hostdata::EntryInput {
+                post_type: input.post_type,
+                key: input.key,
+                parent_key: input.parent_key,
+                slug: input.slug,
+                title: input.title,
+                excerpt: input.excerpt,
+                blocks_json: input.blocks_json,
+                position: input.position,
+                status: input.status,
+                terms: input.terms,
+                fields_json: input.fields_json,
+                seo_json: input.seo_json,
+                source_hash: input.source_hash,
+                edit_url: input.edit_url,
+            },
+        )
+        .await?;
+        Ok(host::PutResult {
+            id: out.id,
+            outcome: out.outcome,
+        })
     }
 
-    async fn list_managed(
-        &mut self,
-        _post_type: String,
-    ) -> Result<Vec<host::ManagedEntry>, String> {
-        Err(String::from("not implemented"))
+    async fn list_managed(&mut self, post_type: String) -> Result<Vec<host::ManagedEntry>, String> {
+        Ok(crate::hostdata::list_managed(&self.data_ctx(), post_type)
+            .await?
+            .into_iter()
+            .map(|e| host::ManagedEntry {
+                key: e.key,
+                id: e.id,
+                source_hash: e.source_hash,
+            })
+            .collect())
     }
 
-    async fn delete_entry(&mut self, _key: String) -> Result<(), String> {
-        Err(String::from("not implemented"))
+    async fn delete_entry(&mut self, key: String) -> Result<(), String> {
+        crate::hostdata::delete_entry(&self.data_ctx(), key).await
     }
 
     async fn now_ms(&mut self) -> u64 {

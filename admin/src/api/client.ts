@@ -688,6 +688,11 @@ export const api = {
     });
   },
 
+  /** Takes over an entry a plugin keeps in step with an outside source. */
+  detachPost(id: string): Promise<PostResponse> {
+    return request(`/api/v1/posts/${id}/detach`, { method: "POST" });
+  },
+
   updatePost(
     id: string,
     body: {

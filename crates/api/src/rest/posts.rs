@@ -18,6 +18,19 @@ use crate::middleware::Principal;
 use crate::policy;
 use crate::state::AppState;
 
+/// Who keeps an entry in step with an outside source, and where to edit it.
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct ManagedInfo {
+    /// The plugin's name.
+    pub plugin: String,
+    /// The plugin's own key for the entry.
+    pub key: String,
+    /// Where editors go to change it (empty for nowhere).
+    pub edit_url: String,
+    /// An author took the entry over: the plugin no longer writes it.
+    pub detached: bool,
+}
+
 /// Shared response shape for a post.
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct PostResponse {
@@ -69,6 +82,11 @@ pub struct PostResponse {
     /// longer accepts the old value. Only a restore fills this.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub fields_dropped: Vec<String>,
+    /// Present when a plugin keeps this entry in step with an outside
+    /// source. Filled on single-entry responses for a caller who may edit
+    /// the entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub managed: Option<ManagedInfo>,
     /// First publication time.
     pub published_at: Option<DateTime<Utc>>,
     /// Scheduled time.
@@ -109,6 +127,7 @@ impl From<vyasa_db::content_models::PostRow> for PostResponse {
             fields: serde_json::Value::Object(serde_json::Map::new()),
             fields_missing: None,
             fields_dropped: Vec::new(),
+            managed: None,
             meta: crate::entry_fields::meta_without_fields(row.meta),
             published_at: row.published_at,
             scheduled_for: row.scheduled_for,
@@ -788,6 +807,7 @@ pub async fn update(
     let body_translation_of = body.translation_of;
     // Fetch first to check ownership.
     let existing = policy::post_for_edit(&state, &principal, id).await?;
+    refuse_managed(&state, &[id]).await?;
     // A translation link is for entries the caller can see, of the same
     // type.
     if let Some(other) = body_translation_of {
@@ -1057,9 +1077,52 @@ async fn single_response(
         None
     };
     let pattern = crate::permalinks::pattern(state).await;
+    let editable = policy::may_edit(Some(principal), &row);
+    let response_id = row.id;
     let mut response = response_with(state, row, &pattern, &mut defs).await;
     response.fields_missing = missing;
+    if editable {
+        response.managed = managed_info(state, response_id).await;
+    }
     response
+}
+
+/// The managed state of an entry, if a plugin keeps it in step.
+async fn managed_info(state: &AppState, post_id: i64) -> Option<ManagedInfo> {
+    vyasa_db::repo::ManagedRepo::new(state.pool.clone())
+        .for_post(post_id)
+        .await
+        .ok()
+        .flatten()
+        .map(|m| ManagedInfo {
+            plugin: m.plugin,
+            key: m.ext_key,
+            edit_url: m.edit_url,
+            detached: m.detached,
+        })
+}
+
+/// Refuses a change to entries a plugin keeps in step with an outside
+/// source and an author has not taken over. Naming the plugin and the
+/// source tells the editor where the change belongs.
+pub(crate) async fn refuse_managed(state: &AppState, ids: &[i64]) -> Result<(), AppError> {
+    let locked = vyasa_db::repo::ManagedRepo::new(state.pool.clone())
+        .locked_among(ids)
+        .await?;
+    match locked.first() {
+        None => Ok(()),
+        Some((_, plugin, edit_url)) => Err(AppError::conflict(if edit_url.is_empty() {
+            format!(
+                "this entry is synced by the plugin {plugin:?}; change it at its source, \
+                 or detach it to edit it here"
+            )
+        } else {
+            format!(
+                "this entry is synced by the plugin {plugin:?}; edit it at {edit_url}, \
+                 or detach it to edit it here"
+            )
+        })),
+    }
 }
 
 /// A response with the translation group filled in, as `principal` sees it.
@@ -1706,4 +1769,39 @@ where
     D: serde::Deserializer<'de>,
 {
     serde::Deserialize::deserialize(d).map(Some)
+}
+
+/// `POST /api/v1/posts/{id}/detach` — take over an entry a plugin keeps in
+/// step with an outside source. The plugin never writes it again; the
+/// entry becomes an ordinary one.
+///
+/// # Errors
+///
+/// 403/404 as for editing the entry; 400 when it is not a managed entry.
+#[utoipa::path(
+    post, path = "/api/v1/posts/{id}/detach",
+    tag = "posts",
+    security(("session_cookie" = []), ("api_key" = [])),
+    params(("id" = i64, Path, description = "Post id")),
+    responses(
+        (status = 200, description = "The entry, now detached", body = PostResponse),
+        (status = 400, description = "Not a managed entry", body = ApiErrorBody),
+        (status = 403, description = "Forbidden", body = ApiErrorBody),
+        (status = 404, description = "Not found", body = ApiErrorBody),
+    )
+)]
+pub async fn detach(
+    State(state): State<AppState>,
+    principal: Principal,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<PostResponse>> {
+    policy::post_for_edit(&state, &principal, id).await?;
+    let repo = vyasa_db::repo::ManagedRepo::new(state.pool.clone());
+    if repo.for_post(id).await?.is_none() {
+        return Err(ApiError(AppError::validation(
+            "this entry is not synced by a plugin",
+        )));
+    }
+    repo.set_detached(id, true).await?;
+    Ok(Json(respond(&state, &principal, id).await?))
 }

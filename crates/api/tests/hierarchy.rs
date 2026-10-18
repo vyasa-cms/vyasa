@@ -720,3 +720,70 @@ async fn a_term_change_reaches_the_index() {
     std::thread::sleep(std::time::Duration::from_millis(800));
     assert_eq!((hits("category:news"), hits("category:reference")), (0, 1));
 }
+
+#[tokio::test]
+async fn a_managed_entry_is_read_only_until_detached() {
+    let (db, server, a) = site().await;
+    let base = server.base();
+    let id = post(base, &a, "guide", "Synced", None);
+    let plugin: i64 = sqlx::query_scalar(
+        "INSERT INTO plugins (id, name, version, capabilities, wasm_sha256) VALUES ($1, 'syncer', '0.1.0', '[]', 'aa') RETURNING id",
+    )
+    .bind(vyasa_common::next_id_i64())
+    .fetch_one(db.pool())
+    .await
+    .unwrap();
+    sqlx::query("INSERT INTO managed_entries (post_id, plugin_id, ext_key, source_hash, edit_url) VALUES ($1, $2, 'docs/synced.md', 'h', 'https://github.com/o/r/edit/main/docs/synced.md')")
+        .bind(id.parse::<i64>().unwrap()).bind(plugin).execute(db.pool()).await.unwrap();
+    let (_, one) = call("GET", base, &a, &format!("/api/v1/posts/{id}"), None);
+    assert_eq!(one["managed"]["plugin"], "syncer");
+    assert_eq!(
+        one["managed"]["edit_url"],
+        "https://github.com/o/r/edit/main/docs/synced.md"
+    );
+    let (status, body) = call(
+        "PUT",
+        base,
+        &a,
+        &format!("/api/v1/posts/{id}"),
+        Some(json!({"title": "Edited"})),
+    );
+    assert_eq!(status, 409, "{body}");
+    assert!(body["message"].as_str().unwrap().contains("syncer"));
+    // Moving it in the tree is editing it too.
+    let (status, _) = call(
+        "PUT",
+        base,
+        &a,
+        "/api/v1/post-types/guide/tree",
+        Some(json!({"moves": [{"id": id, "parent_id": null, "position": 5}]})),
+    );
+    assert_eq!(status, 409);
+    // Trashing stays possible (the source brings it back when it changes).
+    let (status, _) = call("DELETE", base, &a, &format!("/api/v1/posts/{id}"), None);
+    assert_eq!(status, 200);
+    call(
+        "POST",
+        base,
+        &a,
+        &format!("/api/v1/posts/{id}/restore"),
+        None,
+    );
+    let (status, detached) = call(
+        "POST",
+        base,
+        &a,
+        &format!("/api/v1/posts/{id}/detach"),
+        None,
+    );
+    assert_eq!(status, 200, "{detached}");
+    assert_eq!(detached["managed"]["detached"], true);
+    let (status, body) = call(
+        "PUT",
+        base,
+        &a,
+        &format!("/api/v1/posts/{id}"),
+        Some(json!({"title": "Mine now"})),
+    );
+    assert_eq!(status, 200, "{body}");
+}

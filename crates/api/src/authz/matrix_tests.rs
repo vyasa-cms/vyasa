@@ -234,6 +234,7 @@ const BLIND_ROUTES: &[(&str, &str)] = &[
     ("/posts/{id}/comments", "GET"),
     ("/posts/{id}/comments", "POST"),
     ("/posts/{id}/compose", "POST"),
+    ("/posts/{id}/detach", "POST"),
     ("/posts/{id}/duplicate", "POST"),
     ("/posts/{id}/embed", "POST"),
     ("/posts/{id}/language", "GET"),

@@ -9,6 +9,7 @@ pub mod audit;
 pub mod comments;
 pub mod content_fields;
 pub mod content_types;
+pub mod managed;
 pub mod media;
 pub mod menus;
 pub mod options;
@@ -36,6 +37,7 @@ pub use content_fields::{ContentFieldRow, ContentFieldUpdate, ContentFieldsRepo,
 pub use content_types::{
     ContentTypeRow, ContentTypeUpdate, ContentTypesRepo, NewContentType, TypeDeletion,
 };
+pub use managed::{ManagedInfoRow, ManagedRepo, ManagedRow};
 pub use media::{MediaFilter, MediaRepo, MediaStats, NewMedia};
 pub use menus::{MenuItemRow, MenuRow, MenusRepo, NewMenuItem};
 pub use options::OptionsRepo;

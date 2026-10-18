@@ -191,4 +191,20 @@ describe("post editor saves", () => {
     await waitFor(() => expect(update).toHaveBeenCalled());
     expect(update.mock.calls[0]?.[1]).toMatchObject({ parent_id: "1", position: 15 });
   });
+
+  it("shows a synced entry as read-only with an edit-at-source link, and detaches on request", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getPost).mockResolvedValue({
+      ...structuredClone(post),
+      managed: { plugin: "docs-sync", key: "docs/a.md", edit_url: "https://github.com/o/r/edit/main/docs/a.md", detached: false },
+    } as never);
+    const detach = vi.spyOn(api, "detachPost").mockResolvedValue({ ...post } as never);
+    mount();
+    const banner = await screen.findByTestId("managed-banner");
+    expect(banner).toHaveTextContent("Synced from docs-sync");
+    expect(screen.getByRole("link", { name: "Edit source" })).toHaveAttribute("href", "https://github.com/o/r/edit/main/docs/a.md");
+    expect(screen.getByTestId("save-post")).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Detach" }));
+    await waitFor(() => expect(detach).toHaveBeenCalledWith("12"));
+  });
 });

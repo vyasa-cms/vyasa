@@ -1898,6 +1898,30 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/posts/{id}/detach": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * `POST /api/v1/posts/{id}/detach` — take over an entry a plugin keeps in
+         *     step with an outside source. The plugin never writes it again; the
+         *     entry becomes an ordinary one.
+         * @description # Errors
+         *
+         *     403/404 as for editing the entry; 400 when it is not a managed entry.
+         */
+        post: operations["detach"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/posts/{id}/duplicate": {
         parameters: {
             query?: never;
@@ -4758,6 +4782,17 @@ export interface components {
         MailTestBody: {
             to: string;
         };
+        /** @description Who keeps an entry in step with an outside source, and where to edit it. */
+        ManagedInfo: {
+            /** @description An author took the entry over: the plugin no longer writes it. */
+            detached: boolean;
+            /** @description Where editors go to change it (empty for nowhere). */
+            edit_url: string;
+            /** @description The plugin's own key for the entry. */
+            key: string;
+            /** @description The plugin's name. */
+            plugin: string;
+        };
         /** @description Response shape for a media item. */
         MediaResponse: {
             /** @description Alt text. */
@@ -5133,6 +5168,7 @@ export interface components {
              *     entry renders through its theme template.
              */
             layout?: unknown;
+            managed?: components["schemas"]["ManagedInfo"] | null;
             /**
              * @description Extension metadata (SEO and the like). Field values are not in
              *     here: they are `fields`.
@@ -9877,6 +9913,56 @@ export interface operations {
                 };
             };
             /** @description Missing edit_posts / edit_others */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    detach: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Post id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The entry, now detached */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostResponse"];
+                };
+            };
+            /** @description Not a managed entry */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;

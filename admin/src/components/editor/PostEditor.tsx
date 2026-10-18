@@ -536,6 +536,18 @@ export function PostEditor({ mode }: { mode: Mode }) {
   const typeName = customTypes.data?.find((t) => t.slug === chrome.type)?.singular.toLowerCase();
   const hierarchical = customTypes.data?.find((t) => t.slug === chrome.type)?.hierarchical === true;
   const canEdit = can("edit_posts") && (isNew || createdRef.current === postId || can("edit_others") || (postQuery.data !== undefined && String(postQuery.data.author_id) === String(me.data?.id)));
+  // An entry a plugin keeps in step with an outside source is read-only
+  // here until someone detaches it.
+  const managed = isNew ? undefined : postQuery.data?.managed;
+  const managedLock = managed !== undefined && managed !== null && !managed.detached;
+  const detach = useMutation({
+    mutationFn: () => api.detachPost(postId as string),
+    onSuccess: () => {
+      void postQuery.refetch();
+      notify.success("Detached. You can edit this entry here now.");
+    },
+    onError: (e) => notify.error("Couldn't detach", e),
+  });
   const lock = usePostLock(canEdit ? postId : undefined);
   const publicPath = postPath(chrome.type, chrome.slug || "…", postQuery.data?.published_at ?? postQuery.data?.created_at ?? new Date().toISOString(), typeof siteOptions.data?.permalink_pattern === "string" ? siteOptions.data.permalink_pattern : undefined);
 
@@ -1151,7 +1163,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
 
   // Debounced autosave once there is a post to save into.
   React.useEffect(() => {
-    if (isNew || !contentDirty || !canEdit) return;
+    if (isNew || !contentDirty || !canEdit || managedLock) return;
     // Stopped after repeated failures: a fresh edit tries again. Stopped
     // because the session ended: only a manual save (after signing in).
     if (autosaveStopped !== null) {
@@ -1235,7 +1247,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
 
   // Save never publishes; Publish/Update is the only thing that does.
   const save = React.useCallback(() => {
-    if (!canEdit) return;
+    if (!canEdit || managedLock) return;
     const vars = saveVarsRef.current("draft");
     if (isNew) saveNew.mutate(vars);
     else if (isLive) saveWorking.mutate(vars);
@@ -1243,7 +1255,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
   }, [canEdit, isNew, isLive, saveNew, saveWorking, saveDraft]);
 
   const publish = React.useCallback(() => {
-    if (!canEdit || !can("publish_posts")) return;
+    if (!canEdit || managedLock || !can("publish_posts")) return;
     // The server refuses to publish or schedule without the required
     // fields; say which here rather than send a request bound to fail.
     if (target === "published" || target === "scheduled") {
@@ -1496,6 +1508,21 @@ export function PostEditor({ mode }: { mode: Mode }) {
       data-testid="post-editor"
       data-focus-mode={focus ? "true" : undefined}
     >
+      {managedLock && managed ? (
+        <div role="status" data-testid="managed-banner" className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border bg-muted/60 px-4 py-3 text-sm">
+          <span>
+            Synced from {managed.plugin}. Edit it at the source.
+          </span>
+          {managed.edit_url !== "" ? (
+            <a href={managed.edit_url} target="_blank" rel="noreferrer" className="font-medium underline">
+              Edit source
+            </a>
+          ) : null}
+          <Button variant="outline" size="sm" className="ml-auto" onClick={() => detach.mutate()} disabled={detach.isPending}>
+            Detach
+          </Button>
+        </div>
+      ) : null}
       {focus ? (
         <div className="mx-auto mb-6 flex max-w-(--vy-canvas-measure,70ch) items-center gap-3 text-xs text-muted-foreground">
           <Button variant="outline" size="sm" onClick={() => setFocus(false)}>
@@ -1680,10 +1707,10 @@ export function PostEditor({ mode }: { mode: Mode }) {
                 <PanelRightOpen className="h-4 w-4" aria-hidden="true" />
               )}
             </Button>
-            <Button variant="outline" size="sm" onClick={save} disabled={saving} data-testid="save-post">
+            <Button variant="outline" size="sm" onClick={save} disabled={saving || managedLock} data-testid="save-post">
               {saveLabel}
             </Button>
-            <Button size="sm" onClick={publish} disabled={saving || !canPublish || !can("publish_posts")} data-testid="publish-post">
+            <Button size="sm" onClick={publish} disabled={saving || managedLock || !canPublish || !can("publish_posts")} data-testid="publish-post">
               {saving ? "Saving…" : primaryLabel}
             </Button>
             {!isNew ? (
@@ -1808,7 +1835,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
               onChange={setField}
               errors={fieldErrors}
               missing={fieldsMissing}
-              disabled={!canEdit}
+              disabled={!canEdit || managedLock}
             />
           ) : null}
         </div>
