@@ -7,6 +7,44 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Added
+
+- Hierarchical content types: entries can have a parent and an order
+  (`parent_id`, `position`), nest to eight levels, and live at
+  `/<base>/<path/to/entry>`. A tree view with drag and drop in the admin;
+  `GET`/`PUT /api/v1/post-types/{type}/tree`; `parent`, `children` and
+  `postTree` in GraphQL. Plugins declare `hierarchical` and a URL `base`;
+  administrators tick "Hierarchical" on a content type.
+- A layout tree per post type: `layout.json` may carry `types.<slug>`, and a
+  plugin can supply a default tree for its own type.
+- Search scopes: `type` and `term` on `GET /api/v1/search`, the GraphQL
+  `search` field and `/search`.
+- Plugin host: `fetch-with` (request headers, any status), managed entries
+  (`put-entry`, `list-managed`, `delete-entry`; read-only in the editor until
+  detached), `now-ms`, `call-budget-ms`, the capabilities `entries:sync` and
+  `tasks:extended`, a one-minute budget for tasks that declare it, `secret`
+  settings fields, extra forwarded request headers for plugin routes, fields
+  declared by plugin post types, section `context`, child slots for plugin
+  blocks, schema-driven block forms in the editor.
+- `min_host_api` is now enforced: Vyasa 0.3 provides host API 2.
+- The `vyasa-docs` plugin (`plugins/docs/`): documentation sites imported
+  from a GitHub repository. See [docs/DOCS-SITES.md](docs/DOCS-SITES.md).
+
+### Changed
+
+- Plugin HTML is sanitised with a wider allowlist (`id` prefixed `pl-`,
+  `role`, `aria-*`, `data-*`, `nav`, `details`, `button` that never submits,
+  a GET `form` to this site).
+- The full-text index gains a field. On the first start of 0.3 the index is
+  rebuilt automatically; search answers from the database for those seconds.
+- Publishing an entry of a hierarchical type refreshes every cached page of
+  that type, so sidebars stay current.
+
+### Migrations
+
+- `0053_hierarchy.sql` and `0054_managed_entries.sql`; forward-only. Back up
+  before upgrading.
+
 ## [0.2.1] - 2026-10-15
 
 ### Added

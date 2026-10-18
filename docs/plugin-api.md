@@ -58,6 +58,12 @@ So storage, post writes and comment reads were added to
 | `update-post` | `(u64, post-patch) -> result<_, string>` | `db:write:posts` (+ `db:publish:posts` to publish) | **Only rows this plugin created.** Anything else returns `not your post`. |
 | `current-viewer` | `() -> result<option<viewer>, string>` | `viewer:read` | Id, display name and role (a built-in name, or a custom role's slug) of the signed-in visitor — never an email or a token. **Populated only inside `handle-request`**; `none` everywhere else. |
 | `get-post-meta` / `set-post-meta` | `(u64, string) -> result<option<string>, string>` / `(u64, string, string) -> result<_, string>` | `db:read:posts` / `db:write:meta` | Stored at `meta.plugin.<plugin>.<key>` on the post, so it travels with the content. Namespaced, so two plugins using `rating` never collide. Keys ≤ 64 B, values ≤ 16 KiB. |
+| `fetch-with` | `(fetch-request) -> result<fetch-response, string>` | `net:fetch:<host>` | A GET with request headers; the status is data (`304`, `404` and `403` come back as values, not errors). Only `authorization`, `accept`, `if-none-match` and `x-github-api-version` are sent; only `etag`, `content-type`, `retry-after`, `x-ratelimit-remaining` and `x-ratelimit-reset` come back. HTTPS only, redirects refused, same quotas as `fetch`. |
+| `put-entry` | `(entry-input) -> result<put-result, string>` | `entries:sync` (+ `db:publish:posts` to publish) | Creates or updates the entry with this `key`, owned by the plugin and read-only in the editor. Idempotent on `source-hash`; a child needs its parent written first (`parent-key`); `post-type` must be a custom type a plugin registered. See "Content sync". |
+| `list-managed` | `(string) -> result<list<managed-entry>, string>` | `entries:sync` | The entries of a post type this plugin manages (not those an author detached), with the hash it last wrote. |
+| `delete-entry` | `(string) -> result<_, string>` | `entries:sync` | Moves a managed entry to the trash. A key never written, or one an author detached, is left alone. |
+| `now-ms` | `() -> u64` | none | Milliseconds since the Unix epoch. |
+| `call-budget-ms` | `() -> u32` | none | Wall-clock milliseconds left in the current call, so bounded work can stop before the host stops it. |
 | `send-mail` | `(string, string, string) -> result<_, string>` | `mail:send` | Plain text, queued like every other message. `to` must be a registered user's address or the literal `site-admin`, which the host resolves without telling the plugin the address. |
 
 ### Capabilities
@@ -82,6 +88,8 @@ broker. The names the parser accepts are exactly:
 | `event:emit` | `emit-event` |
 | `html:page` | the `filter` export is called at the `page-html` stage |
 | `assets:script` | the `js` half of `register-assets` is served and linked |
+| `entries:sync` | `put-entry`, `list-managed`, `delete-entry`: entries the plugin owns, with structure. Publishing also needs `db:publish:posts`; neither implies the other |
+| `tasks:extended` | a task declared `"budget": "extended"` runs with the extended budget (below) |
 
 `db:write:posts` and `db:publish:posts` are separate on purpose: the
 difference between a draft waiting for review and text live on the site is
@@ -121,6 +129,10 @@ reinstalled from a package that declares them.
 | Post meta | 64 B keys, 16 KiB values, 64 keys per plugin per post |
 | Mail | 200-character subject, 32 KiB body, charged to the write quota |
 | Named filter payloads | 64 KiB in and out; a larger reply is ignored |
+| Extended task budget | for a task declared `"budget": "extended"` by a plugin holding `tasks:extended`: 60 s wall clock, 20 billion fuel, 300 fetches, 50 MiB fetched and 600 writes per minute; model calls and reads keep their ordinary limits |
+| `fetch-with` headers | request and response allowlists above; header values 4 KiB |
+| `attrs-schema` | 16 KiB per block declaration (a larger schema is dropped, the block stays) |
+| Host API | `HOST_API_VERSION` is 2; a package whose manifest says `min_host_api` above it is refused at install |
 
 Individual strings crossing the boundary are otherwise uncapped. A trap
 (including a guest panic) fails that one call, marks the plugin `errored`
@@ -248,8 +260,20 @@ key the operator trusts — but it is worth saying out loud.
 
 ```json
 [{ "slug": "book", "singular": "Book", "plural": "Books",
-   "public": true, "has-archive": true }]
+   "public": true, "has-archive": true,
+   "hierarchical": false, "base": "book",
+   "fields": [{ "key": "section_label", "label": "Section label", "kind": "text" }] }]
 ```
+
+`hierarchical` lets entries nest (a parent, an order, up to eight levels);
+their addresses become `/<base>/<path/to/entry>` and `/<base>` redirects to
+the first entry in reading order. `base` is the first path segment (default:
+the slug); it follows the slug grammar, must not clash with another type's
+slug or base, a taxonomy, a page route or a reserved word, and a clash drops
+the declaration with a log line like any other. `fields` declares fields for
+the type (at most 16; kinds `text`, `textarea`, `number`, `boolean`, `date`,
+`url`): they are stored as owned by the plugin and administrators cannot edit
+or delete them.
 
 Entries live at `/<slug>/<entry-slug>` with an archive at `/<slug>`. A
 page with that slug still wins, so a plugin cannot hide one by picking its
@@ -291,6 +315,62 @@ create content types in the same registry, so a slug has one owner:
   behaviour): once a plugin's taxonomy has been live in a process, an admin
   type with that slug is refused until the server restarts, even after the
   plugin is disabled.
+
+### Other 0.3 declaration keys
+
+- `register-routes`: a route may list `"headers": ["x-hub-signature-256"]`,
+  up to eight lower-case `x-` names forwarded to `handle-request` in addition
+  to the negotiation headers. `cookie` and `authorization` can never be
+  requested.
+- `register-schedule`: a task may declare `"budget": "extended"`; it is
+  honoured only with `tasks:extended` and the task then runs in its own
+  spawned call, so a minute-long sync does not hold back other plugins' tasks.
+- `register-admin`: a settings field may have `"type": "secret"`. A secret has
+  no default, is write-only (a settings read returns `__secrets: {key: set}`
+  and never the value; saving `""` clears it) and is shown as a password input.
+- `register-blocks`: `attrs-schema` (a JSON-Schema subset: objects with
+  properties of type string, number, integer, boolean, array, object; `title`,
+  `description`, `enum`, `format` of `code` or `inline-html`, `items`) gives the
+  editor a form for the block's attributes, and `container`
+  (`{"child": "group", "labels": "<attribute>"}`) makes its children editable
+  panes (tabs, steps).
+- `filter-at("register-layouts", "")`: a JSON object of default section trees
+  keyed by the plugin's own post-type slugs; see "Typed layouts" in
+  [THEMES.md](THEMES.md). A tree that fails the section rules is dropped.
+
+### Section context
+
+A section that lists `"context": ["entry", "tree", "toc"]` in its
+`register-sections` descriptor receives `context` in the `render-section`
+payload when it renders an entry of a hierarchical type: `entry` (the entry
+as a node plus `post_type` and `ancestors`), `tree` (the published tree of
+the type in reading order, at most 2000 nodes, with scalar field values) and
+`toc` (the entry's headings with their anchors). Ids are strings. Only the
+requested keys are present; a failure to fetch degrades to no `context`.
+
+### Content sync
+
+`put-entry` is how a plugin keeps entries in step with an outside source
+(files in a repository, pages in a notes tool). The host validates the whole
+input before writing anything: blocks as an editor save would, fields against
+the type's definitions, terms as `taxonomy:slug` (created when missing for a
+registered taxonomy), `seo-json` keys `canonical-path`, `noindex`, `title`,
+`description`. A row in `managed_entries` ties the plugin's `key` to the
+entry; the same `source-hash` means no write (`unchanged`), a new hash updates
+it (`updated`; a trashed entry returns through a draft). The entry shows in
+the editor as read-only with an "Edit source" link until an author presses
+**Detach**; after that the plugin never writes it again (`detached`) and
+`delete-entry` leaves it alone. Trashing a synced entry stays possible; the
+source brings it back when it changes. Entries survive their plugin.
+
+### Child slots
+
+A plugin block with children is rendered with the children's HTML placed at
+the `[[vy-child-N]]` tokens of its own markup (the host passes the count as
+`__children` in the attributes). The markup is sanitised first and the
+children, already safe output, are filled in afterwards. A block's
+`markdown` attribute, when present, is what the Markdown mirror and
+`llms.txt` carry for it; otherwise its children are.
 
 ### `register-taxonomies() -> string` *(v2)*
 
@@ -391,7 +471,10 @@ rules core sections use, and `bound` holds the entries
 (`{id, title, url, excerpt, date, thumb_url}`) — a section renderer needs
 no database capability. Return HTML for a kind you own; return the
 payload unchanged for one you do not. The reply passes the same widened
-sanitizer as `render-block` and is wrapped
+sanitizer as `render-block` (0.3: `id` values are prefixed `pl-`, `role` is
+allowlisted, `aria-*` and `data-*` survive, `nav`, `details` and `button`
+are allowed, a `button` never submits, a `form` may only GET this site;
+handlers, `style` and scripts never survive) and is wrapped
 `<div class="vy-plugin-section" data-plugin="…">` inside the ordinary
 section wrapper, so scopes, `hide_on` and the theme's `--vy-*` custom
 properties cascade into your markup — style against those tokens, not
@@ -419,7 +502,9 @@ routes, which is where `current-viewer` lives.
 | `register-schedule` + `run-task` | works — recorded in `plugin_tasks`, run by the scheduler |
 | `register-admin` | works — rendered as a settings form, fed back to `init` |
 | `register-assets` | works — served content-addressed, linked from every page; JS needs `assets:script` |
-| `register-post-types` | works — storage, public URLs and archives |
+| `register-post-types` | works — storage, public URLs and archives; `hierarchical`, `base` and `fields` |
+| `put-entry`, `list-managed`, `delete-entry`, `fetch-with` | work — managed entries and header-aware fetches (0.3) |
+| `register-layouts` | works — default section trees for the plugin's own types |
 | `register-taxonomies` | works — storage, term archives |
 | `filter-at` | works — five named points, plus `register-sections` / `render-section` |
 | `on-event` | works — eleven named events |
