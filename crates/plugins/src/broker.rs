@@ -109,6 +109,15 @@ impl Broker {
         }
     }
 
+    /// [`Broker::new`] with explicit per-window quotas.
+    #[must_use]
+    pub fn with_quotas(repo: PluginsRepo, pool: sqlx::PgPool, quotas: Quotas) -> Self {
+        Self {
+            quotas,
+            ..Self::new(repo, pool)
+        }
+    }
+
     async fn granted_for(&self, plugin_id: i64) -> Result<Vec<Capability>, AppError> {
         if let Some(hit) = self.grants.read().await.get(&plugin_id) {
             return Ok(hit.clone());

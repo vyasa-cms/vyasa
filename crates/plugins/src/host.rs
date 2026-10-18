@@ -97,6 +97,29 @@ pub trait FetchBackend: Send + Sync {
         &'a self,
         url: &'a str,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + 'a>>;
+
+    /// GETs `url` with request headers, returning any status as data.
+    /// The default refuses, so existing backends keep compiling.
+    fn get_with<'a>(
+        &'a self,
+        url: &'a str,
+        headers: Vec<(String, String)>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<FetchReply, String>> + Send + 'a>>
+    {
+        let _ = (url, headers);
+        Box::pin(async { Err(String::from("fetch-with is not supported by this backend")) })
+    }
+}
+
+/// An answer to a plugin's GET: any status is data.
+#[derive(Debug, Clone)]
+pub struct FetchReply {
+    /// HTTP status.
+    pub status: u16,
+    /// Only the headers a plugin may see, lower-cased.
+    pub headers: Vec<(String, String)>,
+    /// The body as text.
+    pub body: String,
 }
 
 /// Longest `user` prompt a plugin may send, in characters.
@@ -525,11 +548,33 @@ impl host::Host for HostCtx {
             .await
     }
 
-    async fn fetch_with(
-        &mut self,
-        _req: host::FetchRequest,
-    ) -> Result<host::FetchResponse, String> {
-        Err(String::from("not implemented"))
+    async fn fetch_with(&mut self, req: host::FetchRequest) -> Result<host::FetchResponse, String> {
+        if !req.url.starts_with("https://") {
+            return Err(String::from("only https:// URLs may be fetched"));
+        }
+        if self.broker.check_fetch(self.plugin_id, &req.url).await
+            != crate::broker::Decision::Allowed
+        {
+            return Err(String::from("capability-denied"));
+        }
+        let Some(fetch) = self.fetch.clone() else {
+            return Err(String::from(
+                "outbound fetch is not configured on this site",
+            ));
+        };
+        let reply = fetch.get_with(&req.url, req.headers).await?;
+        if !self
+            .broker
+            .record_bytes(self.plugin_id, reply.body.len() as u64)
+            .await
+        {
+            return Err(String::from("byte quota exceeded"));
+        }
+        Ok(host::FetchResponse {
+            status: reply.status,
+            headers: reply.headers,
+            body: reply.body,
+        })
     }
 
     async fn put_entry(&mut self, _input: host::EntryInput) -> Result<host::PutResult, String> {
