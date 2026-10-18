@@ -43,6 +43,9 @@ pub struct ApiContentQueries {
     plugin_surface: std::sync::Arc<crate::plugin_surface::PluginSurface>,
     /// Administrators' content types and field definitions.
     pool: sqlx::PgPool,
+    /// Published trees of hierarchical types, kept for a few seconds so a
+    /// page with several tree-aware sections reads each tree once.
+    trees: moka::sync::Cache<String, std::sync::Arc<Vec<vyasa_themes::TreeNodeData>>>,
 }
 
 impl std::fmt::Debug for ApiContentQueries {
@@ -74,7 +77,101 @@ impl ApiContentQueries {
             options,
             plugin_surface,
             pool,
+            trees: moka::sync::Cache::builder()
+                .max_capacity(64)
+                .time_to_live(std::time::Duration::from_secs(30))
+                .build(),
         }
+    }
+
+    /// The published tree of a hierarchical type a visitor may open, in
+    /// reading order, at most 2000 entries. Empty for anything else.
+    async fn tree_impl(
+        &self,
+        post_type: &str,
+    ) -> Result<std::sync::Arc<Vec<vyasa_themes::TreeNodeData>>, String> {
+        let Ok(ty) = PostType::parse(post_type) else {
+            return Ok(std::sync::Arc::default());
+        };
+        if !ty.is_hierarchical()
+            || !crate::policy::publicly_openable(&self.plugin_surface, &self.pool, ty).await
+        {
+            return Ok(std::sync::Arc::default());
+        }
+        if let Some(hit) = self.trees.get(ty.as_str()) {
+            return Ok(hit);
+        }
+        let rows = self
+            .posts
+            .published_tree(ty, 2000)
+            .await
+            .map_err(|e| e.to_string())?;
+        let (pattern, _, _) = self.presentation().await;
+        let defs = vyasa_core::content::ContentFieldsService::new(self.pool.clone())
+            .definitions(ty)
+            .await
+            .unwrap_or_default();
+        // Scalars only: a media or entry reference would need resolving
+        // (and visibility checks) that a navigation tree never wants.
+        let scalar: Vec<_> = defs
+            .into_iter()
+            .filter(|d| {
+                !matches!(
+                    d.kind,
+                    vyasa_core::content::FieldKind::Media | vyasa_core::content::FieldKind::Entry
+                )
+            })
+            .collect();
+        let nodes: Vec<vyasa_themes::TreeNodeData> = rows
+            .iter()
+            .map(|p| vyasa_themes::TreeNodeData {
+                id: p.id,
+                parent_id: p.parent_id,
+                position: p.position,
+                title: p.title.clone(),
+                slug: p.slug.clone(),
+                url: pattern.path_for(p),
+                fields: crate::entry_fields::defined_values(&scalar, &p.meta),
+            })
+            .collect();
+        let nodes = std::sync::Arc::new(nodes);
+        self.trees
+            .insert(ty.as_str().to_owned(), std::sync::Arc::clone(&nodes));
+        Ok(nodes)
+    }
+
+    async fn entry_context_impl(
+        &self,
+        post_id: i64,
+    ) -> Result<Option<vyasa_themes::EntryContextData>, String> {
+        let Ok(post) = self.posts.get(post_id).await else {
+            return Ok(None);
+        };
+        if !post.post_type.is_hierarchical()
+            || post.status != PostStatus::Published
+            || post.password_hash.is_some()
+        {
+            return Ok(None);
+        }
+        let tree = self.tree_impl(post.post_type.as_str()).await?;
+        let Some(node) = tree.iter().find(|n| n.id == post_id) else {
+            return Ok(None);
+        };
+        let mut ancestors = Vec::new();
+        let mut parent = node.parent_id;
+        while let Some(id) = parent {
+            if ancestors.contains(&id) {
+                break;
+            }
+            ancestors.push(id);
+            parent = tree.iter().find(|n| n.id == id).and_then(|n| n.parent_id);
+        }
+        ancestors.reverse();
+        Ok(Some(vyasa_themes::EntryContextData {
+            node: node.clone(),
+            post_type: post.post_type.as_str().to_owned(),
+            ancestors,
+        }))
     }
 
     async fn presentation(&self) -> (vyasa_core::options::PermalinkPattern, chrono_tz::Tz, String) {
@@ -390,6 +487,36 @@ impl ContentQueries for ApiContentQueries {
             build_page_tree(None, 1, &by_parent, &mut out);
             Ok(out)
         })
+    }
+
+    fn tree<'a>(
+        &'a self,
+        post_type: &'a str,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Vec<vyasa_themes::TreeNodeData>, String>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move { Ok(self.tree_impl(post_type).await?.as_ref().clone()) })
+    }
+
+    fn entry_context<'a>(
+        &'a self,
+        post_id: i64,
+    ) -> std::pin::Pin<
+        Box<
+            dyn std::future::Future<Output = Result<Option<vyasa_themes::EntryContextData>, String>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(self.entry_context_impl(post_id))
+    }
+
+    fn forget_trees(&self) {
+        self.trees.invalidate_all();
     }
 
     fn related_posts<'a>(

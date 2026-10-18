@@ -1101,6 +1101,59 @@ impl PostsRepo {
         commit(tx).await
     }
 
+    /// The published, unprotected entries of a hierarchical type in
+    /// reading order (parents before children, siblings by position then
+    /// id), at most `limit`. An entry whose parent is not itself published
+    /// and open is left out with everything below it.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn published_tree(
+        &self,
+        post_type: PostType,
+        limit: usize,
+    ) -> Result<Vec<PostRow>, AppError> {
+        let flat: Vec<(i64, Option<i64>, i32)> = sqlx::query_as(
+            "SELECT id, parent_id, position FROM posts
+             WHERE type = $1 AND status = 'published' AND password_hash IS NULL
+             ORDER BY position, id",
+        )
+        .bind(post_type.as_str())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("published tree failed: {e}")))?;
+        let mut kids: std::collections::HashMap<Option<i64>, Vec<i64>> =
+            std::collections::HashMap::new();
+        for (id, parent, _) in &flat {
+            kids.entry(*parent).or_default().push(*id);
+        }
+        // Depth-first from the roots; a parent that is not in the set
+        // (draft, protected, deleted) simply is never reached.
+        let mut order = Vec::with_capacity(flat.len().min(limit));
+        let mut stack: Vec<i64> = kids.remove(&None).unwrap_or_default();
+        stack.reverse();
+        while let Some(id) = stack.pop() {
+            if order.len() >= limit {
+                break;
+            }
+            order.push(id);
+            if let Some(mut children) = kids.remove(&Some(id)) {
+                children.reverse();
+                stack.extend(children);
+            }
+        }
+        let mut rows: std::collections::HashMap<i64, PostRow> = self
+            .get_many(&order)
+            .await?
+            .into_iter()
+            .map(|p| (p.id, p))
+            .collect();
+        Ok(order
+            .into_iter()
+            .filter_map(|id| rows.remove(&id))
+            .collect())
+    }
+
     /// The published, unprotected children of entry `parent_id`, in reading
     /// order (`position`, then id).
     ///

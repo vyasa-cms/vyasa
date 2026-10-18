@@ -17,7 +17,8 @@ use std::sync::Arc;
 
 use vyasa_plugins::host::{HostEnv, V2Outcome};
 use vyasa_themes::{
-    Binding, BlockPayload, DynBlockRegistry, DynamicBlock, MapSettings, ResolveContext,
+    Binding, BlockPayload, DynBlockRegistry, DynamicBlock, EntryContextData, MapSettings,
+    ResolveContext, TocEntryData, TreeNodeData,
 };
 
 use crate::plugin_surface::SectionDecl;
@@ -194,13 +195,31 @@ impl DynamicBlock for PluginSection {
                     })
                 })
                 .collect();
-            let payload = serde_json::json!({
+            let mut payload = serde_json::json!({
                 "kind": self.decl.kind,
                 "settings": serde_json::to_value(settings).unwrap_or_default(),
                 "bound": bound_json,
                 "editor": ctx.editor,
-            })
-            .to_string();
+            });
+            // What the section asked for besides its settings. A failure to
+            // fetch it degrades to no `context`, never to an error page.
+            if let (false, Some(post_id)) = (self.decl.context.is_empty(), ctx.post_id) {
+                let entry = ctx.queries.entry_context(post_id).await.ok().flatten();
+                let wants = |key: &str| self.decl.context.iter().any(|k| k == key);
+                let tree = match (&entry, wants("tree")) {
+                    (Some(e), true) => ctx.queries.tree(&e.post_type).await.unwrap_or_default(),
+                    _ => Vec::new(),
+                };
+                let toc = match (ctx.content_blocks, wants("toc")) {
+                    (Some(blocks), true) => vyasa_themes::toc_of(blocks),
+                    _ => Vec::new(),
+                };
+                if let Some(context) = context_json(&self.decl.context, entry.as_ref(), &tree, &toc)
+                {
+                    payload["context"] = context;
+                }
+            }
+            let payload = payload.to_string();
 
             let env = HostEnv::background(Arc::clone(&self.broker), self.pool.clone());
             let reply = self
@@ -239,6 +258,58 @@ impl DynamicBlock for PluginSection {
     }
 }
 
+fn node_json(node: &TreeNodeData) -> serde_json::Value {
+    serde_json::json!({
+        "id": node.id.to_string(),
+        "parent_id": node.parent_id.map(|p| p.to_string()),
+        "position": node.position,
+        "title": node.title,
+        "slug": node.slug,
+        "url": node.url,
+        "fields": node.fields,
+    })
+}
+
+/// The `context` a section receives: only the keys it asked for (`entry`,
+/// `tree`, `toc`), ids as strings. `None` when it asked for nothing or no
+/// entry of a hierarchical type is in play.
+fn context_json(
+    wanted: &[String],
+    entry: Option<&EntryContextData>,
+    tree: &[TreeNodeData],
+    toc: &[TocEntryData],
+) -> Option<serde_json::Value> {
+    let entry = entry?;
+    let wants = |key: &str| wanted.iter().any(|k| k == key);
+    let mut out = serde_json::Map::new();
+    if wants("entry") {
+        let mut value = node_json(&entry.node);
+        value["post_type"] = serde_json::Value::String(entry.post_type.clone());
+        value["ancestors"] = entry
+            .ancestors
+            .iter()
+            .map(|id| serde_json::Value::String(id.to_string()))
+            .collect();
+        out.insert("entry".into(), value);
+    }
+    if wants("tree") {
+        out.insert(
+            "tree".into(),
+            tree.iter().map(node_json).collect::<Vec<_>>().into(),
+        );
+    }
+    if wants("toc") {
+        out.insert(
+            "toc".into(),
+            toc.iter()
+                .map(|t| serde_json::json!({"level": t.level, "anchor": t.anchor, "text": t.text}))
+                .collect::<Vec<_>>()
+                .into(),
+        );
+    }
+    (!out.is_empty()).then_some(serde_json::Value::Object(out))
+}
+
 /// The live registry: built-ins plus every enabled plugin's sections.
 ///
 /// Assembled per use rather than cached — the surface changes when plugins
@@ -253,4 +324,57 @@ pub async fn registry_with_plugins(state: &AppState) -> DynBlockRegistry {
         }
     }
     registry
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn node(id: i64, parent: Option<i64>, title: &str) -> TreeNodeData {
+        TreeNodeData {
+            id,
+            parent_id: parent,
+            position: 10,
+            title: title.to_owned(),
+            slug: title.to_lowercase(),
+            url: format!("/docs/{}", title.to_lowercase()),
+            fields: serde_json::Map::new(),
+        }
+    }
+
+    #[test]
+    fn only_the_requested_keys_are_present_and_ids_are_strings() {
+        let entry = EntryContextData {
+            node: node(2, Some(1), "Install"),
+            post_type: "doc".into(),
+            ancestors: vec![1],
+        };
+        let tree = vec![node(1, None, "Guides"), node(2, Some(1), "Install")];
+        let toc = vec![vyasa_themes::TocEntryData {
+            level: 2,
+            anchor: "#vy-h-1".into(),
+            text: "A".into(),
+        }];
+        let all = context_json(
+            &["entry".into(), "tree".into(), "toc".into()],
+            Some(&entry),
+            &tree,
+            &toc,
+        )
+        .expect("some");
+        assert_eq!(all["entry"]["id"], "2");
+        assert_eq!(all["entry"]["ancestors"], serde_json::json!(["1"]));
+        assert_eq!(all["tree"][1]["parent_id"], "1");
+        assert_eq!(all["toc"][0]["anchor"], "#vy-h-1");
+        let only_toc = context_json(&["toc".into()], Some(&entry), &tree, &toc).expect("some");
+        assert!(only_toc.get("entry").is_none() && only_toc.get("tree").is_none());
+        assert!(
+            context_json(&[], Some(&entry), &tree, &toc).is_none(),
+            "asks for nothing, sees nothing new"
+        );
+        assert!(
+            context_json(&["tree".into()], None, &tree, &toc).is_none(),
+            "no entry in play: no context"
+        );
+    }
 }

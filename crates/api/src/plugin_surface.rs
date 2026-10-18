@@ -118,6 +118,9 @@ pub struct SectionDecl {
     pub binds: bool,
     /// String settings the canvas edits in place.
     pub inline: Vec<String>,
+    /// What the section wants besides its settings: any of `entry`,
+    /// `tree` and `toc` (unknown names are ignored).
+    pub context: Vec<String>,
     /// Owning plugin.
     pub plugin_id: i64,
     /// Owning plugin's name, for the studio's "plugin" badge.
@@ -798,6 +801,17 @@ fn collect_sections(inner: &mut Inner, plugin_id: i64, name: &str, value: &serde
                     .map(|a| {
                         a.iter()
                             .filter_map(serde_json::Value::as_str)
+                            .map(str::to_owned)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                context: item
+                    .get("context")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .filter(|k| matches!(*k, "entry" | "tree" | "toc"))
                             .map(str::to_owned)
                             .collect()
                     })

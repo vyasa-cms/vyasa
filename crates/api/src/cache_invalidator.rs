@@ -28,6 +28,7 @@ pub fn spawn(state: &AppState) {
     let themes = state.themes.clone();
     let purger = std::sync::Arc::clone(&state.cdn);
     let posts = state.posts.clone();
+    let queries = std::sync::Arc::clone(&state.content_queries);
     let options = state.options_service.clone();
     let mut rx = events::subscribe();
 
@@ -46,7 +47,7 @@ pub fn spawn(state: &AppState) {
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             };
 
-            purge(&cache, &themes, &posts, &event).await;
+            purge(&cache, &themes, &posts, &event, queries.as_ref()).await;
             // The edge holds its own copy, so the same event has to reach
             // it — otherwise turning on `edge_cache_seconds` would mean a
             // correction sits behind a stale page until the TTL expires.
@@ -88,6 +89,7 @@ async fn purge(
     themes: &vyasa_db::repo::themes::ThemesRepo,
     posts: &vyasa_core::post::PostService,
     event: &events::Event,
+    queries: &dyn vyasa_themes::ContentQueries,
 ) {
     // Cache keys are namespaced by the active theme version, so a purge needs
     // to know which namespace to sweep. If the theme cannot be read there is
@@ -108,6 +110,7 @@ async fn purge(
                     .is_ok_and(|p| purges_singles(p.post_type.is_hierarchical(), event))
                 {
                     cache.invalidate_entries(&namespace);
+                    queries.forget_trees();
                 }
             }
         }

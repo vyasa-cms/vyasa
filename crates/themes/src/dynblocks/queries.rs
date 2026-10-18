@@ -66,6 +66,36 @@ pub struct PageNodeData {
     pub depth: u8,
 }
 
+/// One node of a type's published tree, as plugin sections receive it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct TreeNodeData {
+    /// Entry id.
+    pub id: i64,
+    /// Parent entry, `None` at the top.
+    pub parent_id: Option<i64>,
+    /// Order among siblings.
+    pub position: i32,
+    /// Title.
+    pub title: String,
+    /// URL segment.
+    pub slug: String,
+    /// Public address.
+    pub url: String,
+    /// Scalar field values (text, textarea, number, boolean, choice, url, date).
+    pub fields: serde_json::Map<String, serde_json::Value>,
+}
+
+/// The entry being rendered, with the ids above it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EntryContextData {
+    /// The entry as a node.
+    pub node: TreeNodeData,
+    /// Its post type slug.
+    pub post_type: String,
+    /// Ids of its ancestors, root first.
+    pub ancestors: Vec<i64>,
+}
+
 /// One entry of a table of contents.
 #[derive(Debug, Clone, PartialEq)]
 pub struct TocEntryData {
@@ -208,6 +238,29 @@ pub trait ContentQueries: Send + Sync {
         let _ = post_id;
         Box::pin(std::future::ready(Ok(None)))
     }
+
+    /// The published tree of a hierarchical post type, in reading order
+    /// (parents before children); empty for any other type.
+    fn tree<'a>(
+        &'a self,
+        post_type: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<TreeNodeData>, String>> + Send + 'a>> {
+        let _ = post_type;
+        Box::pin(std::future::ready(Ok(Vec::new())))
+    }
+
+    /// The entry `post_id` as a tree node with the ids above it, when it
+    /// is an entry of a hierarchical type a visitor may open.
+    fn entry_context<'a>(
+        &'a self,
+        post_id: i64,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<EntryContextData>, String>> + Send + 'a>> {
+        let _ = post_id;
+        Box::pin(std::future::ready(Ok(None)))
+    }
+
+    /// Forgets any memoised trees (a content change made them stale).
+    fn forget_trees(&self) {}
 
     /// Approved comment tree for a post (oldest-first per level).
     fn approved_comments<'a>(

@@ -259,3 +259,34 @@ async fn switching_a_type_to_hierarchical_backfills_flat_paths_and_back() {
     assert_eq!(repo.clear_paths(ty).await.unwrap(), 2);
     assert_eq!(repo.get(51).await.unwrap().path, None);
 }
+
+#[tokio::test]
+async fn published_tree_lists_published_unprotected_rows_in_preorder() {
+    let db = TestDb::new().await;
+    seed_author(db.pool()).await;
+    let repo = PostsRepo::new(db.pool().clone());
+    let ty = guide();
+    repo.insert_with_unique_slug(&new(60, "b", None, Some(""), ty), None)
+        .await
+        .unwrap();
+    let mut first = new(61, "a", None, Some(""), ty);
+    first.position = -5;
+    repo.insert_with_unique_slug(&first, None).await.unwrap();
+    repo.insert_with_unique_slug(&new(62, "a1", Some(61), Some("a/"), ty), None)
+        .await
+        .unwrap();
+    let mut draft = new(63, "draft", Some(61), Some("a/"), ty);
+    draft.status = PostStatus::Draft;
+    repo.insert_with_unique_slug(&draft, None).await.unwrap();
+    let mut locked = new(64, "locked", None, Some(""), ty);
+    locked.password_hash = Some("x".into());
+    repo.insert_with_unique_slug(&locked, None).await.unwrap();
+    let rows = repo.published_tree(ty, 100).await.unwrap();
+    assert_eq!(
+        rows.iter().map(|r| r.id).collect::<Vec<_>>(),
+        [61, 62, 60],
+        "preorder; no draft, no protected row"
+    );
+    let capped = repo.published_tree(ty, 2).await.unwrap();
+    assert_eq!(capped.len(), 2);
+}

@@ -28,7 +28,7 @@ pub use cache::{etag_for, CacheMetrics, CacheService, CachedPage, ConditionalGet
 pub use css::{font_stack, scopes_css, scopes_to_css, tokens_to_css};
 pub use custom_css::namespace_custom_css;
 pub use dynblocks::card_html_for_test;
-pub use dynblocks::queries::{PageNodeData, TocEntryData};
+pub use dynblocks::queries::{EntryContextData, PageNodeData, TocEntryData, TreeNodeData};
 pub use dynblocks::{
     builtin_registry, BlockPayload, CommentNodeData, ContentQueries, DynBlockRegistry,
     DynamicBlock, EntrySort, MonthArchiveData, PostCardData, ResolveContext, TermLinkData,
@@ -44,7 +44,8 @@ pub use renderer::embed::{resolve_embed as resolve_embed_url, EmbedOutcome};
 pub use renderer::markdown::blocks_to_markdown;
 pub use renderer::{blocks_to_text, first_image, sanitize_comment_html, sanitize_plugin_html};
 pub use renderer::{
-    render_block, render_blocks, timed_boundary_within, toc_from_blocks, RenderError,
+    render_block, render_blocks, timed_boundary_within, toc_from_blocks, toc_from_blocks as toc_of,
+    RenderError,
 };
 pub use scope::{validate_scope, ColorRef, StyleScope};
 pub use sections::{composes, render_tree, sections_css, ResolvedSections};
