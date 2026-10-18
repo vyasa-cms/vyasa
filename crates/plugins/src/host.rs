@@ -57,6 +57,30 @@ pub struct HostLimits {
     pub epoch_deadline_ticks: u64,
 }
 
+/// How much a call may take. Everything except a declared extended task is
+/// `Ordinary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TaskBudget {
+    /// The configured per-call limits.
+    #[default]
+    Ordinary,
+    /// A longer call (one minute, more fuel) for a declared task of a plugin
+    /// holding `tasks:extended`.
+    Extended,
+}
+
+impl HostLimits {
+    /// `(fuel, epoch ticks)` for a call under `budget`.
+    #[must_use]
+    pub fn for_budget(&self, budget: TaskBudget) -> (u64, u64) {
+        match budget {
+            TaskBudget::Ordinary => (self.fuel_per_call, self.epoch_deadline_ticks),
+            // 1200 ticks x 50 ms = one minute of wall clock.
+            TaskBudget::Extended => (20_000_000_000, 1200),
+        }
+    }
+}
+
 impl Default for HostLimits {
     fn default() -> Self {
         Self {
@@ -216,6 +240,8 @@ pub struct HostEnv {
     /// next. Only [`HostEnv::for_viewer`] sets it, and only the plugin
     /// route calls that.
     pub viewer: Option<Viewer>,
+    /// How long the call may run.
+    pub budget: TaskBudget,
 }
 
 impl HostEnv {
@@ -227,7 +253,15 @@ impl HostEnv {
             broker,
             dest,
             viewer: None,
+            budget: TaskBudget::Ordinary,
         }
+    }
+
+    /// The same environment under the extended budget.
+    #[must_use]
+    pub fn extended(mut self) -> Self {
+        self.budget = TaskBudget::Extended;
+        self
     }
 
     /// The same environment, serving `viewer`.
@@ -860,6 +894,7 @@ impl WasmtimeHost {
                 .memory_size(self.limits.max_memory_bytes)
                 .build(),
         );
+        let (fuel, ticks) = self.limits.for_budget(env.budget);
         let mut store = WasmStore::new(
             &self.engine,
             HostCtx {
@@ -876,21 +911,19 @@ impl WasmtimeHost {
                 ai_window: AiWindow::Unbounded,
                 call_deadline: Some(
                     std::time::Instant::now()
-                        + std::time::Duration::from_millis(
-                            EPOCH_TICK_MILLIS.saturating_mul(self.limits.epoch_deadline_ticks),
-                        ),
+                        + std::time::Duration::from_millis(EPOCH_TICK_MILLIS.saturating_mul(ticks)),
                 ),
             },
         );
         // Both budgets are best-effort: a store that refuses them still
         // runs, just unbounded, which the epoch ticker still interrupts.
-        let _ = store.set_fuel(self.limits.fuel_per_call);
+        let _ = store.set_fuel(fuel);
         store.limiter(|ctx: &mut HostCtx| {
             ctx.limits
                 .as_mut()
                 .unwrap_or_else(|| unreachable!("limits set at instantiation"))
         });
-        store.set_epoch_deadline(self.limits.epoch_deadline_ticks);
+        store.set_epoch_deadline(ticks);
         store
     }
 
@@ -1253,6 +1286,37 @@ impl WasmtimeHost {
 
     /// Runs one declared scheduled task.
     pub async fn call_run_task(&self, plugin_id: i64, name: &str, env: &HostEnv) -> V2Outcome<()> {
+        self.call_run_task_with(plugin_id, name, env, false).await
+    }
+
+    /// [`Self::call_run_task`], under the extended budget when `extended`
+    /// is asked for **and** the plugin holds `tasks:extended`; otherwise
+    /// an ordinary run. The larger quotas apply for the call's duration.
+    pub async fn call_run_task_with(
+        &self,
+        plugin_id: i64,
+        name: &str,
+        env: &HostEnv,
+        extended: bool,
+    ) -> V2Outcome<()> {
+        let granted = extended
+            && env
+                .broker
+                .check_capability(plugin_id, &crate::capabilities::Capability::TasksExtended)
+                .await
+                == crate::broker::Decision::Allowed;
+        let extended_env;
+        let (env, _scope) = if granted {
+            extended_env = HostEnv {
+                broker: env.broker.clone(),
+                dest: env.dest.clone(),
+                viewer: env.viewer.clone(),
+                budget: TaskBudget::Extended,
+            };
+            (&extended_env, Some(env.broker.extended_scope(plugin_id)))
+        } else {
+            (env, None)
+        };
         let (bindings, mut store) = match self.begin_call_v2(plugin_id, env).await {
             Ok(Some(pair)) => pair,
             Ok(None) => return V2Outcome::Unsupported,

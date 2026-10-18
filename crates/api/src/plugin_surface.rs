@@ -178,6 +178,9 @@ pub struct TaskDecl {
     pub name: String,
     /// Requested interval, clamped to at least [`MIN_TASK_SECONDS`].
     pub every_seconds: i32,
+    /// Asked for the extended budget (`"budget": "extended"`); it applies
+    /// only if the plugin holds `tasks:extended`.
+    pub extended: bool,
 }
 
 /// The whole contributed surface.
@@ -1290,6 +1293,7 @@ fn collect_tasks(inner: &mut Inner, plugin_id: i64, name: &str, value: &serde_js
             plugin_id,
             name: task.to_owned(),
             every_seconds,
+            extended: item.get("budget").and_then(serde_json::Value::as_str) == Some("extended"),
         });
     }
 }
@@ -1810,6 +1814,27 @@ mod tests {
             form.fields[0].default,
             serde_json::Value::Null,
             "a secret cannot ship a default"
+        );
+    }
+
+    #[test]
+    fn a_task_may_ask_for_the_extended_budget() {
+        let mut inner = Inner::default();
+        collect_tasks(
+            &mut inner,
+            1,
+            "p",
+            &serde_json::json!([
+                {"name": "sync", "every-seconds": 60, "budget": "extended"},
+                {"name": "tally", "every-seconds": 3600},
+                {"name": "odd", "every-seconds": 3600, "budget": "unlimited"}
+            ]),
+        );
+        assert!(inner.tasks[0].extended);
+        assert!(!inner.tasks[1].extended);
+        assert!(
+            !inner.tasks[2].extended,
+            "an unknown budget is the ordinary one"
         );
     }
 }

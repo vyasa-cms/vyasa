@@ -208,6 +208,7 @@ fn env(state: &AppState, viewer: Option<Viewer>) -> HostEnv {
         broker: std::sync::Arc::clone(&state.broker),
         dest: state.pool.clone(),
         viewer,
+        budget: vyasa_plugins::host::TaskBudget::Ordinary,
     }
 }
 

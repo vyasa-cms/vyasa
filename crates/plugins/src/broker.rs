@@ -43,6 +43,30 @@ impl Default for Quotas {
     }
 }
 
+impl Quotas {
+    /// The larger quotas an extended task runs under: more fetches, bytes
+    /// and writes, because a sync is bulk work; reads and model calls stay
+    /// as they are (money is not part of a longer budget).
+    #[must_use]
+    pub fn extended() -> Self {
+        Self {
+            fetches_per_min: 300,
+            bytes_per_min: 50 * 1024 * 1024,
+            writes_per_min: 600,
+            ..Self::default()
+        }
+    }
+}
+
+/// While alive, one plugin's counters use [`Quotas::extended`].
+pub struct ExtendedScope(Arc<std::sync::atomic::AtomicU32>);
+
+impl Drop for ExtendedScope {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
+    }
+}
+
 /// Sliding counters (fixed 60 s window keyed by wall-clock minute).
 #[derive(Default)]
 struct Counters {
@@ -88,6 +112,8 @@ pub struct Broker {
     grants: Arc<tokio::sync::RwLock<HashMap<i64, Vec<Capability>>>>,
     counters: Arc<tokio::sync::Mutex<HashMap<i64, Counters>>>,
     quotas: Quotas,
+    /// Per plugin, how many extended scopes are alive (lock-free to drop).
+    extended: Arc<std::sync::Mutex<HashMap<i64, Arc<std::sync::atomic::AtomicU32>>>>,
 }
 
 impl std::fmt::Debug for Broker {
@@ -106,6 +132,32 @@ impl Broker {
             grants: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             counters: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             quotas: Quotas::default(),
+            extended: Arc::new(std::sync::Mutex::new(HashMap::new())),
+        }
+    }
+
+    /// Starts an extended scope for `plugin_id`: until the guard drops, its
+    /// quotas are [`Quotas::extended`]. Scopes nest.
+    #[must_use]
+    pub fn extended_scope(&self, plugin_id: i64) -> ExtendedScope {
+        let flag = self.extended.lock().map_or_else(
+            |_| Arc::new(std::sync::atomic::AtomicU32::new(0)),
+            |mut map| Arc::clone(map.entry(plugin_id).or_default()),
+        );
+        flag.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        ExtendedScope(flag)
+    }
+
+    /// The quotas in force for `plugin_id` right now.
+    fn quotas_for(&self, plugin_id: i64) -> Quotas {
+        let extended = self.extended.lock().is_ok_and(|map| {
+            map.get(&plugin_id)
+                .is_some_and(|f| f.load(std::sync::atomic::Ordering::SeqCst) > 0)
+        });
+        if extended {
+            Quotas::extended()
+        } else {
+            self.quotas
         }
     }
 
@@ -222,7 +274,7 @@ impl Broker {
         }
         let mut counters = self.counters.lock().await;
         let c = counters.entry(plugin_id).or_default().roll();
-        if c.writes >= self.quotas.writes_per_min {
+        if c.writes >= self.quotas_for(plugin_id).writes_per_min {
             drop(counters);
             self.audit(plugin_id, "quota", cap, "writes/min exceeded")
                 .await;
@@ -251,7 +303,7 @@ impl Broker {
         }
         let mut counters = self.counters.lock().await;
         let c = counters.entry(plugin_id).or_default().roll();
-        if c.db_reads >= self.quotas.db_reads_per_min {
+        if c.db_reads >= self.quotas_for(plugin_id).db_reads_per_min {
             drop(counters);
             self.audit(plugin_id, "quota", &cap, "db reads/min exceeded")
                 .await;
@@ -338,7 +390,7 @@ impl Broker {
         }
         let mut counters = self.counters.lock().await;
         let c = counters.entry(plugin_id).or_default().roll();
-        if c.ai_calls >= self.quotas.ai_calls_per_min {
+        if c.ai_calls >= self.quotas_for(plugin_id).ai_calls_per_min {
             drop(counters);
             self.audit(
                 plugin_id,
@@ -383,7 +435,7 @@ impl Broker {
         }
         let mut counters = self.counters.lock().await;
         let c = counters.entry(plugin_id).or_default().roll();
-        if c.fetches >= self.quotas.fetches_per_min {
+        if c.fetches >= self.quotas_for(plugin_id).fetches_per_min {
             drop(counters);
             self.audit(plugin_id, "quota", &wanted, "fetches/min exceeded")
                 .await;
@@ -400,7 +452,7 @@ impl Broker {
     pub async fn record_bytes(&self, plugin_id: i64, n: u64) -> bool {
         let mut counters = self.counters.lock().await;
         let c = counters.entry(plugin_id).or_default().roll();
-        if c.bytes + n > self.quotas.bytes_per_min {
+        if c.bytes + n > self.quotas_for(plugin_id).bytes_per_min {
             return false;
         }
         c.bytes += n;

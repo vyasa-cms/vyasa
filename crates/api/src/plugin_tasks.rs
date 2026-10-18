@@ -79,8 +79,22 @@ pub fn spawn_runner(state: AppState) {
         tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
         loop {
             tick.tick().await;
+            let declared = state.plugin_surface.tasks().await;
             for (plugin_id, name) in claim_due(&state).await {
-                run_one(&state, plugin_id, &name).await;
+                let extended = declared
+                    .iter()
+                    .any(|t| t.plugin_id == plugin_id && t.name == name && t.extended);
+                if extended {
+                    // A minute-long run must not hold back every other
+                    // plugin's tasks; the claim already stops this one
+                    // from starting twice.
+                    let state = state.clone();
+                    tokio::spawn(async move {
+                        run_one(&state, plugin_id, &name, true).await;
+                    });
+                } else {
+                    run_one(&state, plugin_id, &name, false).await;
+                }
             }
         }
     });
@@ -114,11 +128,15 @@ async fn claim_due(state: &AppState) -> Vec<(i64, String)> {
     }
 }
 
-async fn run_one(state: &AppState, plugin_id: i64, name: &str) {
+async fn run_one(state: &AppState, plugin_id: i64, name: &str, extended: bool) {
     // A scheduled task serves nobody, so there is no viewer to report.
     let env = HostEnv::background(std::sync::Arc::clone(&state.broker), state.pool.clone());
     let started = std::time::Instant::now();
-    let (status, error) = match state.plugin_host.call_run_task(plugin_id, name, &env).await {
+    let (status, error) = match state
+        .plugin_host
+        .call_run_task_with(plugin_id, name, &env, extended)
+        .await
+    {
         V2Outcome::Ok(()) => ("ok", None),
         V2Outcome::Unsupported => (
             "failed",
