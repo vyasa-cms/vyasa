@@ -430,7 +430,8 @@ async fn export_then_import_keeps_a_hierarchical_tree_with_cousins_and_order() {
         .map(|n| n["path"].as_str().unwrap())
         .collect();
     assert_eq!(paths, ["api", "api/install", "guides", "guides/install"]);
-    // Public addresses of nested entries are asserted in Task 6.
+    assert_eq!(get_public(base, "/guide/api/install").0, 200);
+    assert_eq!(get_public(base, "/guide/guides/install").0, 200);
 }
 
 #[tokio::test]
@@ -484,4 +485,92 @@ async fn graphql_exposes_position_path_parent_children_and_the_tree() {
         json_of(resp)["data"]["postTree"].as_array().unwrap().len(),
         2
     );
+}
+
+#[tokio::test]
+async fn nested_entries_are_served_at_their_paths_and_the_mirror_and_listings_agree() {
+    let (_db, server, a) = site().await;
+    let base = server.base();
+    let g = post(base, &a, "guide", "Guides", None);
+    let _i = post(base, &a, "guide", "Install", Some(&g));
+    let (s, html) = get_public(base, "/guide/guides/install");
+    assert_eq!(s, 200, "{html}");
+    assert!(html.contains("Install"));
+    let (s, md) = get_public(base, "/guide/guides/install.md");
+    assert_eq!(s, 200);
+    assert!(md.starts_with("# Install"), "{md}");
+    let (s, llms) = get_public(base, "/llms.txt");
+    assert_eq!(s, 200);
+    assert!(llms.contains("/guide/guides/install.md"), "{llms}");
+    let (_, sitemap) = get_public(base, "/sitemap.xml");
+    assert!(sitemap.contains("/guide/guides/install"), "{sitemap}");
+    let (s, _) = get_public(base, "/guide/install");
+    assert_eq!(s, 404, "a nested entry is not at its bare slug");
+}
+
+#[tokio::test]
+async fn the_archive_of_a_hierarchical_type_redirects_to_its_first_root_and_search_is_a_redirect() {
+    let (_db, server, a) = site().await;
+    let base = server.base();
+    let first = post(base, &a, "guide", "Zeta first by position", None);
+    let _second = post(base, &a, "guide", "Alpha", None);
+    // Position decides, not the title: make "Zeta" first.
+    call(
+        "PUT",
+        base,
+        &a,
+        &format!("/api/v1/posts/{first}"),
+        Some(json!({"position": 1})),
+    );
+    let agent = ureq::AgentBuilder::new().redirects(0).build();
+    let resp = match agent.get(&format!("{base}/guide")).call() {
+        Ok(r) | Err(ureq::Error::Status(_, r)) => r,
+        Err(e) => panic!("{e}"),
+    };
+    assert_eq!(resp.status(), 302);
+    assert_eq!(
+        resp.header("location"),
+        Some("/guide/zeta-first-by-position")
+    );
+    let resp = match agent
+        .get(&format!(
+            "{base}/guide/search?q=hello+world&term=doc-version:v2"
+        ))
+        .call()
+    {
+        Ok(r) | Err(ureq::Error::Status(_, r)) => r,
+        Err(e) => panic!("{e}"),
+    };
+    assert_eq!(resp.status(), 302);
+    assert_eq!(
+        resp.header("location"),
+        Some("/search?s=hello%20world&type=guide&term=doc-version%3Av2")
+    );
+}
+
+#[tokio::test]
+async fn existing_urls_are_unchanged() {
+    let db = TestDb::new().await;
+    let admin = common::seed_user(db.pool(), Role::Admin).await;
+    let server = TestServer::start(common::BIN, &db);
+    let base = server.base();
+    let a = common::login_cookie(base, &admin.email, &admin.password);
+    create_type(base, &a, "note", "Note", "Notes");
+    post(base, &a, "note", "A Note", None);
+    let (_, p) = call(
+        "POST",
+        base,
+        &a,
+        "/api/v1/posts",
+        Some(json!({"type": "post", "title": "Hello", "status": "published", "content": doc("h")})),
+    );
+    let _ = p;
+    assert_eq!(get_public(base, "/note/a-note").0, 200);
+    assert_eq!(
+        get_public(base, "/note").0,
+        200,
+        "a flat type keeps its listing"
+    );
+    assert_eq!(get_public(base, "/post/hello").0, 200);
+    assert_eq!(get_public(base, "/note/a-note.md").0, 200);
 }

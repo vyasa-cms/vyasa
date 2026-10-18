@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use vyasa_db::content_models::PostRow;
 use vyasa_db::content_models::{PostStatus, PostType};
-use vyasa_db::repo::PostFilter;
+use vyasa_db::repo::{PostFilter, PostsRepo};
 use vyasa_themes::{
     cache, keys, CachedPage, Engine, Layout, PageContext, PostCard, RenderRequest, SiteMeta,
     TemplateType, TokenSet,
@@ -680,6 +680,13 @@ pub struct EntryParams {
     /// Listing page, when this path turns out to be a post-type archive.
     #[serde(default)]
     pub page: Option<u32>,
+    /// Search text, when this path turns out to be a hierarchical type's
+    /// `search` address (redirected to the site search).
+    #[serde(default)]
+    pub q: Option<String>,
+    /// A `taxonomy:term` scope for the same redirect.
+    #[serde(default)]
+    pub term: Option<String>,
 }
 
 /// Shared single-post/page implementation.
@@ -691,11 +698,22 @@ pub(super) async fn single_impl(
     headers: HeaderMap,
     params: EntryParams,
 ) -> R {
-    let Ok(bundle) = load_bundle(&state).await else {
-        return crate::public::errors::internal_error();
-    };
     let Ok(post) = state.posts.get_by_slug(t, &slug).await else {
         return missing(&state).await;
+    };
+    Box::pin(render_single(state, post, headers, params)).await
+}
+
+/// Renders an entry already looked up, by slug or by path.
+#[allow(clippy::too_many_lines)]
+pub(super) async fn render_single(
+    state: AppState,
+    post: PostRow,
+    headers: HeaderMap,
+    params: EntryParams,
+) -> R {
+    let Ok(bundle) = load_bundle(&state).await else {
+        return crate::public::errors::internal_error();
     };
     // Public visibility: drafts/scheduled/trashed are 404 here; previews go
     // through the signed /preview route.
@@ -719,7 +737,7 @@ pub(super) async fn single_impl(
     let key = cacheable.then(|| {
         keys::single(
             &bundle.version,
-            &post.slug,
+            post.path.as_deref().unwrap_or(&post.slug),
             post.updated_at.timestamp_millis(),
         )
     });
@@ -965,10 +983,22 @@ pub(super) async fn markdown_mirror(
     slug: &str,
     headers: &HeaderMap,
 ) -> R {
-    use std::fmt::Write as _;
     let Ok(post) = state.posts.get_by_slug(t, slug).await else {
         return missing(state).await;
     };
+    markdown_of(state, post, headers).await
+}
+
+/// [`markdown_mirror`] for an entry of a hierarchical type, by path.
+async fn markdown_mirror_path(state: &AppState, t: PostType, path: &str, headers: &HeaderMap) -> R {
+    let Ok(post) = state.posts.get_by_path(t, path).await else {
+        return missing(state).await;
+    };
+    markdown_of(state, post, headers).await
+}
+
+async fn markdown_of(state: &AppState, post: PostRow, headers: &HeaderMap) -> R {
+    use std::fmt::Write as _;
     if !matches!(post.status, PostStatus::Published) || post.password_hash.is_some() {
         return missing(state).await;
     }
@@ -1043,7 +1073,7 @@ pub async fn single_page(
         return markdown_mirror(&state, PostType::Page, bare, &headers).await;
     }
     if let Some(decl) =
-        crate::entry_fields::served_type(&state.plugin_surface, &state.pool, &slug).await
+        crate::entry_fields::served_type_by_base(&state.plugin_surface, &state.pool, &slug).await
     {
         if decl.public
             && decl.has_archive
@@ -1053,36 +1083,82 @@ pub async fn single_page(
                 .await
                 .is_err()
         {
+            // A documentation-style type has no listing: its address is
+            // the first page in reading order.
+            if decl.hierarchical {
+                if let Ok(post_type) = PostType::parse(&decl.slug) {
+                    return match PostsRepo::new(state.pool.clone())
+                        .first_root(post_type)
+                        .await
+                    {
+                        Ok(Some(first)) => {
+                            let to = crate::permalinks::path(&state, &first).await;
+                            found(&to)
+                        }
+                        _ => missing(&state).await,
+                    };
+                }
+            }
             return custom_archive(&state, &decl, params.page.unwrap_or(1), &headers).await;
         }
     }
     single_impl(state, PostType::Page, slug, headers, params).await
 }
 
-/// `GET /{type}/{slug}` — one entry of a registered post type (a plugin's
-/// or an administrator's).
-pub async fn custom_single(
+/// `GET /{type}/{*rest}` — one entry of a registered post type (a
+/// plugin's or an administrator's): `/{base}/{slug}` for a flat type,
+/// `/{base}/{path…}` for a hierarchical one.
+pub async fn custom_entry(
     State(state): State<AppState>,
-    Path((first, slug)): Path<(String, String)>,
+    Path((first, rest)): Path<(String, String)>,
     Query(params): Query<EntryParams>,
     headers: HeaderMap,
 ) -> R {
-    // `/{first}/{slug}` is claimed by two kinds of registration. Post
+    // `/{first}/…` is claimed by two kinds of registration. Post
     // types win, and `collect_taxonomies` refuses a slug a post type
     // already holds, so the two can never both match.
     if let Some(decl) =
-        crate::entry_fields::served_type(&state.plugin_surface, &state.pool, &first).await
+        crate::entry_fields::served_type_by_base(&state.plugin_surface, &state.pool, &first).await
     {
-        let Ok(post_type) = PostType::parse(&first) else {
+        let Ok(post_type) = PostType::parse(&decl.slug) else {
             return missing(&state).await;
         };
         if !decl.public {
             return missing(&state).await;
         }
-        if let Some(bare) = slug.strip_suffix(".md") {
+        if decl.hierarchical {
+            if let Some(bare) = rest.strip_suffix(".md") {
+                return markdown_mirror_path(&state, post_type, bare, &headers).await;
+            }
+            // `/{base}/search` is a sub-route of the type, not an entry:
+            // it hands over to the site search scoped to the type.
+            if rest == "search" {
+                return found(&search_address(&decl.slug, &params));
+            }
+            let Ok(post) = state.posts.get_by_path(post_type, &rest).await else {
+                return missing(&state).await;
+            };
+            return Box::pin(render_single(state, post, headers, params)).await;
+        }
+        if rest.contains('/') {
+            return missing(&state).await;
+        }
+        if let Some(bare) = rest.strip_suffix(".md") {
             return markdown_mirror(&state, post_type, bare, &headers).await;
         }
-        return single_impl(state, post_type, slug, headers, params).await;
+        return single_impl(state, post_type, rest, headers, params).await;
+    }
+    // A type that moved to another base keeps answering at its slug.
+    if let Some(decl) =
+        crate::entry_fields::served_type(&state.plugin_surface, &state.pool, &first).await
+    {
+        if decl.public && decl.base != first {
+            return moved(&format!("/{}/{rest}", decl.base));
+        }
+        return missing(&state).await;
+    }
+    if rest.contains('/') {
+        return missing(&state).await;
     }
     if let Some(decl) = state.plugin_surface.taxonomy(&first).await {
         if !decl.public {
@@ -1093,9 +1169,51 @@ pub async fn custom_single(
         let Ok(tax) = vyasa_db::content_models::Taxonomy::parse(&first) else {
             return missing(&state).await;
         };
-        return archive_impl(state, tax.as_str(), slug, params.page.unwrap_or(1), headers).await;
+        return archive_impl(state, tax.as_str(), rest, params.page.unwrap_or(1), headers).await;
     }
     missing(&state).await
+}
+
+/// A `302` to `to`.
+fn found(to: &str) -> R {
+    match axum::http::HeaderValue::from_str(to) {
+        Ok(value) => (StatusCode::FOUND, [(header::LOCATION, value)]).into_response(),
+        Err(_) => crate::public::errors::internal_error(),
+    }
+}
+
+/// A `301` to `to`.
+fn moved(to: &str) -> R {
+    match axum::http::HeaderValue::from_str(to) {
+        Ok(value) => (StatusCode::MOVED_PERMANENTLY, [(header::LOCATION, value)]).into_response(),
+        Err(_) => crate::public::errors::internal_error(),
+    }
+}
+
+/// Percent-encodes a query value (spaces as `%20`).
+fn percent_encode(raw: &str) -> String {
+    raw.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            other => format!("%{other:02X}"),
+        })
+        .collect()
+}
+
+/// The site search address for `/{base}/search?q=…&term=…`.
+fn search_address(type_slug: &str, params: &EntryParams) -> String {
+    let mut to = format!(
+        "/search?s={}&type={}",
+        percent_encode(params.q.as_deref().unwrap_or("")),
+        percent_encode(type_slug)
+    );
+    if let Some(term) = params.term.as_deref().filter(|t| !t.is_empty()) {
+        to.push_str("&term=");
+        to.push_str(&percent_encode(term));
+    }
+    to
 }
 
 /// The listing for one registered post type.

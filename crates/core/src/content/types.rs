@@ -492,3 +492,16 @@ impl ContentTypesService {
         Ok(skipped)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn search_stays_reserved_at_the_root() {
+        // A hierarchical type answers `/{base}/search` itself, and the
+        // site's own `/search` must stay out of any type's reach.
+        assert!(check_type_slug("search").is_err());
+        assert!(check_type_slug("docs").is_ok());
+    }
+}

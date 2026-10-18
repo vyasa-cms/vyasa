@@ -172,7 +172,13 @@ impl PermalinkPattern {
         use vyasa_db::content_models::PostType;
         match post.post_type {
             PostType::Page => format!("/{}", post.slug),
-            PostType::Custom(t) => format!("/{t}/{}", post.slug),
+            // A custom type lives under its base; a hierarchical entry's
+            // address is its path, the slugs from the root.
+            PostType::Custom(_) => format!(
+                "/{}/{}",
+                post.post_type.base(),
+                post.path.as_deref().unwrap_or(&post.slug)
+            ),
             _ => {
                 let at = post.published_at.unwrap_or(post.created_at);
                 self.url_for(
@@ -872,4 +878,53 @@ fn default_role_refused(name: &str) -> AppError {
         "\"{name}\" cannot be the role new registrations get: it can manage users, \
          options, plugins, themes or categories, edit others' content or moderate comments"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vyasa_db::content_models::{PostRow, PostStatus, PostType};
+
+    fn sample_row(post_type: PostType, slug: &str) -> PostRow {
+        let now = chrono::Utc::now();
+        PostRow {
+            id: 1,
+            sticky: false,
+            lang: String::new(),
+            translation_group: None,
+            post_type,
+            status: PostStatus::Published,
+            slug: slug.to_owned(),
+            title: slug.to_owned(),
+            content: serde_json::json!([]),
+            layout: None,
+            excerpt: None,
+            author_id: 1,
+            parent_id: None,
+            meta: serde_json::json!({}),
+            published_at: Some(now),
+            scheduled_for: None,
+            password_hash: None,
+            created_at: now,
+            updated_at: now,
+            path: None,
+            position: 0,
+        }
+    }
+
+    #[test]
+    fn custom_entries_use_their_types_base_and_path() {
+        let t = PostType::register("doc-permalink").expect("registers");
+        PostType::set_traits("doc-permalink", true, Some("docs-permalink")).expect("traits");
+        let pattern = PermalinkPattern(PermalinkPattern::DEFAULT.into());
+        let mut row = sample_row(t, "install");
+        row.path = Some("guides/install".into());
+        assert_eq!(pattern.path_for(&row), "/docs-permalink/guides/install");
+        // A flat custom type keeps /{slug}/{entry}; a base is honoured when declared.
+        let flat = PostType::register("flat-permalink").expect("registers");
+        let row = sample_row(flat, "one");
+        assert_eq!(pattern.path_for(&row), "/flat-permalink/one");
+        PostType::set_traits("flat-permalink", false, Some("flats")).expect("traits");
+        assert_eq!(pattern.path_for(&row), "/flats/one");
+    }
 }

@@ -355,6 +355,16 @@ impl PostService {
         self.posts.get_by_slug(post_type, slug).await
     }
 
+    /// Fetches the live entry of a hierarchical type at `path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::NotFound`] when there is none (a trashed entry
+    /// has no address).
+    pub async fn get_by_path(&self, post_type: PostType, path: &str) -> Result<PostRow, AppError> {
+        self.posts.get_by_path(post_type, path).await
+    }
+
     /// Lists posts by filter, newest first.
     ///
     /// # Errors

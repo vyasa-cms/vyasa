@@ -95,7 +95,6 @@ pub async fn served_type(surface: &PluginSurface, pool: &PgPool, slug: &str) -> 
 }
 
 /// The live custom type whose public addresses start with `base`.
-#[allow(dead_code)] // used by the public router (Task 6)
 pub async fn served_type_by_base(
     surface: &PluginSurface,
     pool: &PgPool,
