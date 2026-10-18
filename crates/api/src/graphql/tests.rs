@@ -156,6 +156,7 @@ async fn seed_for_graphql(pool: &sqlx::PgPool) -> AppState {
                 password: None,
                 term_ids: Some(vec![91_010]),
                 layout: None,
+                position: None,
             })
             .await
             .expect("create post");
@@ -178,6 +179,7 @@ async fn seed_for_graphql(pool: &sqlx::PgPool) -> AppState {
             password: None,
             term_ids: None,
             layout: None,
+            position: None,
         })
         .await
         .expect("draft");
@@ -943,6 +945,7 @@ async fn subscription_post_published_and_updated() {
             password: None,
             term_ids: None,
             layout: None,
+            position: None,
         })
         .await
         .expect("sched");
@@ -1366,6 +1369,7 @@ async fn field_definitions_are_read_once_per_request() {
                     password: None,
                     term_ids: None,
                     layout: None,
+                    position: None,
                 },
                 Some(serde_json::json!({"colour": format!("c{n}")})),
             )

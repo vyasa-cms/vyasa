@@ -83,6 +83,7 @@ pub(super) async fn post(
             password: password.map(str::to_owned),
             term_ids: None,
             layout: None,
+            position: None,
         })
         .await
         .expect("seed post");

@@ -131,6 +131,7 @@ pub async fn policy_page(
             password: None,
             term_ids: None,
             layout: None,
+            position: None,
         })
         .await?;
     Ok((

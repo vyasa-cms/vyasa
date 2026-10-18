@@ -112,6 +112,7 @@ fn entry(ctx: &Ctx, post_type: PostType, status: PostStatus) -> CreatePost {
         password: None,
         term_ids: None,
         layout: None,
+        position: None,
     }
 }
 

@@ -596,6 +596,7 @@ pub async fn create(
                 password: body.password,
                 term_ids: body.term_ids,
                 layout,
+                position: None,
             },
             body.fields,
         )
@@ -822,6 +823,8 @@ pub async fn update(
                 password: body.password.clone(),
                 term_ids: body.term_ids.clone(),
                 layout,
+                parent_id: None,
+                position: None,
             },
         )
         .await?;
@@ -1103,6 +1106,7 @@ pub async fn duplicate(
                     .layout
                     .clone()
                     .and_then(|v| serde_json::from_value(v).ok()),
+                position: None,
             },
             Some(serde_json::Value::Object(fields)),
         )

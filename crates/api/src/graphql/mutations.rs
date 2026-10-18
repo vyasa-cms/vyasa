@@ -173,6 +173,7 @@ impl MutationRoot {
                     password: input.password,
                     term_ids: input.term_ids,
                     layout: None,
+                    position: None,
                 },
                 input.fields,
             )
@@ -227,6 +228,8 @@ impl MutationRoot {
                     password: input.password,
                     term_ids: input.term_ids,
                     layout: None,
+                    parent_id: None,
+                    position: None,
                 },
             )
             .await
@@ -313,6 +316,8 @@ impl MutationRoot {
                     password: None,
                     term_ids: None,
                     layout: None,
+                    parent_id: None,
+                    position: None,
                 },
             )
             .await
