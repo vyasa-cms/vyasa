@@ -16,3 +16,9 @@ pub mod sections;
 pub mod settings;
 pub mod sync;
 pub mod webhook;
+
+// wit-bindgen generates a function with ten parameters; the lint is about
+// code we wrote, not about generated bindings.
+#[cfg(target_os = "wasi")]
+#[allow(clippy::too_many_arguments)]
+mod guest;
