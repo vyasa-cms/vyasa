@@ -521,6 +521,8 @@ pub struct ContentField {
     pub options: serde_json::Value,
     /// Order within the type, lowest first.
     pub position: i32,
+    /// Who defined it: `admin`, or a plugin's name (then it is locked).
+    pub owner: String,
     /// Creation time.
     pub created_at: chrono::DateTime<chrono::Utc>,
     /// Last change.
@@ -538,6 +540,7 @@ impl From<vyasa_db::repo::ContentFieldRow> for ContentField {
             required: r.required,
             options: r.options,
             position: r.position,
+            owner: r.owner,
             created_at: r.created_at,
             updated_at: r.updated_at,
         }

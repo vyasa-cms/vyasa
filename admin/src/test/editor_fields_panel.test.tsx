@@ -14,7 +14,7 @@ vi.mock("@/components/ui/toast", () => ({
 }));
 
 function def(key: string, label: string, kind: ContentField["kind"], position: number, extra: Partial<ContentField> = {}): ContentField {
-  return { type_slug: "product", key, label, help: "", kind, required: false, options: {}, position, created_at: "", updated_at: "", ...extra };
+  return { type_slug: "product", key, label, help: "", kind, required: false, options: {}, position, owner: "admin", created_at: "", updated_at: "", ...extra };
 }
 
 const DEFS: ContentField[] = [

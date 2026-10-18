@@ -4116,6 +4116,8 @@ export interface components {
             label: string;
             /** @description Per-kind options. */
             options: unknown;
+            /** @description Who defined it: `admin`, or a plugin's name (then it is locked). */
+            owner: string;
             /**
              * Format: int32
              * @description Order within the type, lowest first.

@@ -131,6 +131,19 @@ pub struct SectionDecl {
     pub plugin_name: String,
 }
 
+/// A field a plugin's post type declares.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DeclaredField {
+    /// `^[a-z][a-z0-9_]{0,39}$`.
+    pub key: String,
+    /// Label shown in the editor.
+    pub label: String,
+    /// Help text.
+    pub help: String,
+    /// `text`, `textarea`, `number`, `boolean`, `date` or `url`.
+    pub kind: String,
+}
+
 /// A custom post type a plugin registered.
 #[derive(Clone, Debug, serde::Serialize)]
 pub struct PostTypeDecl {
@@ -148,6 +161,8 @@ pub struct PostTypeDecl {
     pub hierarchical: bool,
     /// First segment of the public addresses (the slug unless declared).
     pub base: String,
+    /// Fields the plugin declares for the type (locked to administrators).
+    pub fields: Vec<DeclaredField>,
     /// Owning plugin.
     pub plugin_id: i64,
 }
@@ -497,6 +512,7 @@ pub enum Collect {
 /// # Errors
 /// With [`Collect::Enable`], a Conflict naming the slug an administrator's
 /// content type holds; the caller withdraws everything collected.
+#[allow(clippy::too_many_lines)]
 pub async fn collect(
     state: &AppState,
     plugin_id: i64,
@@ -558,6 +574,17 @@ pub async fn collect(
     if let Some(v) = declaration(state, plugin_id, name, Declaration::PostTypes).await {
         let mut inner = state.plugin_surface.inner.write().await;
         skipped.extend(collect_post_types(&mut inner, plugin_id, name, &v, mode)?);
+        // The fields its types declare, owned by the plugin and locked to
+        // administrators. Never deletes, and never takes over a field an
+        // administrator defined.
+        let declared: Vec<(String, Vec<DeclaredField>)> = inner
+            .post_types
+            .values()
+            .filter(|t| t.plugin_id == plugin_id && !t.fields.is_empty())
+            .map(|t| (t.slug.clone(), t.fields.clone()))
+            .collect();
+        drop(inner);
+        store_declared_fields(state, name, declared).await;
     }
     if let Some(v) = declaration(state, plugin_id, name, Declaration::Taxonomies).await {
         let mut inner = state.plugin_surface.inner.write().await;
@@ -617,6 +644,38 @@ pub async fn collect(
         collect_tasks(&mut inner, plugin_id, name, &v);
     }
     Ok(skipped)
+}
+
+/// Writes the fields a plugin's post types declare, owned by the plugin.
+async fn store_declared_fields(
+    state: &AppState,
+    name: &str,
+    declared: Vec<(String, Vec<DeclaredField>)>,
+) {
+    let repo = vyasa_db::repo::ContentFieldsRepo::new(state.pool.clone());
+    for (slug, fields) in declared {
+        for f in fields {
+            let stored = repo
+                .upsert_owned(
+                    name,
+                    &slug,
+                    &f.key,
+                    &f.label,
+                    &f.help,
+                    &f.kind,
+                    false,
+                    &serde_json::json!({}),
+                )
+                .await;
+            if let Err(e) = stored {
+                tracing::warn!(
+                    plugin = name,
+                    "field {:?} of {slug:?} not stored: {e}",
+                    f.key
+                );
+            }
+        }
+    }
 }
 
 /// The refusal or the skip for a slug an administrator's content type
@@ -906,6 +965,45 @@ fn collect_taxonomies(
         );
     }
     Ok(skipped)
+}
+
+/// Fields a post type declares: at most 16, keys in the field grammar,
+/// the kinds an administrator has that need no options (`choice` needs
+/// its choices, `media` and `entry` need resolving).
+fn declared_fields(value: Option<&serde_json::Value>) -> Vec<DeclaredField> {
+    let Some(items) = value.and_then(serde_json::Value::as_array) else {
+        return Vec::new();
+    };
+    let mut out: Vec<DeclaredField> = Vec::new();
+    for item in items {
+        if out.len() >= 16 {
+            break;
+        }
+        let text = |k: &str| item.get(k).and_then(serde_json::Value::as_str);
+        let (Some(key), Some(kind)) = (text("key"), text("kind")) else {
+            continue;
+        };
+        let key_ok = key.len() <= 40
+            && key.starts_with(|c: char| c.is_ascii_lowercase())
+            && key
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+        let kind_ok = matches!(
+            kind,
+            "text" | "textarea" | "number" | "boolean" | "date" | "url"
+        );
+        if !key_ok || !kind_ok || out.iter().any(|f| f.key == key) {
+            tracing::warn!("ignoring declared field {key:?} ({kind:?})");
+            continue;
+        }
+        out.push(DeclaredField {
+            key: key.to_owned(),
+            label: text("label").unwrap_or(key).chars().take(120).collect(),
+            help: text("help").unwrap_or("").chars().take(500).collect(),
+            kind: kind.to_owned(),
+        });
+    }
+    out
 }
 
 /// Headers a route may ask to receive: `x-` names in the usual grammar.
@@ -1217,6 +1315,7 @@ fn collect_post_types(
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(false),
             base: base.to_owned(),
+            fields: declared_fields(item.get("fields")),
             plugin_id,
         });
     }
@@ -1836,5 +1935,32 @@ mod tests {
             !inner.tasks[2].extended,
             "an unknown budget is the ordinary one"
         );
+    }
+
+    // plugin_surface.rs
+    #[test]
+    fn a_post_type_declares_its_fields_with_the_kinds_administrators_have() {
+        let mut inner = Inner::default();
+        collect_post_types(
+            &mut inner,
+            1,
+            "p",
+            &serde_json::json!([{
+            "slug": "fielded-decl", "fields": [
+                {"key": "section_label", "label": "Section label", "kind": "text", "help": "h"},
+                {"key": "hide", "label": "Hide", "kind": "boolean"},
+                {"key": "BAD KEY", "label": "x", "kind": "text"},
+                {"key": "weird", "label": "x", "kind": "hologram"}
+            ]}]),
+            Collect::Boot,
+        )
+        .expect("collected");
+        let f = &inner.post_types["fielded-decl"].fields;
+        assert_eq!(
+            f.iter().map(|d| d.key.as_str()).collect::<Vec<_>>(),
+            ["section_label", "hide"]
+        );
+        assert_eq!(f[0].help, "h");
+        assert_eq!(f[1].kind, "boolean");
     }
 }
