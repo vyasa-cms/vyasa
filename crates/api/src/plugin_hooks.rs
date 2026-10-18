@@ -34,6 +34,11 @@ pub mod filters {
     /// unchanged — string-keyed points are how new surfaces arrive
     /// without invalidating installed binaries (see host.wit).
     pub const REGISTER_SECTIONS: &str = "register-sections";
+    /// Asked once at surface build, after the sections: the default
+    /// section trees this plugin supplies for its own post types, as a JSON
+    /// object keyed by type slug. Like `register-sections` it is a surface
+    /// question, not a content filter.
+    pub const REGISTER_LAYOUTS: &str = "register-layouts";
     /// Renders one instance of a declared section. The payload is
     /// `{kind, settings, bound, editor}`; the host resolves the binding
     /// and sanitizes the reply. Unchanged payload = cannot render.

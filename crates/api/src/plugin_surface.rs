@@ -182,6 +182,8 @@ struct Inner {
     post_types: BTreeMap<String, PostTypeDecl>,
     taxonomies: BTreeMap<String, TaxonomyDecl>,
     sections: BTreeMap<String, SectionDecl>,
+    /// Default section trees plugins supply for their own post types.
+    layouts: BTreeMap<String, Vec<vyasa_themes::Section>>,
     tasks: Vec<TaskDecl>,
     /// Plugins implementing the superset world, in id order.
     ///
@@ -258,6 +260,12 @@ impl PluginSurface {
     /// One registered custom taxonomy.
     pub async fn taxonomy(&self, slug: &str) -> Option<TaxonomyDecl> {
         self.inner.read().await.taxonomies.get(slug).cloned()
+    }
+
+    /// The default section tree a plugin supplies for entries of the
+    /// custom type `slug`, when it supplies one.
+    pub async fn type_layout(&self, slug: &str) -> Option<Vec<vyasa_themes::Section>> {
+        self.inner.read().await.layouts.get(slug).cloned()
     }
 
     /// Every designer section enabled plugins declare.
@@ -374,6 +382,14 @@ impl PluginSurface {
         inner.routes.retain(|r| r.plugin_id != plugin_id);
         inner.assets.remove(&plugin_id);
         inner.admin.retain(|f| f.plugin_id != plugin_id);
+        // A tree belongs to whoever declared its type, so it goes first.
+        let owned: Vec<String> = inner
+            .post_types
+            .iter()
+            .filter(|(_, t)| t.plugin_id == plugin_id)
+            .map(|(slug, _)| slug.clone())
+            .collect();
+        inner.layouts.retain(|slug, _| !owned.contains(slug));
         inner.post_types.retain(|_, t| t.plugin_id != plugin_id);
         inner.taxonomies.retain(|_, t| t.plugin_id != plugin_id);
         inner.tasks.retain(|t| t.plugin_id != plugin_id);
@@ -567,6 +583,25 @@ pub async fn collect(
             }
         }
     }
+    // Default trees for the plugin's own post types, after its sections so
+    // a tree may use them.
+    {
+        let env = HostEnv::background(std::sync::Arc::clone(&state.broker), state.pool.clone());
+        if let V2Outcome::Ok(reply) = state
+            .plugin_host
+            .call_filter_at(
+                plugin_id,
+                crate::plugin_hooks::filters::REGISTER_LAYOUTS,
+                "",
+                &env,
+            )
+            .await
+        {
+            let reply = validated_layouts(state, name, &reply, &mut skipped).await;
+            let mut inner = state.plugin_surface.inner.write().await;
+            collect_layouts(&mut inner, plugin_id, name, &reply);
+        }
+    }
     if let Some(v) = declaration(state, plugin_id, name, Declaration::Schedule).await {
         let mut inner = state.plugin_surface.inner.write().await;
         collect_tasks(&mut inner, plugin_id, name, &v);
@@ -627,6 +662,74 @@ fn is_valid_section_kind(kind: &str) -> bool {
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
     };
     part(ns) && part(rest) && !rest.contains('/')
+}
+
+/// Drops, from a `register-layouts` reply, every tree that fails the
+/// section rules against the live registry (the plugin's own sections
+/// included), reporting each as degraded. Anything that is not a map of
+/// trees is returned untouched for [`collect_layouts`] to ignore.
+async fn validated_layouts(
+    state: &AppState,
+    name: &str,
+    reply: &str,
+    skipped: &mut Vec<String>,
+) -> String {
+    let Ok(trees) = serde_json::from_str::<BTreeMap<String, Vec<vyasa_themes::Section>>>(reply)
+    else {
+        return reply.to_owned();
+    };
+    let registry = crate::plugin_sections::registry_with_plugins(state).await;
+    let mut kept = serde_json::Map::new();
+    for (slug, tree) in trees {
+        let errors: Vec<String> = vyasa_themes::validate_sections(&tree, &registry, None, "layout")
+            .into_iter()
+            .filter(vyasa_themes::TokenDiagnostic::is_error)
+            .map(|d| format!("{d:?}"))
+            .collect();
+        if errors.is_empty() {
+            if let Ok(value) = serde_json::to_value(&tree) {
+                kept.insert(slug, value);
+            }
+        } else {
+            tracing::warn!(plugin = name, "layout for {slug:?} dropped: {errors:?}");
+            skipped.push(format!(
+                "layout for the post type {slug:?} not loaded: {}",
+                errors.join("; ")
+            ));
+        }
+    }
+    serde_json::Value::Object(kept).to_string()
+}
+
+/// Keeps, from a `register-layouts` reply (a JSON object of section trees
+/// keyed by type slug), the trees for post types this plugin declares.
+/// First declaration wins. Anything that is not such a map is ignored.
+fn collect_layouts(inner: &mut Inner, plugin_id: i64, name: &str, reply: &str) {
+    if reply.trim().is_empty() {
+        return;
+    }
+    let Ok(trees) = serde_json::from_str::<BTreeMap<String, Vec<vyasa_themes::Section>>>(reply)
+    else {
+        tracing::warn!(
+            plugin = name,
+            "register-layouts: not a map of section trees"
+        );
+        return;
+    };
+    for (slug, tree) in trees {
+        let mine = inner
+            .post_types
+            .get(&slug)
+            .is_some_and(|t| t.plugin_id == plugin_id);
+        if !mine || tree.is_empty() || inner.layouts.contains_key(&slug) {
+            tracing::warn!(
+                plugin = name,
+                "ignoring the layout for {slug:?}: not this plugin's type, empty, or already set"
+            );
+            continue;
+        }
+        inner.layouts.insert(slug, tree);
+    }
 }
 
 fn collect_sections(inner: &mut Inner, plugin_id: i64, name: &str, value: &serde_json::Value) {
@@ -1586,5 +1689,42 @@ mod tests {
         let d = &inner.post_types["plain-decl"];
         assert!(!d.hierarchical);
         assert_eq!(d.base, "plain-decl");
+    }
+
+    #[test]
+    fn layouts_are_kept_only_for_types_the_plugin_declares() {
+        let mut inner = Inner::default();
+        collect_post_types(
+            &mut inner,
+            1,
+            "p",
+            &serde_json::json!([{"slug": "layout-mine"}]),
+            Collect::Boot,
+        )
+        .expect("collected");
+        let reply = serde_json::json!({
+            "layout-mine": [{"id": "body", "kind": "post-content"}],
+            "layout-theirs": [{"id": "body", "kind": "post-content"}]
+        });
+        collect_layouts(&mut inner, 1, "p", &reply.to_string());
+        assert!(inner.layouts.contains_key("layout-mine"));
+        assert!(!inner.layouts.contains_key("layout-theirs"));
+        // First declaration wins.
+        collect_layouts(
+            &mut inner,
+            2,
+            "q",
+            &serde_json::json!({"layout-mine": [{"id": "x", "kind": "post-content"}]}).to_string(),
+        );
+        assert_eq!(inner.layouts["layout-mine"][0].id, "body");
+    }
+
+    #[test]
+    fn a_reply_that_is_not_a_layout_map_is_ignored() {
+        let mut inner = Inner::default();
+        collect_layouts(&mut inner, 1, "p", "");
+        collect_layouts(&mut inner, 1, "p", "[1,2]");
+        collect_layouts(&mut inner, 1, "p", "{\"layout-mine\": \"nope\"}");
+        assert!(inner.layouts.is_empty());
     }
 }

@@ -838,7 +838,7 @@ pub(super) async fn render_single(
             // A page that composes itself renders its own tree instead of
             // the theme's `page` body. Anything else leaves this empty and
             // the template lays the entry out exactly as before.
-            sections: vyasa_themes::page_sections(post.layout.as_ref()),
+            sections: sections_for_entry(state_ref, &bundle, &post).await,
             // Lets `single-book.html` override `single.html` for a theme
             // that ships one; a theme that does not renders as before.
             post_type_slug: match post.post_type {
@@ -875,6 +875,30 @@ pub(super) async fn render_single(
     } else {
         respond_cached(state_ref, &headers, key, render).await
     }
+}
+
+/// The entry's own composition, else its type's tree from the theme, else
+/// the one its plugin supplies, else none (the theme's `single` template).
+async fn sections_for_entry(
+    state: &AppState,
+    bundle: &ThemeBundle,
+    post: &PostRow,
+) -> Vec<vyasa_themes::Section> {
+    let own = vyasa_themes::page_sections(post.layout.as_ref());
+    if !own.is_empty() {
+        return own;
+    }
+    let PostType::Custom(slug) = post.post_type else {
+        return Vec::new();
+    };
+    if let Some(tree) = bundle.layout.type_sections(slug) {
+        return tree.to_vec();
+    }
+    state
+        .plugin_surface
+        .type_layout(slug)
+        .await
+        .unwrap_or_default()
 }
 
 /// `hreflang` alternates for an entry that belongs to a translation
@@ -1820,7 +1844,7 @@ pub async fn preview(
         // A composed page previewed without its own sections showed the
         // theme's default entry layout -- the one thing the author was
         // trying to look at was the thing left out.
-        sections: vyasa_themes::page_sections(post.layout.as_ref()),
+        sections: sections_for_entry(&state, &bundle, &post).await,
         post_type_slug: match post.post_type {
             PostType::Custom(t) => Some(t.to_owned()),
             _ => None,
@@ -2139,7 +2163,7 @@ async fn preview_single(
             ("body".to_owned(), content_html.clone()),
             ("content".to_owned(), content_html),
         ],
-        sections: vyasa_themes::page_sections(post.layout.as_ref()),
+        sections: sections_for_entry(state, bundle, &post).await,
         post_type_slug: match post.post_type {
             PostType::Custom(t) => Some(t.to_owned()),
             _ => None,

@@ -596,8 +596,11 @@ pub fn registry_schema_for(registry: &crate::dynblocks::DynBlockRegistry) -> Val
             serde_json::json!({ "kind": kind, "description": description })
         })
         .collect();
+    // `composed.html` is the engine's own fallback for entries that
+    // compose themselves; it is not offered for editing.
     let template_files: Vec<Value> = builtin_sources()
         .iter()
+        .filter(|(name, _)| *name != "composed.html")
         .map(|(name, src)| serde_json::json!({ "name": name, "builtin_source": src }))
         .collect();
     serde_json::json!({

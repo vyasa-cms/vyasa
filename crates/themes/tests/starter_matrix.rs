@@ -8,6 +8,8 @@
 
 #[path = "support/fake_queries.rs"]
 mod fake_queries;
+#[path = "support/marker.rs"]
+mod marker;
 
 use vyasa_themes::{
     builtin_registry, parse_token_set, render_page, validate_layout, Engine, Layout, MapSettings,
@@ -161,5 +163,33 @@ fn chrome_renders_once_per_page() {
                 assert!(n <= 1, "{name}/{template:?}: {label} rendered {n} times");
             }
         }
+    }
+}
+
+/// A typed section tree renders in every shipped starter, through the
+/// theme's own single template where it ships one (blog and portfolio), and
+/// the page is one document with the entry's body and the plugin section.
+#[test]
+fn typed_layout_renders_in_every_starter_theme() {
+    for (name, layout, tokens) in starters() {
+        let mut engine = Engine::builtin().unwrap_or_else(|e| panic!("{name}: {e}"));
+        let own_single: Option<&str> = match name {
+            "blog" => Some(include_str!(
+                "../../../themes-starter/blog/templates/single.tera"
+            )),
+            "portfolio" => Some(include_str!(
+                "../../../themes-starter/portfolio/templates/single.tera"
+            )),
+            _ => None,
+        };
+        if let Some(src) = own_single {
+            engine
+                .install_theme_templates(&[("single.html", src)])
+                .unwrap_or_else(|e| panic!("{name}: {e}"));
+        }
+        let html = marker::render(&engine, &layout, &tokens, &marker::page(marker::tree()));
+        assert!(html.contains("MARK:test/marker"), "{name}:\n{html}");
+        assert!(html.contains("BODY-HTML"), "{name}:\n{html}");
+        assert_eq!(html.matches("<html").count(), 1, "{name}: one document");
     }
 }
