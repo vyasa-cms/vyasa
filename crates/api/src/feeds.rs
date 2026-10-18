@@ -365,6 +365,8 @@ mod tests {
             password_hash: None,
             created_at: Utc::now(),
             updated_at: Utc::now(),
+            path: None,
+            position: 0,
         }
     }
 

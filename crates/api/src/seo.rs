@@ -574,6 +574,8 @@ mod tests {
             sticky: false,
             lang: String::new(),
             translation_group: None,
+            path: None,
+            position: 0,
         }
     }
 

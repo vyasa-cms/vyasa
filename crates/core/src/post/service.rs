@@ -220,6 +220,8 @@ impl PostService {
                         scheduled_for: input.scheduled_for,
                         password_hash: password_hash.clone(),
                         layout: input.layout.clone(),
+                        position: 0,
+                        path_prefix: None,
                     },
                     term_ids.as_deref(),
                 )
@@ -429,6 +431,7 @@ impl PostService {
                 content: input.content.map(|c| c.to_json()),
                 excerpt: input.excerpt,
                 parent_id: None,
+                position: None,
                 meta: input.meta,
                 fields: new_fields.map(serde_json::Value::Object),
                 scheduled_for: input.scheduled_for,

@@ -56,6 +56,8 @@ async fn entry(
             scheduled_for: None,
             password_hash: None,
             layout: None,
+            path_prefix: None,
+            position: 0,
         })
         .await
         .expect("entry");
@@ -70,6 +72,7 @@ fn new_type(slug: &str) -> NewContentType<'_> {
         description: "Things we sell",
         public: true,
         has_archive: false,
+        hierarchical: false,
     }
 }
 
@@ -435,6 +438,7 @@ async fn a_meta_write_keeps_stored_field_values_and_a_fields_write_keeps_the_res
         expect_status: None,
         touch_updated_at: false,
         layout: None,
+        position: None,
     };
 
     // An SEO-only meta write must not wipe the values.

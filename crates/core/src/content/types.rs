@@ -322,6 +322,7 @@ impl ContentTypesService {
                     description: &description,
                     public: input.public,
                     has_archive: input.has_archive,
+                    hierarchical: false,
                 })
                 .await?;
             if let Err(e) = PostType::register_admin(&slug) {
@@ -369,6 +370,7 @@ impl ContentTypesService {
                     description: description.as_deref(),
                     public: changes.public,
                     has_archive: changes.has_archive,
+                    hierarchical: None,
                 },
             )
             .await

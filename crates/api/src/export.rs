@@ -1051,6 +1051,8 @@ pub async fn import(
                 published_at: parse(&p.published_at),
                 scheduled_for: parse(&p.scheduled_for),
                 password_hash: None,
+                path_prefix: None,
+                position: 0,
             })
             .await
         {

@@ -405,6 +405,7 @@ async fn stored_types_are_loaded_into_the_registry_and_a_plugins_slug_is_reporte
             description: "",
             public: true,
             has_archive: true,
+            hierarchical: false,
         })
         .await
         .expect("row");
@@ -1661,6 +1662,8 @@ async fn a_slug_with_stored_entries_or_a_live_taxonomy_is_refused() {
                 scheduled_for: None,
                 password_hash: None,
                 layout: None,
+                path_prefix: None,
+                position: 0,
             })
             .await
             .expect("orphan entry");
@@ -1742,6 +1745,7 @@ async fn loading_skips_a_stored_type_whose_slug_is_now_reserved() {
             description: "",
             public: true,
             has_archive: true,
+            hierarchical: false,
         })
         .await
         .expect("a row from before the word was reserved");
