@@ -483,7 +483,7 @@ type QueryRoot {
 	else, and every hit is re-read through the repository so an entry
 	left behind by an unpublish cannot leak.
 	"""
-	search(query: String!, limit: Int): [GqlSearchHit!]!
+	search(query: String!, limit: Int, postType: String, term: String): [GqlSearchHit!]!
 	"""
 	Fetch a post by type + slug — respects visibility.
 	"""

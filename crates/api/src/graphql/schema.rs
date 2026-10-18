@@ -265,6 +265,8 @@ impl QueryRoot {
         ctx: &Context<'_>,
         query: String,
         limit: Option<i32>,
+        post_type: Option<String>,
+        #[graphql(name = "term")] term_scope: Option<String>,
     ) -> async_graphql::Result<Vec<GqlSearchHit>> {
         let gql = ctx.data::<GqlContext>()?;
         let term = query.trim();
@@ -280,7 +282,14 @@ impl QueryRoot {
         };
 
         let mut out = Vec::new();
-        for hit in index.search(term, None, limit, 0).unwrap_or_default() {
+        let scope = vyasa_search::Scope {
+            post_type: post_type.filter(|t| !t.is_empty()),
+            term: term_scope.filter(|t| t.contains(':')),
+        };
+        for hit in index
+            .search_scoped(term, &scope, limit, 0)
+            .unwrap_or_default()
+        {
             let Ok(id) = i64::try_from(hit.id) else {
                 continue;
             };

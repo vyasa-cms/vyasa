@@ -574,3 +574,149 @@ async fn existing_urls_are_unchanged() {
     assert_eq!(get_public(base, "/post/hello").0, 200);
     assert_eq!(get_public(base, "/note/a-note.md").0, 200);
 }
+
+#[tokio::test]
+async fn search_is_scoped_by_type_and_term_on_rest_graphql_and_the_public_page() {
+    let (_db, server, a) = site().await;
+    let base = server.base();
+    let (_, news) = call(
+        "POST",
+        base,
+        &a,
+        "/api/v1/terms",
+        Some(json!({"taxonomy": "category", "name": "News"})),
+    );
+    let (_, ref_) = call(
+        "POST",
+        base,
+        &a,
+        "/api/v1/terms",
+        Some(json!({"taxonomy": "category", "name": "Reference"})),
+    );
+    let mk = |ty: &str, title: &str, term: &Value| {
+        let (s, v) = call(
+            "POST",
+            base,
+            &a,
+            "/api/v1/posts",
+            Some(json!({"type": ty, "title": title, "status": "published",
+            "content": doc("zebra installation notes"), "term_ids": [sid(&term["id"])]})),
+        );
+        assert_eq!(s, 201, "{v}");
+    };
+    mk("post", "A post about zebra", &news);
+    mk("guide", "Guide zebra news", &news);
+    mk("guide", "Guide zebra reference", &ref_);
+    std::thread::sleep(std::time::Duration::from_millis(800)); // the indexer runs on the event bus
+
+    let titles = |v: &Value| -> Vec<String> {
+        let mut t: Vec<String> = v["hits"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|h| h["title"].as_str().unwrap().to_owned())
+            .collect();
+        t.sort();
+        t
+    };
+    let (_, all) = call("GET", base, &a, "/api/v1/search?q=zebra", None);
+    assert_eq!(titles(&all).len(), 3, "{all}");
+    let (_, only_guides) = call("GET", base, &a, "/api/v1/search?q=zebra&type=guide", None);
+    assert_eq!(
+        titles(&only_guides),
+        ["Guide zebra news", "Guide zebra reference"]
+    );
+    let (_, news_guides) = call(
+        "GET",
+        base,
+        &a,
+        "/api/v1/search?q=zebra&type=guide&term=category:news",
+        None,
+    );
+    assert_eq!(titles(&news_guides), ["Guide zebra news"]);
+    let (_, none) = call(
+        "GET",
+        base,
+        &a,
+        "/api/v1/search?q=zebra&term=category:nothing",
+        None,
+    );
+    assert!(
+        titles(&none).is_empty(),
+        "an unknown term matches nothing and is not an error"
+    );
+    // A limit of one still returns the best guide when posts rank higher.
+    let (_, one) = call(
+        "GET",
+        base,
+        &a,
+        "/api/v1/search?q=zebra&type=guide&limit=1",
+        None,
+    );
+    assert_eq!(one["hits"].as_array().unwrap().len(), 1);
+
+    let q = json!({"query": "{ search(query: \"zebra\", postType: \"guide\", term: \"category:news\") { post { title } snippet } }"});
+    let (_, g) = call("POST", base, &a, "/api/graphql", Some(q));
+    assert_eq!(g["data"]["search"].as_array().unwrap().len(), 1, "{g}");
+
+    let (s, page) = get_public(base, "/search?s=zebra&type=guide&term=category:news");
+    assert_eq!(s, 200);
+    assert!(page.contains("Guide zebra news"), "{page}");
+    assert!(
+        !page.contains("Guide zebra reference") && !page.contains("A post about zebra"),
+        "{page}"
+    );
+}
+
+#[tokio::test]
+async fn a_term_change_reaches_the_index() {
+    let (_db, server, a) = site().await;
+    let base = server.base();
+    let (_, news) = call(
+        "POST",
+        base,
+        &a,
+        "/api/v1/terms",
+        Some(json!({"taxonomy": "category", "name": "News"})),
+    );
+    let (_, reference) = call(
+        "POST",
+        base,
+        &a,
+        "/api/v1/terms",
+        Some(json!({"taxonomy": "category", "name": "Reference"})),
+    );
+    let (status, created) = call(
+        "POST",
+        base,
+        &a,
+        "/api/v1/posts",
+        Some(json!({
+        "type": "guide", "title": "Walrus guide", "status": "published",
+        "content": doc("walrus"), "term_ids": [sid(&news["id"])]})),
+    );
+    assert_eq!(status, 201, "{created}");
+    let id = sid(&created["id"]);
+    std::thread::sleep(std::time::Duration::from_millis(800));
+    let hits = |term: &str| -> usize {
+        let (_, v) = call(
+            "GET",
+            base,
+            &a,
+            &format!("/api/v1/search?q=walrus&term={term}"),
+            None,
+        );
+        v["hits"].as_array().unwrap().len()
+    };
+    assert_eq!((hits("category:news"), hits("category:reference")), (1, 0));
+    let (status, _) = call(
+        "PUT",
+        base,
+        &a,
+        &format!("/api/v1/posts/{id}"),
+        Some(json!({"term_ids": [sid(&reference["id"])]})),
+    );
+    assert_eq!(status, 200);
+    std::thread::sleep(std::time::Duration::from_millis(800));
+    assert_eq!((hits("category:news"), hits("category:reference")), (0, 1));
+}

@@ -11291,6 +11291,13 @@ export interface operations {
                 q: string;
                 /** @description Maximum hits (1..=50, default 10). */
                 limit?: number | null;
+                /** @description Only entries of this post type. */
+                type?: string | null;
+                /**
+                 * @description Only entries filed under this term, as `taxonomy:slug`; a value
+                 *     without a colon is ignored.
+                 */
+                term?: string | null;
             };
             header?: never;
             path?: never;

@@ -1019,6 +1019,8 @@ async fn protected_content_and_key_grants_are_enforced_before_pagination() {
         axum::extract::Query(crate::rest::search::SearchParams {
             q: "Confidential".into(),
             limit: None,
+            post_type: None,
+            term: None,
         }),
     )
     .await

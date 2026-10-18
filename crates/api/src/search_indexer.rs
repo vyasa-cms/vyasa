@@ -60,6 +60,7 @@ fn doc_for(
     row: &PostRow,
     served_custom: &std::collections::HashSet<String>,
     fields: &[(String, String)],
+    terms: Vec<String>,
 ) -> Option<SearchDoc> {
     if !is_publicly_searchable(row) || !type_is_searchable(row.post_type, served_custom) {
         return None;
@@ -84,8 +85,22 @@ fn doc_for(
             }
             body
         },
-        terms: Vec::new(),
+        terms,
     })
+}
+
+/// The terms an entry is filed under, as `taxonomy:slug` (what a scoped
+/// search matches exactly). One small query per entry, on the indexing
+/// path only.
+pub async fn terms_for(pool: &sqlx::PgPool, post_id: i64) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT t.taxonomy || ':' || t.slug FROM term_relationships r
+         JOIN terms t ON t.id = r.term_id WHERE r.post_id = $1 ORDER BY 1",
+    )
+    .bind(post_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default()
 }
 
 /// How many entries the index should hold right now: published, not
@@ -153,7 +168,8 @@ pub async fn reindex_all(state: &AppState) -> Result<usize, vyasa_common::AppErr
                 defs.of(&state.pool, row.post_type).await,
                 &row.meta,
             );
-            match doc_for(row, &served, &fields) {
+            let terms = terms_for(&state.pool, row.id).await;
+            match doc_for(row, &served, &fields, terms) {
                 Some(doc) => {
                     manager.upsert(&doc)?;
                     indexed += 1;
@@ -207,9 +223,10 @@ pub async fn reindex_type(
                 defs.of(&state.pool, row.post_type).await,
                 &row.meta,
             );
+            let terms = terms_for(&state.pool, row.id).await;
             docs.push((
                 u64::try_from(row.id).unwrap_or_default(),
-                doc_for(row, &served, &fields),
+                doc_for(row, &served, &fields, terms),
             ));
         }
         let manager = Arc::clone(&manager);
@@ -294,7 +311,8 @@ async fn apply(
             let mut defs = crate::entry_fields::Definitions::default();
             let fields =
                 crate::entry_fields::text_values(defs.of(pool, row.post_type).await, &row.meta);
-            doc_for(row, &served, &fields)
+            let terms = terms_for(pool, row.id).await;
+            doc_for(row, &served, &fields, terms)
         }
         None => None,
     };

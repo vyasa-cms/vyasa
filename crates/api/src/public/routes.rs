@@ -438,6 +438,12 @@ pub struct ListParams {
     pub search: Option<String>,
     #[serde(default)]
     pub page: Option<u32>,
+    /// Search scope: only this post type (`/search?type=doc`).
+    #[serde(rename = "type", default)]
+    pub post_type: Option<String>,
+    /// Search scope: only entries filed under this `taxonomy:slug`.
+    #[serde(default)]
+    pub term: Option<String>,
 }
 
 /// `GET /` — home index with pagination and basic search (`?s=`).
@@ -1679,10 +1685,14 @@ async fn published_by_id(state: &AppState, ids: &[i64]) -> Vec<PostRow> {
 /// nothing, so search still works on a deployment that has not been
 /// reindexed. Snippets travel with the hits: they say *why* a post
 /// matched, and were once computed and discarded.
-async fn search_hits(state: &AppState, term: &str) -> Option<Vec<(i64, String)>> {
+async fn search_hits(
+    state: &AppState,
+    term: &str,
+    scope: &vyasa_search::Scope,
+) -> Option<Vec<(i64, String)>> {
     let hits: Option<Vec<(i64, String)>> = match (&state.search_index, term.is_empty()) {
         (Some(index), false) => index
-            .search(term, None, usize::try_from(PAGE_SIZE).unwrap_or(10), 0)
+            .search_scoped(term, scope, usize::try_from(PAGE_SIZE).unwrap_or(10), 0)
             .ok()
             .filter(|hits| !hits.is_empty())
             .map(|hits| {
@@ -1714,6 +1724,7 @@ async fn search_hits(state: &AppState, term: &str) -> Option<Vec<(i64, String)>>
 }
 
 /// `GET /search?s=…` — full-text via Tantivy with DB fallback.
+#[allow(clippy::too_many_lines)]
 pub async fn search(
     State(state): State<AppState>,
     Query(q): Query<ListParams>,
@@ -1737,23 +1748,44 @@ pub async fn search(
     // The page number belongs in the key: without it every page of a
     // search answered — and cached — as page one.
     let page_no = q.page.unwrap_or(1).max(1);
-    let key = keys::search(&bundle.version, &term, page_no);
+    // The scope is part of what was asked, so it is part of the key.
+    let scope = vyasa_search::Scope {
+        post_type: q.post_type.clone().filter(|t| !t.is_empty()),
+        term: q.term.clone().filter(|t| t.contains(':')),
+    };
+    let key = keys::search(
+        &bundle.version,
+        &format!(
+            "{term}\u{1f}{}\u{1f}{}",
+            scope.post_type.as_deref().unwrap_or(""),
+            scope.term.as_deref().unwrap_or("")
+        ),
+        page_no,
+    );
     let origin = crate::feeds::origin_from_headers(&headers);
     respond_cached(state_ref, &headers, Some(key), async move {
         let site = page_meta::SiteContext::load(state_ref, &origin).await;
         let per_page = u32::try_from(site.per_page).unwrap_or(10);
-        let hits = search_hits(state_ref, &term).await;
+        let hits = search_hits(state_ref, &term, &scope).await;
         let indexed_ids: Option<Vec<i64>> =
             hits.as_ref().map(|h| h.iter().map(|(id, _)| *id).collect());
 
         let rows = if let Some(ids) = indexed_ids {
             published_by_id(state_ref, &ids).await
+        } else if scope.term.is_some() {
+            // The SQL fallback cannot honour a term, and showing results
+            // from outside the scope would be wrong: no match is no match.
+            Vec::new()
         } else {
             // Only types the public may see: no patterns, no custom type
             // that is not served publicly.
             let filter = PostFilter {
                 status: Some(PostStatus::Published),
                 search: Some(term.clone()).filter(|t| !t.is_empty()),
+                post_type: scope
+                    .post_type
+                    .as_deref()
+                    .and_then(|t| PostType::parse(t).ok()),
                 limit: per_page + 1,
                 offset: (page_no - 1).saturating_mul(per_page),
                 readable_types: crate::policy::readable_custom_types(state_ref, None).await,
@@ -1781,9 +1813,27 @@ pub async fn search(
                 }
             }
         }
-        let query = urlencode(&term);
+        let mut query = urlencode(&term);
+        if let Some(t) = &scope.post_type {
+            query.push_str("&type=");
+            query.push_str(&urlencode(t));
+        }
+        if let Some(t) = &scope.term {
+            query.push_str("&term=");
+            query.push_str(&urlencode(t));
+        }
+        let heading = match scope.post_type.as_deref() {
+            Some(t) => {
+                let plural =
+                    crate::entry_fields::served_type(&state_ref.plugin_surface, &state_ref.pool, t)
+                        .await
+                        .map_or_else(|| t.to_owned(), |d| d.plural);
+                format!("Search: {term} in {plural}")
+            }
+            None => format!("Search: {term}"),
+        };
         let page_ctx = PageContext {
-            title: format!("Search: {term}"),
+            title: heading.clone(),
             archive_title: Some(term.clone()),
             posts,
             pagination_page: page_no,
@@ -1792,7 +1842,7 @@ pub async fn search(
                 .then(|| format!("/search?s={query}&page={}", page_no - 1)),
             // A search result page is thin content; keep it out of the index.
             head: {
-                let mut head = page_meta::Head::page("/search", &format!("Search: {term}"), "");
+                let mut head = page_meta::Head::page("/search", &heading, "");
                 head.indexable = false;
                 head.filtered(state_ref).await.render(&site)
             },
