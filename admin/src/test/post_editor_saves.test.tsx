@@ -159,4 +159,36 @@ describe("post editor saves", () => {
     }
     expect(vi.mocked(api.autosave)).toHaveBeenCalledTimes(1);
   });
+  it("sends the chosen parent and position for an entry of a hierarchical type", async () => {
+    const user = userEvent.setup();
+    vi.mocked(api.getPost).mockResolvedValue({ ...structuredClone(post), type: "guide", slug: "install" } as never);
+    vi.spyOn(api, "listContentTypes").mockResolvedValue([
+      { slug: "guide", singular: "Guide", plural: "Guides", public: true, has_archive: true, hierarchical: true, base: "guide", plugin: false, owner: "admin", description: "", count: 2 },
+    ] as never);
+    vi.spyOn(api, "getPostTree").mockResolvedValue({
+      type: "guide",
+      hierarchical: true,
+      truncated: false,
+      nodes: [
+        { id: "1", parent_id: null, position: 10, title: "Intro", slug: "intro", path: "intro", url: "/guide/intro", status: "published", depth: 1 },
+        { id: "12", parent_id: null, position: 20, title: "Install", slug: "install", path: "install", url: "/guide/install", status: "published", depth: 1 },
+      ],
+    } as never);
+    const update = vi.spyOn(api, "updatePost").mockResolvedValue({ ...post, type: "guide" } as never);
+    mount();
+    const titleField = await screen.findByPlaceholderText("Post title");
+    await waitFor(() => expect(titleField).toHaveValue("Hello"));
+    await user.click(screen.getByRole("button", { name: "Show settings" }));
+    await user.click(await screen.findByRole("button", { name: /Address/ }));
+    const parent = await screen.findByLabelText("Parent");
+    // The entry itself is not offered as its own parent.
+    await waitFor(() => expect(screen.getByRole("option", { name: "Intro" })).toBeInTheDocument());
+    expect(screen.queryByRole("option", { name: "Install" })).not.toBeInTheDocument();
+    await user.selectOptions(parent, "1");
+    await user.type(screen.getByLabelText("Position"), "15");
+    expect(await screen.findByTestId("tree-path")).toHaveTextContent("Path: intro/install");
+    await user.click(screen.getAllByRole("button", { name: "Save draft" })[0]!);
+    await waitFor(() => expect(update).toHaveBeenCalled());
+    expect(update.mock.calls[0]?.[1]).toMatchObject({ parent_id: "1", position: 15 });
+  });
 });

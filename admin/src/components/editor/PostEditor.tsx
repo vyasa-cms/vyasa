@@ -106,6 +106,12 @@ export function targetOwnsUndo(target: EventTarget | null): boolean {
   );
 }
 
+/** A hierarchical entry's position as the server takes it (empty: leave it). */
+function positionForSave(chrome: ChromeValue): { position?: number } {
+  const n = chrome.position.trim() === "" ? Number.NaN : Number(chrome.position);
+  return Number.isFinite(n) ? { position: Math.trunc(n) } : {};
+}
+
 const EMPTY_CHROME: ChromeValue = {
   slug: "",
   excerpt: "",
@@ -120,6 +126,7 @@ const EMPTY_CHROME: ChromeValue = {
   translations: [],
   scheduled_for: "",
   parent_id: "",
+  position: "",
   term_ids: [],
   featured_media_id: "",
   featured_media_url: "",
@@ -527,6 +534,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
     enabled: chrome.type !== "post" && chrome.type !== "page",
   });
   const typeName = customTypes.data?.find((t) => t.slug === chrome.type)?.singular.toLowerCase();
+  const hierarchical = customTypes.data?.find((t) => t.slug === chrome.type)?.hierarchical === true;
   const canEdit = can("edit_posts") && (isNew || createdRef.current === postId || can("edit_others") || (postQuery.data !== undefined && String(postQuery.data.author_id) === String(me.data?.id)));
   const lock = usePostLock(canEdit ? postId : undefined);
   const publicPath = postPath(chrome.type, chrome.slug || "…", postQuery.data?.published_at ?? postQuery.data?.created_at ?? new Date().toISOString(), typeof siteOptions.data?.permalink_pattern === "string" ? siteOptions.data.permalink_pattern : undefined);
@@ -616,6 +624,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
       layout: unknown;
       scheduled_for: string | null;
       parent_id: string | number | null;
+      position?: number;
     };
     const nextBlocks = normalizeBlocks((p.content as { blocks?: unknown })?.blocks);
     const meta = (p as unknown as { meta?: Record<string, unknown> }).meta ?? {};
@@ -630,6 +639,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
       type: p.type ?? "post",
       scheduled_for: p.scheduled_for ?? "",
       parent_id: p.parent_id === null || p.parent_id === undefined ? "" : String(p.parent_id),
+      position: typeof p.position === "number" ? String(p.position) : "",
       featured_media_id: typeof meta["featured_media_id"] === "string" || typeof meta["featured_media_id"] === "number" ? String(meta["featured_media_id"]) : "",
       featured_media_url: typeof meta["featured_media_url"] === "string" ? meta["featured_media_url"] : "",
       featured_blurhash: typeof meta["featured_blurhash"] === "string" ? meta["featured_blurhash"] : "",
@@ -896,6 +906,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
         term_ids: chrome.term_ids.length ? chrome.term_ids : null,
         scheduled_for: chrome.scheduled_for || null,
         parent_id: chrome.parent_id === "" ? null : chrome.parent_id,
+        ...(hierarchical ? positionForSave(chrome) : {}),
         layout: chrome.type === "page" ? layout : undefined,
         ...(Object.keys(definedOnly(fields)).length > 0 ? { fields: definedOnly(fields) } : {}),
       }),
@@ -943,6 +954,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
         ...(chrome.translation_of ? { translation_of: chrome.translation_of } : {}),
         term_ids: termsKnown ? chrome.term_ids : undefined,
         scheduled_for: chrome.scheduled_for || undefined,
+        ...(hierarchical ? { parent_id: chrome.parent_id === "" ? null : chrome.parent_id, ...positionForSave(chrome) } : {}),
         // Sent only for pages, and always in full: an empty array is how an
         // author clears the composition and goes back to the theme template.
         layout: chrome.type === "page" ? layout : undefined,
@@ -1008,6 +1020,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
         ...(chrome.translation_of ? { translation_of: chrome.translation_of } : {}),
         term_ids: termsKnown ? chrome.term_ids : undefined,
         scheduled_for: chrome.scheduled_for || undefined,
+        ...(hierarchical ? { parent_id: chrome.parent_id === "" ? null : chrome.parent_id, ...positionForSave(chrome) } : {}),
         layout: chrome.type === "page" ? layout : undefined,
         expected_updated_at: expectedUpdatedAt(),
       }),
@@ -1834,6 +1847,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
               onChange={(p) => setChrome((c) => ({ ...c, ...p }))}
               document={docForSave}
               postId={postId}
+              hierarchical={hierarchical}
             />
 
             {outline.length >= 2 ? (

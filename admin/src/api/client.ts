@@ -45,6 +45,16 @@ export type ContentTypeInfo = Omit<components["schemas"]["ContentType"], "owner"
   owner: "builtin" | "plugin" | "admin";
 };
 
+/** The tree of a hierarchical type (`GET /post-types/{type}/tree`). */
+export type PostTree = components["schemas"]["TreeResponse"];
+
+/** One entry's new place, as `PUT /post-types/{type}/tree` takes it. */
+export interface TreeMove {
+  id: string;
+  parent_id: string | null;
+  position: number;
+}
+
 /** An administrator's content type, as create and relabel return it. */
 export type AdminContentType = components["schemas"]["AdminType"];
 
@@ -662,6 +672,8 @@ export const api = {
     term_ids?: string[] | null;
     scheduled_for?: string | null;
     parent_id?: string | null;
+    /** Hierarchical types: position among siblings (omitted: appended). */
+    position?: number;
     /** Section tree for a page that composes itself. */
     layout?: unknown;
         sticky?: boolean;
@@ -688,6 +700,10 @@ export const api = {
       password?: string | null;
       term_ids?: string[] | null;
       scheduled_for?: string | null;
+      /** Hierarchical types: the new parent (`null` moves to the top). */
+      parent_id?: string | null;
+      /** Hierarchical types: the new position among siblings. */
+      position?: number;
       /** Section tree; `[]` clears it and restores the theme template. */
       layout?: unknown;
       /** Apply only if the post is unchanged since this moment (409 otherwise). */
@@ -1668,6 +1684,7 @@ export const api = {
     description?: string;
     public?: boolean;
     has_archive?: boolean;
+    hierarchical?: boolean;
   }): Promise<AdminContentType> {
     return request("/api/v1/content-types", { method: "POST", body: JSON.stringify(body) });
   },
@@ -1675,9 +1692,22 @@ export const api = {
   /** Labels and switches only: the slug never changes. */
   updateContentType(
     slug: string,
-    body: { singular?: string; plural?: string; description?: string; public?: boolean; has_archive?: boolean },
+    body: { singular?: string; plural?: string; description?: string; public?: boolean; has_archive?: boolean; hierarchical?: boolean },
   ): Promise<AdminContentType> {
     return request(`/api/v1/content-types/${encodeURIComponent(slug)}`, { method: "PUT", body: JSON.stringify(body) });
+  },
+
+  /** The entries of a hierarchical type in reading order; `all` adds drafts and protected entries. */
+  getPostTree(type: string, all = false): Promise<PostTree> {
+    return request(`/api/v1/post-types/${encodeURIComponent(type)}/tree${all ? "?status=all" : ""}`);
+  },
+
+  /** Reorders and re-parents entries in one request; answers with the new tree. */
+  movePostTree(type: string, moves: TreeMove[]): Promise<PostTree> {
+    return request(`/api/v1/post-types/${encodeURIComponent(type)}/tree`, {
+      method: "PUT",
+      body: JSON.stringify({ moves }),
+    });
   },
 
   /** 409 (naming how many) while any entry of the type exists, trash included. */

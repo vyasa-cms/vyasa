@@ -38,7 +38,7 @@ async function settle() {
 }
 const Page = Route.options.component as React.ComponentType;
 
-const base = { public: true, has_archive: true, description: "", count: 0 };
+const base = { public: true, has_archive: true, hierarchical: false, description: "", count: 0 };
 const TYPES = [
   { ...base, slug: "post", singular: "Post", plural: "Posts", plugin: false, owner: "builtin", count: 12 },
   { ...base, slug: "page", singular: "Page", plural: "Pages", plugin: false, owner: "builtin", count: 4 },
@@ -101,7 +101,7 @@ describe("content types page", () => {
 
   it("creates a type, stating the slug rules and refusing a bad slug before sending it", async () => {
     const user = userEvent.setup();
-    mocked.createContentType.mockResolvedValue({ slug: "event", singular: "Event", plural: "Events", description: "", public: true, has_archive: true, created_at: "", updated_at: "" });
+    mocked.createContentType.mockResolvedValue({ slug: "event", singular: "Event", plural: "Events", description: "", public: true, has_archive: true, hierarchical: false, created_at: "", updated_at: "" });
     mount();
     await screen.findByText("Products");
 
@@ -135,6 +135,7 @@ describe("content types page", () => {
         description: "",
         public: true,
         has_archive: false,
+        hierarchical: false,
       }),
     );
     expect(vi.mocked(notify).success).toHaveBeenCalledWith("Events created", expect.any(String));
@@ -164,7 +165,7 @@ describe("content types page", () => {
 
   it("relabels without ever sending a new slug", async () => {
     const user = userEvent.setup();
-    mocked.updateContentType.mockResolvedValue({ slug: "product", singular: "Item", plural: "Items", description: "Things we sell.", public: true, has_archive: true, created_at: "", updated_at: "" });
+    mocked.updateContentType.mockResolvedValue({ slug: "product", singular: "Item", plural: "Items", description: "Things we sell.", public: true, has_archive: true, hierarchical: false, created_at: "", updated_at: "" });
     mount();
     await screen.findByText("Products");
     await user.click(within(rowOf("Products")).getByRole("button", { name: "Edit labels" }));
@@ -186,7 +187,25 @@ describe("content types page", () => {
         description: "Things we sell.",
         public: true,
         has_archive: true,
+        hierarchical: false,
       }),
+    );
+  });
+
+  it("creates a hierarchical type when the box is ticked", async () => {
+    const user = userEvent.setup();
+    mocked.createContentType.mockResolvedValue({ slug: "guide", singular: "Guide", plural: "Guides", description: "", public: true, has_archive: true, hierarchical: true, created_at: "", updated_at: "" });
+    mount();
+    await screen.findByText("Products");
+    await user.click(screen.getByRole("button", { name: "New content type" }));
+    await settle();
+    await user.type(screen.getByLabelText("Slug"), "guide");
+    await user.type(screen.getByLabelText("Singular label"), "Guide");
+    await user.type(screen.getByLabelText("Plural label"), "Guides");
+    await user.click(screen.getByRole("checkbox", { name: /hierarchical/i }));
+    await user.click(screen.getByRole("button", { name: "Create type" }));
+    await waitFor(() =>
+      expect(mocked.createContentType).toHaveBeenCalledWith(expect.objectContaining({ slug: "guide", hierarchical: true })),
     );
   });
 
