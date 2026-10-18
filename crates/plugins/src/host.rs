@@ -172,7 +172,12 @@ pub struct HostCtx {
     pub viewer: Option<Viewer>,
     /// How long `ai-complete` may run for this call.
     pub ai_window: AiWindow,
+    /// When the host will stop this call, for `call-budget-ms`.
+    pub call_deadline: Option<std::time::Instant>,
 }
+
+/// How long one epoch tick lasts.
+const EPOCH_TICK_MILLIS: u64 = 50;
 
 /// Broker + pool accessor bundle shared across host calls.
 pub struct HostEnv {
@@ -520,6 +525,45 @@ impl host::Host for HostCtx {
             .await
     }
 
+    async fn fetch_with(
+        &mut self,
+        _req: host::FetchRequest,
+    ) -> Result<host::FetchResponse, String> {
+        Err(String::from("not implemented"))
+    }
+
+    async fn put_entry(&mut self, _input: host::EntryInput) -> Result<host::PutResult, String> {
+        Err(String::from("not implemented"))
+    }
+
+    async fn list_managed(
+        &mut self,
+        _post_type: String,
+    ) -> Result<Vec<host::ManagedEntry>, String> {
+        Err(String::from("not implemented"))
+    }
+
+    async fn delete_entry(&mut self, _key: String) -> Result<(), String> {
+        Err(String::from("not implemented"))
+    }
+
+    async fn now_ms(&mut self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+    }
+
+    async fn call_budget_ms(&mut self) -> u32 {
+        self.call_deadline.map_or(0, |deadline| {
+            u32::try_from(
+                deadline
+                    .saturating_duration_since(std::time::Instant::now())
+                    .as_millis(),
+            )
+            .unwrap_or(u32::MAX)
+        })
+    }
+
     async fn send_mail(&mut self, to: String, subject: String, body: String) -> Result<(), String> {
         crate::hostdata::send_mail(&self.data_ctx(), &self.plugin_name, to, subject, body).await
     }
@@ -629,7 +673,8 @@ impl WasmtimeHost {
         // Advance epochs every 50 ms so deadline checks fire promptly.
         let ticker = engine.clone();
         tokio::spawn(async move {
-            let mut tick = tokio::time::interval(std::time::Duration::from_millis(50));
+            let mut tick =
+                tokio::time::interval(std::time::Duration::from_millis(EPOCH_TICK_MILLIS));
             loop {
                 tick.tick().await;
                 ticker.increment_epoch();
@@ -784,6 +829,12 @@ impl WasmtimeHost {
                 fetch: self.fetch.read().ok().and_then(|g| g.clone()),
                 viewer: env.viewer.clone(),
                 ai_window: AiWindow::Unbounded,
+                call_deadline: Some(
+                    std::time::Instant::now()
+                        + std::time::Duration::from_millis(
+                            EPOCH_TICK_MILLIS.saturating_mul(self.limits.epoch_deadline_ticks),
+                        ),
+                ),
             },
         );
         // Both budgets are best-effort: a store that refuses them still

@@ -234,6 +234,14 @@ fn parse_inner(
         return Err(err("manifest name must match [a-z0-9-]{1,60}"));
     }
 
+    if manifest.min_host_api > crate::HOST_API_VERSION {
+        return Err(err(format!(
+            "this package needs host API {}, this server provides {}",
+            manifest.min_host_api,
+            crate::HOST_API_VERSION
+        )));
+    }
+
     // Validate capability grammar early so install surfaces typos.
     let capabilities = manifest
         .capabilities
