@@ -7,6 +7,15 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-10-19
+
+Documentation sites. Entries of a content type can now form a tree with
+nested addresses, each post type can have its own page layout, search can be
+scoped to a type or a term, and plugins gain what a content-syncing plugin
+needs. The first such plugin, `vyasa-docs`, turns a folder of Markdown in a
+GitHub repository into a documentation site with a sidebar, contents, pager,
+versions and search.
+
 ### Added
 
 - Hierarchical content types: entries can have a parent and an order
@@ -29,12 +38,15 @@ follows [semantic versioning](https://semver.org) as described in
 - `min_host_api` is now enforced: Vyasa 0.3 provides host API 2.
 - The `vyasa-docs` plugin (`plugins/docs/`): documentation sites imported
   from a GitHub repository. See [docs/DOCS-SITES.md](docs/DOCS-SITES.md).
+- Nested entries carry `BreadcrumbList` structured data.
 
 ### Changed
 
 - Plugin HTML is sanitised with a wider allowlist (`id` prefixed `pl-`,
   `role`, `aria-*`, `data-*`, `nav`, `details`, `button` that never submits,
-  a GET `form` to this site).
+  a GET `form` to this site). Links may keep the `rel` values `prev`,
+  `next`, `nofollow`, `ugc`, `sponsored` and `external`; `noopener
+  noreferrer` is always added.
 - The full-text index gains a field. On the first start of 0.3 the index is
   rebuilt automatically; search answers from the database for those seconds.
 - Publishing an entry of a hierarchical type refreshes every cached page of
@@ -44,6 +56,12 @@ follows [semantic versioning](https://semver.org) as described in
 
 - `0053_hierarchy.sql` and `0054_managed_entries.sql`; forward-only. Back up
   before upgrading.
+
+### Security
+
+- ammonia 4.2.4 (RUSTSEC-2026-0373) and zip 9 (RUSTSEC-2026-0367, -0368,
+  -0369). zip 8 remains only in the build script of `utoipa-swagger-ui`,
+  which does not use the affected extraction code.
 
 ## [0.2.1] - 2026-10-15
 
