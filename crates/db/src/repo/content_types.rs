@@ -7,7 +7,7 @@ use sqlx::PgPool;
 use vyasa_common::AppError;
 
 const TYPE_COLUMNS: &str =
-    "slug, singular, plural, description, public, has_archive, created_at, updated_at";
+    "slug, singular, plural, description, public, has_archive, hierarchical, created_at, updated_at";
 
 /// One administrator-created content type.
 #[derive(Clone, Debug, PartialEq, Eq, sqlx::FromRow, serde::Serialize)]
@@ -24,6 +24,8 @@ pub struct ContentTypeRow {
     pub public: bool,
     /// Whether `/{slug}/` lists the entries.
     pub has_archive: bool,
+    /// Whether entries nest under one another.
+    pub hierarchical: bool,
     /// Creation time.
     pub created_at: DateTime<Utc>,
     /// Last change.
@@ -45,6 +47,8 @@ pub struct NewContentType<'a> {
     pub public: bool,
     /// Whether the type has an archive.
     pub has_archive: bool,
+    /// Whether entries nest under one another.
+    pub hierarchical: bool,
 }
 
 /// Fields of a content type to change; `None` leaves one as it is. The
@@ -61,6 +65,8 @@ pub struct ContentTypeUpdate<'a> {
     pub public: Option<bool>,
     /// New archive flag.
     pub has_archive: Option<bool>,
+    /// New hierarchical flag.
+    pub hierarchical: Option<bool>,
 }
 
 /// What [`ContentTypesRepo::delete_if_unused`] did.
@@ -128,8 +134,8 @@ impl ContentTypesRepo {
     /// value the table's constraints refuse).
     pub async fn insert(&self, row: &NewContentType<'_>) -> Result<ContentTypeRow, AppError> {
         sqlx::query_as(sqlx::AssertSqlSafe(format!(
-            "INSERT INTO content_types (slug, singular, plural, description, public, has_archive)
-             VALUES ($1, $2, $3, $4, $5, $6)
+            "INSERT INTO content_types (slug, singular, plural, description, public, has_archive, hierarchical)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
              RETURNING {TYPE_COLUMNS}"
         )))
         .bind(row.slug)
@@ -138,6 +144,7 @@ impl ContentTypesRepo {
         .bind(row.description)
         .bind(row.public)
         .bind(row.has_archive)
+        .bind(row.hierarchical)
         .fetch_one(&self.pool)
         .await
         .map_err(|err| match err {
@@ -167,6 +174,7 @@ impl ContentTypesRepo {
                 description = COALESCE($4, description),
                 public = COALESCE($5, public),
                 has_archive = COALESCE($6, has_archive),
+                hierarchical = COALESCE($7, hierarchical),
                 updated_at = now()
              WHERE slug = $1
              RETURNING {TYPE_COLUMNS}"
@@ -177,6 +185,7 @@ impl ContentTypesRepo {
         .bind(update.description)
         .bind(update.public)
         .bind(update.has_archive)
+        .bind(update.hierarchical)
         .fetch_optional(&self.pool)
         .await
         .map_err(|err| AppError::db(format!("content type update failed: {err}")))?
@@ -194,6 +203,19 @@ impl ContentTypesRepo {
             .fetch_one(&self.pool)
             .await
             .map_err(|err| AppError::db(format!("content type entry count failed: {err}")))
+    }
+
+    /// Entries of the type, in any status, that have a parent.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Db`] on database failure.
+    pub async fn count_nested_entries(&self, slug: &str) -> Result<i64, AppError> {
+        sqlx::query_scalar("SELECT COUNT(*) FROM posts WHERE type = $1 AND parent_id IS NOT NULL")
+            .bind(slug)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|err| AppError::db(format!("nested entry count failed: {err}")))
     }
 
     /// Deletes a type and its field definitions, in one transaction, when

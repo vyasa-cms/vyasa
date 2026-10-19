@@ -10,6 +10,11 @@
 /// need rebuilding, rather than finding them degraded afterwards.
 pub const CONTRACT_VERSION: &str = "vyasa-plugin-v2";
 
+/// The host API a package may require through `min_host_api` in its
+/// manifest. A 0.2 host is implicitly 1; 0.3 adds the host imports and
+/// capabilities for synced content.
+pub const HOST_API_VERSION: u32 = 2;
+
 pub mod blocks;
 pub mod broker;
 pub mod capabilities;

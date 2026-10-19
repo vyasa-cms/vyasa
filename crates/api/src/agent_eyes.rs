@@ -168,6 +168,23 @@ impl ContentQueries for MenuOverlayQueries {
     {
         self.inner.related_posts(post_id, count)
     }
+    fn tree<'a>(
+        &'a self,
+        post_type: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<vyasa_themes::TreeNodeData>, String>> + Send + 'a>>
+    {
+        self.inner.tree(post_type)
+    }
+    fn entry_context<'a>(
+        &'a self,
+        post_id: i64,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<Option<vyasa_themes::EntryContextData>, String>> + Send + 'a,
+        >,
+    > {
+        self.inner.entry_context(post_id)
+    }
     fn post_audio_url<'a>(
         &'a self,
         post_id: i64,

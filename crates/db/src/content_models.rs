@@ -195,6 +195,108 @@ fn check_custom_type_name(name: &str) -> Result<(), vyasa_common::AppError> {
     Ok(())
 }
 
+/// What a custom type declares beyond its name: whether entries nest, and
+/// the first segment of their public addresses.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct TypeTraits {
+    hierarchical: bool,
+    base: &'static str,
+}
+
+static TYPE_TRAITS: std::sync::RwLock<std::collections::BTreeMap<&'static str, TypeTraits>> =
+    std::sync::RwLock::new(std::collections::BTreeMap::new());
+
+/// Interned URL bases (a few dozen bytes each; bounded like type names).
+static TYPE_BASES: std::sync::RwLock<Option<std::collections::BTreeSet<&'static str>>> =
+    std::sync::RwLock::new(None);
+
+impl PostType {
+    /// Declares whether entries of the custom type `name` nest and where
+    /// their addresses start (`None`: the slug itself).
+    ///
+    /// # Errors
+    /// [`vyasa_common::AppError::Validation`] for a built-in type, a name
+    /// that is not a live custom type, or a base that is not a slug.
+    pub fn set_traits(
+        name: &str,
+        hierarchical: bool,
+        base: Option<&str>,
+    ) -> Result<(), vyasa_common::AppError> {
+        check_custom_type_name(name)?;
+        let interned = *post_types()?
+            .live
+            .get_key_value(name)
+            .map(|(k, _)| k)
+            .ok_or_else(|| {
+                vyasa_common::AppError::validation(format!(
+                    "{name:?} is not a registered post type"
+                ))
+            })?;
+        let base: &'static str = match base {
+            None => interned,
+            Some(b) if b == name => interned,
+            Some(b) => {
+                if !is_valid_custom_type(b) {
+                    return Err(vyasa_common::AppError::validation(format!(
+                        "invalid URL base: {b:?}"
+                    )));
+                }
+                intern_in(&TYPE_BASES, b)?
+            }
+        };
+        TYPE_TRAITS
+            .write()
+            .map_err(|_| vyasa_common::AppError::internal_msg("type traits poisoned"))?
+            .insert(interned, TypeTraits { hierarchical, base });
+        Ok(())
+    }
+
+    /// Forgets what [`PostType::set_traits`] recorded (the type is gone).
+    pub fn clear_traits(name: &str) {
+        if let Ok(mut map) = TYPE_TRAITS.write() {
+            map.remove(name);
+        }
+    }
+
+    /// Whether entries of this type have parents and a `path`.
+    #[must_use]
+    pub fn is_hierarchical(self) -> bool {
+        match self {
+            Self::Custom(name) => TYPE_TRAITS
+                .read()
+                .ok()
+                .and_then(|m| m.get(name).map(|t| t.hierarchical))
+                .unwrap_or(false),
+            _ => false,
+        }
+    }
+
+    /// The first segment of this type's public addresses: its slug unless
+    /// the type declared another. `post` and `page` are their own.
+    #[must_use]
+    pub fn base(self) -> &'static str {
+        match self {
+            Self::Custom(name) => TYPE_TRAITS
+                .read()
+                .ok()
+                .and_then(|m| m.get(name).map(|t| t.base))
+                .unwrap_or(name),
+            other => other.as_str(),
+        }
+    }
+
+    /// The custom type whose addresses start with `base`, if any. A type
+    /// that declared another base is no longer found by its slug.
+    #[must_use]
+    pub fn find_by_base(base: &str) -> Option<Self> {
+        let live = Self::custom_types();
+        let traits = TYPE_TRAITS.read().ok()?;
+        live.into_iter()
+            .find(|name| traits.get(name).map_or(*name, |t| t.base) == base)
+            .map(Self::Custom)
+    }
+}
+
 impl PostType {
     /// Registers a plugin's custom type name, returning the interned type.
     ///
@@ -252,9 +354,15 @@ impl PostType {
     /// or removed). Names an administrator holds are left alone. Returns
     /// how many were taken out.
     pub fn unregister_plugin_types(names: &[&str]) -> usize {
-        POST_TYPES
+        let removed = POST_TYPES
             .write()
-            .map_or(0, |mut registry| registry.unlive(names, TypeOwner::Plugin))
+            .map_or(0, |mut registry| registry.unlive(names, TypeOwner::Plugin));
+        for name in names {
+            if Self::owner(name).is_none() {
+                Self::clear_traits(name);
+            }
+        }
+        removed
     }
 
     /// Checks, without registering anything, that an administrator's
@@ -296,9 +404,13 @@ impl PostType {
     ///
     /// Returns whether the name was live as an administrator's type.
     pub fn unregister_admin(name: &str) -> bool {
-        POST_TYPES
+        let removed = POST_TYPES
             .write()
-            .is_ok_and(|mut registry| registry.unlive(&[name], TypeOwner::Admin) == 1)
+            .is_ok_and(|mut registry| registry.unlive(&[name], TypeOwner::Admin) == 1);
+        if removed {
+            Self::clear_traits(name);
+        }
+        removed
     }
 
     /// Whether this process has interned `name` (live or not).
@@ -562,6 +674,12 @@ pub struct PostRow {
     /// Entries sharing a group are translations of one another.
     #[sqlx(default)]
     pub translation_group: Option<i64>,
+    /// Order among siblings of a hierarchical type (0 elsewhere).
+    #[sqlx(default)]
+    pub position: i32,
+    /// Slash-joined slugs from the root; `None` unless the type is hierarchical.
+    #[sqlx(default)]
+    pub path: Option<String>,
     /// Argon2 hash of the access password, for password-protected posts.
     #[serde(skip_serializing)]
     pub password_hash: Option<String>,

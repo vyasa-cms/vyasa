@@ -204,6 +204,9 @@ impl BlockKind {
                 | BlockKind::Table
                 | BlockKind::Callout
                 | BlockKind::Timed
+                // A plugin block places its children in the slots of its
+                // own markup (0.3); the plugin decides what they mean.
+                | BlockKind::Plugin
         )
     }
 }

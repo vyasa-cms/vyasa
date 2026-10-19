@@ -435,6 +435,7 @@ const ARCHIVE: &str = include_str!("../templates/archive.html");
 const PAGE: &str = include_str!("../templates/page.html");
 const SEARCH: &str = include_str!("../templates/search.html");
 const NOT_FOUND: &str = include_str!("../templates/not-found.html");
+const COMPOSED: &str = include_str!("../templates/composed.html");
 
 /// A throwaway engine preloaded with only the built-in templates.
 fn probe_tera() -> Tera {
@@ -452,11 +453,11 @@ fn probe_tera() -> Tera {
 /// The built-in template sources by engine name, so editors can show an
 /// author what they are overriding.
 #[must_use]
-pub fn builtin_sources() -> [(&'static str, &'static str); 7] {
+pub fn builtin_sources() -> [(&'static str, &'static str); 8] {
     builtin_templates()
 }
 
-fn builtin_templates() -> [(&'static str, &'static str); 7] {
+fn builtin_templates() -> [(&'static str, &'static str); 8] {
     [
         ("base.html", BASE),
         ("index.html", INDEX),
@@ -465,6 +466,7 @@ fn builtin_templates() -> [(&'static str, &'static str); 7] {
         ("page.html", PAGE),
         ("search.html", SEARCH),
         ("not-found.html", NOT_FOUND),
+        ("composed.html", COMPOSED),
     ]
 }
 

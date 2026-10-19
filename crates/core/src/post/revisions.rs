@@ -256,6 +256,7 @@ impl RevisionService {
                 content: Some(rev.content.clone()),
                 excerpt: None,
                 parent_id: None,
+                position: None,
                 meta: None,
                 fields,
                 scheduled_for: None,

@@ -168,12 +168,17 @@ export function SettingsForm({ form }: { form: PluginForm }) {
     null,
   );
 
+  // Secrets are write-only: the server says whether one is set, never what
+  // it is, so their fields start empty and are sent only when touched.
+  const secretFlags = (stored.data?.["__secrets"] ?? {}) as Record<string, boolean>;
+  const [secretActions, setSecretActions] = React.useState<Record<string, "set" | "clear">>({});
+
   const values =
     draft ??
     Object.fromEntries(
       form.fields.map((f) => [
         f.key,
-        stored.data?.[f.key] ?? f.default ?? defaultFor(f),
+        f.kind === "secret" ? "" : (stored.data?.[f.key] ?? f.default ?? defaultFor(f)),
       ]),
     );
 
@@ -182,11 +187,20 @@ export function SettingsForm({ form }: { form: PluginForm }) {
       // One request per field: the settings store is a key/value table and
       // there is no batch endpoint. A form has at most a handful of fields.
       for (const field of form.fields) {
+        if (field.kind === "secret") {
+          const action = secretActions[field.key];
+          if (action === "clear") await putPluginSetting(form.pluginId, field.key, "");
+          else if (action === "set" && values[field.key] !== "") {
+            await putPluginSetting(form.pluginId, field.key, values[field.key]);
+          }
+          continue;
+        }
         await putPluginSetting(form.pluginId, field.key, values[field.key]);
       }
     },
     onSuccess: () => {
       setDraft(null);
+      setSecretActions({});
       void queryClient.invalidateQueries({
         queryKey: ["plugin-settings", form.pluginId],
       });
@@ -199,8 +213,16 @@ export function SettingsForm({ form }: { form: PluginForm }) {
     onError: (e) => notify.error("Couldn't save the settings", e),
   });
 
-  const set = (key: string, value: unknown) =>
+  const set = (key: string, value: unknown) => {
     setDraft({ ...values, [key]: value });
+    if (form.fields.find((f) => f.key === key)?.kind === "secret") {
+      setSecretActions((a) => ({ ...a, [key]: "set" }));
+    }
+  };
+  const clearSecret = (key: string) => {
+    setDraft({ ...values, [key]: "" });
+    setSecretActions((a) => ({ ...a, [key]: "clear" }));
+  };
 
   return (
     <Panel
@@ -215,6 +237,8 @@ export function SettingsForm({ form }: { form: PluginForm }) {
             field={field}
             value={values[field.key]}
             onChange={(v) => set(field.key, v)}
+            secretSet={secretFlags[field.key] === true && secretActions[field.key] !== "clear"}
+            onClear={() => clearSecret(field.key)}
           />
         ))}
         <Button
@@ -240,10 +264,14 @@ function Field({
   field,
   value,
   onChange,
+  secretSet,
+  onClear,
 }: {
   field: PluginField;
   value: unknown;
   onChange: (value: unknown) => void;
+  secretSet: boolean;
+  onClear: () => void;
 }) {
   const label = <span className="text-sm font-medium">{field.label}</span>;
   const help =
@@ -266,6 +294,35 @@ function Field({
           {help}
         </span>
       </label>
+    );
+  }
+
+  if (field.kind === "secret") {
+    return (
+      <div className="flex flex-col gap-1.5">
+        <label className="flex flex-col gap-1.5">
+          {label}
+          <Input
+            type="password"
+            autoComplete="new-password"
+            aria-label={field.label}
+            placeholder={secretSet ? "Set (leave blank to keep)" : "Not set"}
+            value={typeof value === "string" ? value : ""}
+            onChange={(e) => onChange(e.target.value)}
+          />
+        </label>
+        {secretSet ? (
+          <button
+            type="button"
+            onClick={onClear}
+            className="self-start text-xs text-muted-foreground underline"
+            aria-label={`Clear ${field.label}`}
+          >
+            Clear
+          </button>
+        ) : null}
+        {help}
+      </div>
     );
   }
 

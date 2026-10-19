@@ -28,6 +28,7 @@ pub fn spawn(state: &AppState) {
     let themes = state.themes.clone();
     let purger = std::sync::Arc::clone(&state.cdn);
     let posts = state.posts.clone();
+    let queries = std::sync::Arc::clone(&state.content_queries);
     let options = state.options_service.clone();
     let mut rx = events::subscribe();
 
@@ -46,7 +47,7 @@ pub fn spawn(state: &AppState) {
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             };
 
-            purge(&cache, &themes, &event).await;
+            purge(&cache, &themes, &posts, &event, queries.as_ref()).await;
             // The edge holds its own copy, so the same event has to reach
             // it — otherwise turning on `edge_cache_seconds` would mean a
             // correction sits behind a stale page until the TTL expires.
@@ -63,10 +64,32 @@ pub fn spawn(state: &AppState) {
     });
 }
 
+/// The entry an event is about, when it is about a post.
+fn post_id_of(event: &events::Event) -> Option<i64> {
+    match event {
+        events::Event::Published(e) => Some(e.post_id),
+        events::Event::Updated(e) => Some(e.post_id),
+        events::Event::Trashed(e) => Some(e.post_id),
+        events::Event::Restored(e) => Some(e.post_id),
+        events::Event::Deleted(e) => Some(e.post_id),
+        _ => None,
+    }
+}
+
+/// Whether an event drops every cached single page: any post event on an
+/// entry of a hierarchical type, because every page of such a type shows
+/// the tree (publishing one doc must refresh the sidebar of all others).
+/// Comment events keep the handling `apply_domain_event` gives them.
+fn purges_singles(hierarchical: bool, event: &events::Event) -> bool {
+    hierarchical && post_id_of(event).is_some()
+}
+
 async fn purge(
     cache: &Arc<RenderCache>,
     themes: &vyasa_db::repo::themes::ThemesRepo,
+    posts: &vyasa_core::post::PostService,
     event: &events::Event,
+    queries: &dyn vyasa_themes::ContentQueries,
 ) {
     // Cache keys are namespaced by the active theme version, so a purge needs
     // to know which namespace to sweep. If the theme cannot be read there is
@@ -77,6 +100,18 @@ async fn purge(
             let purged = cache.apply_domain_event(event, &namespace);
             if !purged.is_empty() {
                 tracing::debug!("render cache purged {} key groups", purged.len());
+            }
+            // A tree changes every page that shows it, not only the
+            // entry's own.
+            if let Some(id) = post_id_of(event) {
+                if posts
+                    .get(id)
+                    .await
+                    .is_ok_and(|p| purges_singles(p.post_type.is_hierarchical(), event))
+                {
+                    cache.invalidate_entries(&namespace);
+                    queries.forget_trees();
+                }
             }
         }
         _ => cache.invalidate_theme(),
@@ -162,5 +197,38 @@ mod edge_url_tests {
         // with, and the caller purges everything instead.
         assert!(edge_urls(None, &paths).is_none());
         assert!(edge_urls(Some("  "), &paths).is_none());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn published(id: i64) -> events::Event {
+        events::Event::Published(events::PostPublished {
+            post_id: id,
+            author_id: 1,
+        })
+    }
+
+    #[test]
+    fn publishing_a_doc_refreshes_other_docs_pages() {
+        assert!(purges_singles(true, &published(1)));
+        assert!(purges_singles(
+            true,
+            &events::Event::Updated(events::PostUpdated { post_id: 1 })
+        ));
+        assert!(purges_singles(
+            true,
+            &events::Event::Trashed(events::PostTrashed { post_id: 1 })
+        ));
+    }
+
+    #[test]
+    fn publishing_a_post_does_not_purge_singles() {
+        assert!(
+            !purges_singles(false, &published(1)),
+            "a blog must not start re-rendering every page on publish"
+        );
     }
 }

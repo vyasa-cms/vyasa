@@ -123,6 +123,8 @@ plugin's own route, public, decided by the plugin.
 | POST | /plugins/{id}/disable | manage_plugins |
 | POST | /plugins/{id}/enable | manage_plugins |
 | POST | /plugins/{id}/rollback | manage_plugins |
+| GET | /post-types/{type}/tree | public |
+| PUT | /post-types/{type}/tree | edit_posts |
 | GET | /posts | authenticated |
 | POST | /posts | edit_posts |
 | POST | /posts/batch | edit_posts |
@@ -138,6 +140,7 @@ plugin's own route, public, decided by the plugin.
 | GET | /posts/{id}/comments | public |
 | POST | /posts/{id}/comments | public |
 | POST | /posts/{id}/compose | edit_posts |
+| POST | /posts/{id}/detach | edit_posts |
 | POST | /posts/{id}/duplicate | edit_posts |
 | POST | /posts/{id}/embed | edit_posts |
 | GET | /posts/{id}/language | authenticated |

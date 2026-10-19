@@ -225,7 +225,10 @@ pub fn parse_vytheme(bytes: &[u8]) -> Result<ParsedTheme, PackageError> {
         let file = archive
             .by_index_raw(i)
             .map_err(|e| err(format!("corrupt package entry #{i}: {e}")))?;
-        names.push(file.name().to_owned());
+        let name = file
+            .name()
+            .map_err(|e| err(format!("package entry #{i} has an unreadable name: {e}")))?;
+        names.push(name.into_owned());
     }
     check_entry_names(&names)?;
 

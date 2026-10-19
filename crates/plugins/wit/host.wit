@@ -115,6 +115,65 @@ interface host {
         body: string,
     }
 
+
+    /// A GET with request headers (0.3). Only `authorization`, `accept`,
+    /// `if-none-match` and `x-github-api-version` are sent.
+    record fetch-request {
+        url: string,
+        headers: list<tuple<string, string>>,
+    }
+
+    /// The answer to [`fetch-with`]: the status is data, not an error, so
+    /// a plugin can tell `304 Not Modified` and `404` from a failure.
+    record fetch-response {
+        status: u16,
+        /// Only `etag`, `content-type`, `retry-after`, `x-ratelimit-remaining`
+        /// and `x-ratelimit-reset` are passed back.
+        headers: list<tuple<string, string>>,
+        body: string,
+    }
+
+    /// An entry a plugin keeps in step with an outside source (0.3).
+    record entry-input {
+        post-type: string,
+        /// Stable identity within this plugin; the same key updates the same entry.
+        key: string,
+        /// Key of another entry of this plugin that becomes the parent.
+        parent-key: option<string>,
+        /// Empty to derive one from the title; unique among siblings.
+        slug: string,
+        title: string,
+        excerpt: string,
+        /// A JSON array of blocks (`docs/BLOCKS.md`), validated like an editor save.
+        blocks-json: string,
+        /// Order among siblings.
+        position: s32,
+        /// `draft` or `published`.
+        status: string,
+        /// `taxonomy:term-slug`, created when missing.
+        terms: list<string>,
+        /// A JSON object of field values, checked against the type's fields.
+        fields-json: string,
+        /// A JSON object: `canonical-path`, `noindex`, `title`, `description`.
+        seo-json: string,
+        /// Opaque. An entry whose stored hash equals this is not written.
+        source-hash: string,
+        /// Shown to editors as "edit at the source"; empty for none.
+        edit-url: string,
+    }
+
+    record put-result {
+        id: u64,
+        /// `created`, `updated` or `unchanged`.
+        outcome: string,
+    }
+
+    record managed-entry {
+        key: string,
+        id: u64,
+        source-hash: string,
+    }
+
     log: func(level: log-level, message: string);
 
     get-post: func(id: u64) -> result<post-summary, string>;
@@ -194,6 +253,28 @@ interface host {
     /// the site without ever telling the plugin the address. A plugin may
     /// notify the people running or using the site; it is not an open relay.
     send-mail: func(to: string, subject: string, body: string) -> result<_, string>;
+
+    /// Like `fetch`, with request headers and the response status (0.3).
+    /// Needs `net:fetch:<host>`; redirects are still refused.
+    fetch-with: func(req: fetch-request) -> result<fetch-response, string>;
+
+    /// Creates or updates the entry with this key, owned by the plugin and
+    /// read-only in the editor (0.3). Needs `entries:sync`; `published`
+    /// also needs `db:publish:posts`.
+    put-entry: func(input: entry-input) -> result<put-result, string>;
+
+    /// Every entry of `post-type` this plugin manages (0.3). Needs `entries:sync`.
+    list-managed: func(post-type: string) -> result<list<managed-entry>, string>;
+
+    /// Moves a managed entry to the trash (0.3). Needs `entries:sync`.
+    delete-entry: func(key: string) -> result<_, string>;
+
+    /// Milliseconds since the Unix epoch (0.3).
+    now-ms: func() -> u64;
+
+    /// Wall-clock milliseconds left in the current call (0.3): a plugin
+    /// doing bounded work can stop before the host stops it for it.
+    call-budget-ms: func() -> u32;
 }
 
 /// What every Vyasa plugin must export.

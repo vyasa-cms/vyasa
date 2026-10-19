@@ -65,9 +65,9 @@ checksum = "e9d4ee0d472d1cd2e28c97dfa124b3d8d992e10eb0a035f33f5d12e3a177ba3b"
 
 [[package]]
 name = "ammonia"
-version = "4.2.3"
+version = "4.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "061e83b03c2681c18a6787d956e355c74e0b98ba7ba3d69b0822ade1e6f1d716"
+checksum = "1f45dfa685e1ec33b1bf1a3b93b8047cbdbef41b6040deebbe6bea7720a45574"
 dependencies = [
  "cssparser",
  "html5ever",
@@ -1629,7 +1629,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3077,6 +3077,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "650eef8c711430f1a879fdd01d4745a7deea475becfb90269c06775983bbf086"
 
 [[package]]
+name = "nix"
+version = "0.31.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cf20d2fde8ff38632c426f1165ed7436270b44f199fc55284c38276f9db47c3d"
+dependencies = [
+ "bitflags",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
+]
+
+[[package]]
 name = "nom"
 version = "7.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3686,7 +3698,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4044,7 +4056,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4113,7 +4125,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5023,10 +5035,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.3.4",
+ "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5659,7 +5671,7 @@ dependencies = [
  "url",
  "utoipa",
  "utoipa-swagger-ui-vendored",
- "zip",
+ "zip 8.6.0",
 ]
 
 [[package]]
@@ -5700,7 +5712,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vyasa-ai"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "base64 0.23.1",
  "reqwest",
@@ -5716,7 +5728,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-api"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "ammonia",
  "async-graphql",
@@ -5769,12 +5781,12 @@ dependencies = [
  "vyasa-search",
  "vyasa-testkit",
  "vyasa-themes",
- "zip",
+ "zip 9.0.5",
 ]
 
 [[package]]
 name = "vyasa-common"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "config",
  "criterion",
@@ -5787,7 +5799,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-core"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "argon2",
  "async-trait",
@@ -5820,7 +5832,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-db"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "serde",
@@ -5835,7 +5847,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-jobs"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "lettre",
@@ -5855,7 +5867,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-plugins"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "ammonia",
  "chrono",
@@ -5875,12 +5887,12 @@ dependencies = [
  "vyasa-testkit",
  "wasmtime",
  "wasmtime-wasi",
- "zip",
+ "zip 9.0.5",
 ]
 
 [[package]]
 name = "vyasa-search"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "tantivy",
  "tempfile",
@@ -5891,7 +5903,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-testkit"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "ed25519-dalek",
  "hex",
@@ -5903,12 +5915,12 @@ dependencies = [
  "url",
  "vyasa-plugins",
  "vyasa-themes",
- "zip",
+ "zip 9.0.5",
 ]
 
 [[package]]
 name = "vyasa-themes"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "ammonia",
  "chrono",
@@ -5926,7 +5938,7 @@ dependencies = [
  "tokio",
  "toml",
  "vyasa-core",
- "zip",
+ "zip 9.0.5",
 ]
 
 [[package]]
@@ -6545,7 +6557,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -6932,6 +6944,21 @@ dependencies = [
  "flate2",
  "indexmap",
  "memchr",
+ "typed-path",
+ "zopfli",
+]
+
+[[package]]
+name = "zip"
+version = "9.0.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6e04976da629d3b04204ba8105b396a193af8ad2583b2c79bfb3ab8af580a11e"
+dependencies = [
+ "crc32fast",
+ "flate2",
+ "indexmap",
+ "memchr",
+ "nix",
  "typed-path",
  "zopfli",
 ]

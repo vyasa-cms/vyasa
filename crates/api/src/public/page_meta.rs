@@ -247,16 +247,46 @@ pub struct Head {
     pub follow: bool,
     /// An absolute canonical the author set, for syndicated content.
     pub canonical: Option<String>,
+    /// A path on this site the author names as canonical (a versioned page
+    /// pointing at the current one); made absolute at render.
+    pub canonical_path: Option<String>,
     /// Social overrides: title, description, image for feeds.
     pub social_title: Option<String>,
     pub social_description: Option<String>,
     /// A second JSON-LD document (FAQ, HowTo, Product) beside Article.
     pub structured: Option<serde_json::Value>,
+    /// The entry's ancestors then itself, as (title, site path), for a
+    /// `BreadcrumbList`. Empty for a top-level entry.
+    pub breadcrumbs: Vec<(String, String)>,
     /// Translations of this page: (language tag, absolute or site path).
     pub alternates: Vec<(String, String)>,
 }
 
+/// Which address a page declares as canonical: an absolute one the author
+/// set, else a path on this site made absolute, else its own address.
+fn pick_canonical(
+    absolute: Option<&str>,
+    path: Option<&str>,
+    own_path: &str,
+    make_absolute: impl Fn(&str) -> Option<String>,
+) -> Option<String> {
+    absolute
+        .map(str::to_owned)
+        .or_else(|| {
+            path.filter(|p| p.starts_with('/') && !p.starts_with("//"))
+                .and_then(&make_absolute)
+        })
+        .or_else(|| make_absolute(own_path))
+}
+
 impl Head {
+    /// Attaches the entry's ancestors and itself, for `BreadcrumbList`.
+    #[must_use]
+    pub fn with_breadcrumbs(mut self, breadcrumbs: Vec<(String, String)>) -> Self {
+        self.breadcrumbs = breadcrumbs;
+        self
+    }
+
     /// Attaches the page's translations, for hreflang links.
     #[must_use]
     pub fn with_alternates(mut self, alternates: Vec<(String, String)>) -> Self {
@@ -321,9 +351,11 @@ impl Head {
             follow: !flag("seo_nofollow"),
             canonical: meta("seo_canonical")
                 .filter(|c| c.starts_with("https://") || c.starts_with("http://")),
+            canonical_path: meta("seo_canonical_path"),
             social_title: meta("og_title"),
             social_description: meta("og_description"),
             structured: crate::seo::structured_data(post, path),
+            breadcrumbs: Vec::new(),
         }
     }
 
@@ -373,7 +405,12 @@ impl Head {
                 esc(&href)
             );
         }
-        if let Some(url) = self.canonical.clone().or_else(|| site.absolute(&self.path)) {
+        if let Some(url) = pick_canonical(
+            self.canonical.as_deref(),
+            self.canonical_path.as_deref(),
+            &self.path,
+            |p| site.absolute(p),
+        ) {
             let _ = write!(out, "\n<link rel=\"canonical\" href=\"{}\">", esc(&url));
             let _ = write!(
                 out,
@@ -498,7 +535,12 @@ impl Head {
     }
 
     fn json_ld(&self, site: &SiteContext) -> String {
-        let main = self.json_ld_main(site);
+        let mut main = self.json_ld_main(site);
+        if let Some(list) = self.breadcrumb_list(site) {
+            main.push_str("\n<script type=\"application/ld+json\">");
+            main.push_str(&list.replace("</", "<\\/"));
+            main.push_str("</script>");
+        }
         match &self.structured {
             Some(doc) => format!(
                 "{main}\n<script type=\"application/ld+json\">{}</script>",
@@ -508,6 +550,33 @@ impl Head {
             ),
             None => main,
         }
+    }
+
+    /// `BreadcrumbList` for an entry with ancestors; needs the site's own
+    /// address, since schema.org wants absolute item URLs.
+    fn breadcrumb_list(&self, site: &SiteContext) -> Option<String> {
+        if self.breadcrumbs.len() < 2 {
+            return None;
+        }
+        let items = self
+            .breadcrumbs
+            .iter()
+            .enumerate()
+            .map(|(i, (name, path))| {
+                Some(serde_json::json!({
+                    "@type": "ListItem",
+                    "position": i + 1,
+                    "name": name,
+                    "item": site.absolute(path)?,
+                }))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        serde_json::to_string(&serde_json::json!({
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": items,
+        }))
+        .ok()
     }
 
     fn json_ld_main(&self, site: &SiteContext) -> String {
@@ -610,6 +679,29 @@ pub const fn is_public_type(t: PostType) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_canonical_path_becomes_absolute_and_only_a_site_path_is_accepted() {
+        let abs = |p: &str| Some(format!("https://docs.example.com{p}"));
+        assert_eq!(
+            pick_canonical(None, Some("/docs/a"), "/docs/v1/a", abs).as_deref(),
+            Some("https://docs.example.com/docs/a")
+        );
+        assert_eq!(
+            pick_canonical(Some("https://x.test/a"), Some("/docs/a"), "/b", abs).as_deref(),
+            Some("https://x.test/a"),
+            "an explicit absolute canonical wins"
+        );
+        assert_eq!(
+            pick_canonical(None, Some("//evil.example/a"), "/b", abs).as_deref(),
+            Some("https://docs.example.com/b")
+        );
+        assert_eq!(
+            pick_canonical(None, Some("docs/a"), "/b", abs).as_deref(),
+            Some("https://docs.example.com/b")
+        );
+        assert_eq!(pick_canonical(None, None, "/b", |_| None), None);
+    }
+
     use super::*;
 
     #[test]

@@ -66,9 +66,10 @@ pub async fn plugin_route(
     headers: HeaderMap,
     body: Bytes,
 ) -> Response {
-    let Some(owner) = match_route(&state, &name, &method, &rest).await else {
+    let Some(route) = match_route(&state, &name, &method, &rest).await else {
         return super::routes::missing(&state).await;
     };
+    let owner = route.plugin_id;
     if body.len() > MAX_REQUEST_BODY {
         return (StatusCode::PAYLOAD_TOO_LARGE, "request body too large").into_response();
     }
@@ -80,7 +81,7 @@ pub async fn plugin_route(
         path: rest,
         // The request's own query string, not a header a caller could set.
         query: query.unwrap_or_default(),
-        headers: forwarded(&headers),
+        headers: forwarded_with(&headers, &route.headers),
         body,
     };
     // The session cookie never crosses into the guest, but who it belongs
@@ -111,7 +112,12 @@ pub async fn plugin_route(
 }
 
 /// The plugin that declared `method name/rest`, if any.
-async fn match_route(state: &AppState, name: &str, method: &Method, rest: &str) -> Option<i64> {
+async fn match_route(
+    state: &AppState,
+    name: &str,
+    method: &Method,
+    rest: &str,
+) -> Option<RouteDecl> {
     let routes = state.plugin_surface.routes().await;
     owner_of(&routes, name, method.as_str(), rest)
 }
@@ -125,7 +131,7 @@ async fn match_route(state: &AppState, name: &str, method: &Method, rest: &str) 
 /// A declared path may end in `*`, which matches the rest of the path;
 /// that is how a plugin serves a tree rather than one endpoint. Matching
 /// is first-declared-wins, in registration order.
-fn owner_of(routes: &[RouteDecl], name: &str, method: &str, rest: &str) -> Option<i64> {
+fn owner_of(routes: &[RouteDecl], name: &str, method: &str, rest: &str) -> Option<RouteDecl> {
     routes
         .iter()
         .find(|r| {
@@ -138,7 +144,7 @@ fn owner_of(routes: &[RouteDecl], name: &str, method: &str, rest: &str) -> Optio
                     None => r.path == rest,
                 }
         })
-        .map(|r| r.plugin_id)
+        .cloned()
 }
 
 /// The content hash in an asset file name, when the name is well formed.
@@ -154,12 +160,21 @@ fn asset_hash(file: &str) -> Option<&str> {
     ok.then_some(hash)
 }
 
-fn forwarded(headers: &HeaderMap) -> Vec<(String, String)> {
+/// The allowlisted headers plus the ones the matched route declared
+/// (`x-…` names only, enforced when the route was collected).
+fn forwarded_with(headers: &HeaderMap, extra: &[String]) -> Vec<(String, String)> {
     FORWARDED_HEADERS
         .iter()
+        .copied()
+        .chain(
+            extra
+                .iter()
+                .map(String::as_str)
+                .filter(|n| n.starts_with("x-")),
+        )
         .filter_map(|name| {
-            let value = headers.get(*name)?.to_str().ok()?;
-            Some(((*name).to_owned(), value.chars().take(1024).collect()))
+            let value = headers.get(name)?.to_str().ok()?;
+            Some((name.to_owned(), value.chars().take(1024).collect()))
         })
         .collect()
 }
@@ -335,6 +350,7 @@ mod tests {
             plugin_name: name.to_owned(),
             method: method.to_owned(),
             path: path.to_owned(),
+            headers: Vec::new(),
         }
     }
 
@@ -346,7 +362,7 @@ mod tests {
             route(2, "docs", "GET", "pages/*"),
             route(3, "any", "GET", "*"),
         ];
-        let owner = |name, method, rest| owner_of(&routes, name, method, rest);
+        let owner = |name, method, rest| owner_of(&routes, name, method, rest).map(|r| r.plugin_id);
 
         assert_eq!(owner("shop", "GET", "cart"), Some(1));
         assert_eq!(owner("shop", "POST", "cart"), Some(1));
@@ -403,10 +419,38 @@ mod tests {
         headers.insert("cookie", HeaderValue::from_static("session=secret"));
         headers.insert("authorization", HeaderValue::from_static("Bearer secret"));
         headers.insert("accept", HeaderValue::from_static("application/json"));
-        let seen = forwarded(&headers);
+        let seen = forwarded_with(&headers, &[]);
         assert_eq!(
             seen,
             vec![(String::from("accept"), String::from("application/json"))]
         );
+    }
+
+    #[test]
+    fn extra_headers_are_forwarded_only_when_declared_and_never_the_forbidden_ones() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-hub-signature-256",
+            HeaderValue::from_static("sha256=abc"),
+        );
+        headers.insert("x-github-event", HeaderValue::from_static("push"));
+        headers.insert("x-other", HeaderValue::from_static("no"));
+        headers.insert("cookie", HeaderValue::from_static("session=1"));
+        headers.insert("authorization", HeaderValue::from_static("Bearer t"));
+        let declared = vec![
+            "x-hub-signature-256".to_owned(),
+            "x-github-event".to_owned(),
+        ];
+        let out = forwarded_with(&headers, &declared);
+        let names: Vec<_> = out.iter().map(|(k, _)| k.as_str()).collect();
+        assert!(names.contains(&"x-hub-signature-256") && names.contains(&"x-github-event"));
+        assert!(
+            !names.contains(&"x-other")
+                && !names.contains(&"cookie")
+                && !names.contains(&"authorization")
+        );
+        assert!(forwarded_with(&headers, &[])
+            .iter()
+            .all(|(k, _)| !k.starts_with("x-hub")));
     }
 }

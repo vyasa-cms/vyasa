@@ -19,7 +19,7 @@ vi.mock("@/api/client", async (importOriginal) => {
 
 const chrome = {
   slug: "sourdough-starter", excerpt: "How to keep a sourdough starter alive", seo_title: "", seo_description: "",
-  status: "published", type: "post", password: "", sticky: false, lang: "", translation_of: "", translations: [], scheduled_for: "", parent_id: "", term_ids: [],
+  status: "published", type: "post", password: "", sticky: false, lang: "", translation_of: "", translations: [], scheduled_for: "", parent_id: "", position: "", term_ids: [],
   featured_media_id: "", featured_media_url: "", featured_blurhash: "", featured_focal: "",
   seo_keyphrase: "sourdough starter", seo_canonical: "", seo_noindex: false, seo_nofollow: false,
   og_title: "", og_description: "", og_image: "", schema_type: "", product_price: "", product_currency: "",

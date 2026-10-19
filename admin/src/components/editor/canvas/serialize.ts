@@ -14,7 +14,7 @@
  * upload completes.
  */
 import type { Block, BlockKind } from "../blocks";
-import { CONTAINER_KINDS } from "./extensions";
+import { CONTAINER_KINDS, isPluginContainer } from "./extensions";
 import { htmlToInline, inlineToHtml, type InlineNode } from "./inline";
 
 export interface PMNode {
@@ -38,7 +38,7 @@ export const NATIVE_KINDS: BlockKind[] = [
 ];
 
 export function isNative(kind: BlockKind): boolean {
-  return NATIVE_KINDS.includes(kind);
+  return NATIVE_KINDS.includes(kind) || isPluginContainer(kind);
 }
 
 function str(attrs: Record<string, unknown>, key: string): string {

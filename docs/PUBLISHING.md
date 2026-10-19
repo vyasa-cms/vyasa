@@ -43,7 +43,9 @@ mkdir -p pkg && cp manifest.toml pkg/ && cp target/wasm32-wasip2/release/*.wasm 
 VYASA_SIGNING_KEY=<secret hex> vyasa plugin pack pkg --out my-plugin-0.1.0.vyplugin
 ```
 
-`manifest.toml` must declare every capability the plugin uses
+`manifest.toml` must declare every capability the plugin uses (and, since
+0.3, `min_host_api = 2` when it calls `fetch-with`, `put-entry` or the other
+new imports: an older server refuses the package instead of failing a call)
 (`capabilities = ["log:write", "db:read:posts"]`); the host enforces that
 list at runtime, and the marketplace shows it to operators before they
 install.

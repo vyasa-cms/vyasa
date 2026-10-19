@@ -1,0 +1,26 @@
+[workspace]
+
+[package]
+name = "vyasa-docs"
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Documentation sites for Vyasa: a Docs section synced from a GitHub repository"
+publish = false
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+pulldown-cmark = { version = "0.13", default-features = false }
+serde_json = { version = "1", features = ["preserve_order"] }
+sha2 = "0.10"
+hmac = "0.12"
+
+[target.'cfg(target_os = "wasi")'.dependencies]
+wit-bindgen = "0.30"
+
+[profile.release]
+strip = true
+lto = true
+opt-level = "s"

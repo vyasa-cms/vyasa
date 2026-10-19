@@ -341,6 +341,21 @@ per-type templates (`type_templates`), so the studio and the assistants
 can compose with them. Text and textarea values are indexed for search and
 listed in an entry's Markdown mirror and in `llms.txt`.
 
+## Typed layouts (0.3)
+
+`layout.json` may carry a `types` key: a map from a custom post-type slug to a
+section tree, validated like any other (an empty tree or a bad slug is an
+error). A single entry of that type renders through the tree, the same path a
+page that composes itself uses. Resolution order for an entry of a custom
+type: its own tree, else the theme's `types.<slug>`, else the default a plugin
+supplies for its own type (`register-layouts`), else the theme's `single`
+template as before. A child theme replaces a type's tree wholesale. A theme
+that has a `single-<type>.html` template is saying it handles the type
+itself and keeps its template; any other `single.html` that never prints
+`sections` is replaced, for composed entries only, by the bundled
+`composed.html`, so the tree always shows. The theme studio does not edit
+typed trees, and an operation on a template leaves them untouched.
+
 ## Plugin sections (phase 54)
 
 A plugin can register designer sections (`register-sections` /

@@ -304,3 +304,28 @@ fn a_signature_of_the_wrong_length_after_cleaning_is_refused() {
         .to_string();
     assert!(msg.contains("not valid hex"), "{msg}");
 }
+
+#[test]
+fn a_package_that_needs_a_newer_host_api_is_refused_naming_both_numbers() {
+    let signing = key(1);
+    let keys = [signing.verifying_key()];
+    let manifest = |extra: &str| format!("name = \"future\"\nversion = \"1.0.0\"\n{extra}");
+    // min_host_api = 3 against HOST_API_VERSION = 2.
+    let text = message_of(
+        &package(&signing, &manifest("min_host_api = 3\n"), WASM),
+        &keys,
+    );
+    assert!(
+        text.contains('3') && text.contains(&vyasa_plugins::HOST_API_VERSION.to_string()),
+        "{text}"
+    );
+    assert!(parse_rpplugin(
+        &package(&signing, &manifest("min_host_api = 2\n"), WASM),
+        &keys
+    )
+    .is_ok());
+    assert!(
+        parse_rpplugin(&package(&signing, &manifest(""), WASM), &keys).is_ok(),
+        "no requirement means 0"
+    );
+}

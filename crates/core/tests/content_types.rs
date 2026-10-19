@@ -74,6 +74,7 @@ fn new_type(slug: &str) -> NewType {
         description: String::new(),
         public: true,
         has_archive: true,
+        hierarchical: false,
     }
 }
 
@@ -112,6 +113,7 @@ fn entry(ctx: &Ctx, post_type: PostType, status: PostStatus) -> CreatePost {
         password: None,
         term_ids: None,
         layout: None,
+        position: None,
     }
 }
 
@@ -405,6 +407,7 @@ async fn stored_types_are_loaded_into_the_registry_and_a_plugins_slug_is_reporte
             description: "",
             public: true,
             has_archive: true,
+            hierarchical: false,
         })
         .await
         .expect("row");
@@ -1661,6 +1664,8 @@ async fn a_slug_with_stored_entries_or_a_live_taxonomy_is_refused() {
                 scheduled_for: None,
                 password_hash: None,
                 layout: None,
+                path_prefix: None,
+                position: 0,
             })
             .await
             .expect("orphan entry");
@@ -1742,6 +1747,7 @@ async fn loading_skips_a_stored_type_whose_slug_is_now_reserved() {
             description: "",
             public: true,
             has_archive: true,
+            hierarchical: false,
         })
         .await
         .expect("a row from before the word was reserved");
@@ -2005,4 +2011,123 @@ async fn a_slug_with_left_over_field_definitions_is_refused_until_they_are_remov
         .await
         .expect("fields")
         .is_empty());
+}
+
+// crates/core/tests/content_types.rs (append; `setup()`, `FieldChanges`, `NewField`, `FieldKind`, `PostType`, `AppError`, `json!` are already imported there)
+#[tokio::test]
+async fn the_fields_a_plugin_owns_cannot_be_edited_or_deleted_by_an_administrator() {
+    let c = setup().await;
+    PostType::register_plugin_types(&["owned-fields-type"]).unwrap();
+    let repo = vyasa_db::repo::ContentFieldsRepo::new(c.pool.clone());
+    let row = repo
+        .upsert_owned(
+            "syncer",
+            "owned-fields-type",
+            "section_label",
+            "Section label",
+            "",
+            "text",
+            false,
+            &json!({}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(row.owner, "syncer");
+
+    let err = c
+        .fields
+        .update(
+            "owned-fields-type",
+            "section_label",
+            FieldChanges {
+                label: Some("Hacked".into()),
+                ..FieldChanges::default()
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, AppError::Conflict { message } if message.contains("syncer")),
+        "{err:?}"
+    );
+    let err = c
+        .fields
+        .delete("owned-fields-type", "section_label")
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&err, AppError::Conflict { message } if message.contains("syncer")),
+        "{err:?}"
+    );
+
+    // The plugin may rewrite its own definition; the field stays in place.
+    let again = repo
+        .upsert_owned(
+            "syncer",
+            "owned-fields-type",
+            "section_label",
+            "Renamed",
+            "",
+            "text",
+            false,
+            &json!({}),
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        (again.label.as_str(), again.position),
+        ("Renamed", row.position)
+    );
+    let defs = c
+        .fields
+        .definitions(PostType::parse("owned-fields-type").unwrap())
+        .await
+        .unwrap();
+    assert!(
+        defs.iter().any(|d| d.key == "section_label"),
+        "entries can carry values for it"
+    );
+
+    // An administrator's own field on the same type is unaffected.
+    c.fields
+        .create(
+            "owned-fields-type",
+            NewField {
+                key: "mine".into(),
+                label: "Mine".into(),
+                help: String::new(),
+                kind: FieldKind::Text,
+                required: false,
+                options: json!({}),
+            },
+        )
+        .await
+        .unwrap();
+    c.fields
+        .update(
+            "owned-fields-type",
+            "mine",
+            FieldChanges {
+                label: Some("Still mine".into()),
+                ..FieldChanges::default()
+            },
+        )
+        .await
+        .unwrap();
+
+    // A plugin cannot take over an administrator's field.
+    let err = repo
+        .upsert_owned(
+            "syncer",
+            "owned-fields-type",
+            "mine",
+            "Taken",
+            "",
+            "text",
+            false,
+            &json!({}),
+        )
+        .await
+        .unwrap_err();
+    assert!(matches!(err, AppError::Conflict { .. }), "{err:?}");
 }

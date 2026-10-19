@@ -43,6 +43,17 @@ where
     raw.map(RawId::into_i64).transpose()
 }
 
+/// A required `i64` from a number or a string.
+///
+/// # Errors
+/// Fails when a string is present but is not a valid integer.
+pub fn required<'de, D>(deserializer: D) -> Result<i64, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    RawId::deserialize(deserializer)?.into_i64()
+}
+
 /// `Option<Option<i64>>` for three-state fields, where an explicit `null`
 /// means "clear this" and an absent key means "leave it alone".
 ///

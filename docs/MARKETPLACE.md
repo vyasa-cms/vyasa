@@ -62,8 +62,10 @@ To publish your own plugin or theme to it, read
 
 `capabilities` must list exactly what the plugin's own manifest
 requests, in the colon-separated grammar the broker parses —
-`db:read:posts`, `kv:write`, `net:fetch:*.stripe.com`. A capability that
-does not parse is refused at install.
+`db:read:posts`, `kv:write`, `net:fetch:*.stripe.com`, and since 0.3
+`entries:sync` and `tasks:extended`. A capability that does not parse is
+refused at install. `min_host_api` is enforced: this server provides host
+API 2 (`HOST_API_VERSION`), and a package that needs more is refused.
 The admin shows that list before installing and sends it back as the
 accepted set; if the package asks for anything else, the install is
 refused. A catalogue edited between reading and clicking therefore cannot

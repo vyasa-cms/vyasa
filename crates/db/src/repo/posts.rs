@@ -7,7 +7,7 @@ use crate::content_models::{PostRow, PostStatus, PostType};
 
 const POST_COLUMNS: &str = "id, type AS post_type, status, slug, title, content, layout, excerpt,
                             author_id, parent_id, meta, published_at, scheduled_for,
-                            password_hash, created_at, updated_at, sticky, lang, translation_group";
+                            password_hash, created_at, updated_at, sticky, lang, translation_group, position, path";
 
 /// Filter + pagination for post listing.
 #[derive(Clone, Debug, Default)]
@@ -163,11 +163,11 @@ impl PostsRepo {
         post: &NewPost,
         term_ids: Option<&[i64]>,
     ) -> Result<PostRow, AppError> {
-        let base = post.slug.as_str();
+        let base = format!("{}{}", post.path_prefix.as_deref().unwrap_or(""), post.slug);
         let mut tx = self.begin().await?;
         sqlx::query("SELECT pg_advisory_xact_lock(hashtextextended($1 || ':' || $2, 0))")
             .bind(post.post_type.as_str())
-            .bind(base)
+            .bind(&base)
             .execute(&mut *tx)
             .await
             .map_err(|err| AppError::db(format!("slug lock failed: {err}")))?;
@@ -576,7 +576,8 @@ impl PostsRepo {
                 title = COALESCE($4, title),
                 content = COALESCE($5, content),
                 excerpt = COALESCE($6, excerpt),
-                parent_id = COALESCE($7, parent_id),
+                parent_id = CASE WHEN $17 THEN $7 ELSE parent_id END,
+                position = COALESCE($18, position),
                 meta = {META_WITH_FIELDS},
                 scheduled_for = CASE WHEN $13 THEN NULL ELSE COALESCE($9, scheduled_for) END,
                 password_hash = CASE WHEN $14 THEN $10 ELSE password_hash END,
@@ -594,7 +595,7 @@ impl PostsRepo {
         .bind(&post.title)
         .bind(&post.content)
         .bind(&post.excerpt)
-        .bind(post.parent_id)
+        .bind(post.parent_id.flatten())
         .bind(&post.meta)
         .bind(post.scheduled_for)
         .bind(post.password_hash.as_ref().and_then(Option::as_deref))
@@ -604,6 +605,8 @@ impl PostsRepo {
         .bind(post.password_hash.is_some())
         .bind(post.expect_status.map(PostStatus::as_str))
         .bind(&post.fields)
+        .bind(post.parent_id.is_some())
+        .bind(post.position)
         .fetch_optional(&mut *tx)
         .await
         .map_err(|err| {
@@ -662,6 +665,32 @@ async fn free_slug_in(
     post: &NewPost,
 ) -> Result<String, AppError> {
     let base = post.slug.as_str();
+    if let Some(prefix) = post.path_prefix.as_deref() {
+        let base_path = format!("{prefix}{base}");
+        let base_taken: bool = sqlx::query_scalar(BASE_PATH_TAKEN_SQL)
+            .bind(post.post_type.as_str())
+            .bind(&base_path)
+            .fetch_one(&mut **tx)
+            .await
+            .map_err(|err| AppError::db(format!("slug check failed: {err}")))?;
+        if !base_taken {
+            return Ok(base.to_string());
+        }
+        let candidates: Vec<String> = vyasa_common::slug_candidates(base).collect();
+        let paths: Vec<String> = candidates.iter().map(|c| format!("{prefix}{c}")).collect();
+        let taken: std::collections::HashSet<String> = sqlx::query_scalar(TAKEN_PATHS_SQL)
+            .bind(post.post_type.as_str())
+            .bind(&paths)
+            .fetch_all(&mut **tx)
+            .await
+            .map_err(|err| AppError::db(format!("slug check failed: {err}")))?
+            .into_iter()
+            .collect();
+        return Ok(candidates
+            .into_iter()
+            .find(|candidate| !taken.contains(&format!("{prefix}{candidate}")))
+            .unwrap_or_else(|| format!("{base}-{}", post.id)));
+    }
     let base_taken: bool = sqlx::query_scalar(BASE_SLUG_TAKEN_SQL)
         .bind(post.post_type.as_str())
         .bind(base)
@@ -696,8 +725,8 @@ async fn insert_in(
     let row: PostRow = sqlx::query_as(sqlx::AssertSqlSafe(format!(
         "INSERT INTO posts (id, type, status, slug, title, content, excerpt,
                             author_id, parent_id, meta, published_at, scheduled_for,
-                            password_hash, layout)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                            password_hash, layout, position, path)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
          RETURNING {POST_COLUMNS}"
     )))
     .bind(post.id)
@@ -714,6 +743,12 @@ async fn insert_in(
     .bind(post.scheduled_for)
     .bind(&post.password_hash)
     .bind(&post.layout)
+    .bind(post.position)
+    .bind(
+        post.path_prefix
+            .as_deref()
+            .map(|prefix| format!("{prefix}{slug}")),
+    )
     .fetch_one(&mut **tx)
     .await
     .map_err(|err| write_err(&err, "post insert failed", slug))?;
@@ -734,7 +769,7 @@ async fn commit(tx: sqlx::Transaction<'static, sqlx::Postgres>) -> Result<(), Ap
 /// fault.
 fn write_err(err: &sqlx::Error, what: &str, slug: &str) -> AppError {
     if let sqlx::Error::Database(db) = err {
-        if db.is_unique_violation() && db.constraint() == Some(SLUG_INDEX) {
+        if db.is_unique_violation() && matches!(db.constraint(), Some(SLUG_INDEX | PATH_INDEX)) {
             return AppError::conflict(format!("slug {slug:?} is already in use"));
         }
     }
@@ -770,13 +805,24 @@ pub const SLUG_INDEX: &str = "posts_type_slug_uniq";
 /// first probe of [`PostsRepo::insert_with_unique_slug`]. Public so a test
 /// can check its plan uses [`SLUG_INDEX`].
 pub const BASE_SLUG_TAKEN_SQL: &str = "SELECT EXISTS(SELECT 1 FROM posts
-                   WHERE type = $1 AND slug = $2 AND status <> 'trash')";
+                   WHERE type = $1 AND slug = $2 AND status <> 'trash' AND path IS NULL)";
 
 /// Which of the slugs in `$2` are held by non-trashed posts of type `$1`:
 /// the second probe of [`PostsRepo::insert_with_unique_slug`]. Public so a
 /// test can check its plan uses [`SLUG_INDEX`].
 pub const TAKEN_SLUGS_SQL: &str = "SELECT slug FROM posts
-     WHERE type = $1 AND slug = ANY($2) AND status <> 'trash'";
+     WHERE type = $1 AND slug = ANY($2) AND status <> 'trash' AND path IS NULL";
+
+/// The partial unique index on `(type, path)` for non-trashed hierarchical entries.
+pub const PATH_INDEX: &str = "posts_type_path_uniq";
+
+/// Whether path `$2` is held by a non-trashed post of type `$1`.
+pub const BASE_PATH_TAKEN_SQL: &str = "SELECT EXISTS(SELECT 1 FROM posts
+                   WHERE type = $1 AND path = $2 AND status <> 'trash')";
+
+/// Which of the paths in `$2` are held by non-trashed posts of type `$1`.
+pub const TAKEN_PATHS_SQL: &str = "SELECT path FROM posts
+     WHERE type = $1 AND path = ANY($2) AND status <> 'trash'";
 
 /// Parameters for inserting a post.
 pub struct NewPost {
@@ -809,6 +855,11 @@ pub struct NewPost {
     pub password_hash: Option<String>,
     /// Section tree composing this entry, when it has one.
     pub layout: Option<serde_json::Value>,
+    /// Order among siblings.
+    pub position: i32,
+    /// `Some(prefix)` for a hierarchical type: the parent's path plus `/`
+    /// (empty at the root). The row's path is the prefix plus its slug.
+    pub path_prefix: Option<String>,
 }
 
 /// Partial update for a post; `None` fields keep their current values.
@@ -825,8 +876,10 @@ pub struct PostUpdate {
     pub content: Option<serde_json::Value>,
     /// New excerpt.
     pub excerpt: Option<String>,
-    /// New parent.
-    pub parent_id: Option<i64>,
+    /// New parent: `None` keeps, `Some(None)` clears.
+    pub parent_id: Option<Option<i64>>,
+    /// New position among siblings.
+    pub position: Option<i32>,
     /// New meta (a JSON object). Its own `fields` key is ignored: the
     /// stored field values are kept unless [`PostUpdate::fields`] is set.
     pub meta: Option<serde_json::Value>,
@@ -955,5 +1008,228 @@ impl PostsRepo {
             .await
             .map_err(|err| AppError::db(format!("sticky update failed: {err}")))?;
         Ok(())
+    }
+}
+/// One entry of a hierarchical type, as the hierarchy rules need it.
+#[derive(Clone, Debug, sqlx::FromRow)]
+pub struct TreeRow {
+    /// Row id.
+    pub id: i64,
+    /// Parent row.
+    pub parent_id: Option<i64>,
+    /// Order among siblings.
+    pub position: i32,
+    /// URL segment.
+    pub slug: String,
+    /// Stored path.
+    pub path: Option<String>,
+    /// Lifecycle status.
+    pub status: PostStatus,
+    /// Title.
+    pub title: String,
+    /// Whether the entry is password-protected.
+    pub locked: bool,
+    /// Author.
+    pub author_id: i64,
+}
+
+/// A new place for one entry.
+#[derive(Clone, Debug)]
+pub struct TreeChange {
+    /// Row id.
+    pub id: i64,
+    /// New parent.
+    pub parent_id: Option<i64>,
+    /// New position.
+    pub position: i32,
+    /// New path.
+    pub path: String,
+}
+
+impl PostsRepo {
+    /// Every non-trashed entry of `post_type`, in reading order.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn tree_rows(&self, post_type: PostType) -> Result<Vec<TreeRow>, AppError> {
+        sqlx::query_as(
+            "SELECT id, parent_id, position, slug, path, status, title,
+                    password_hash IS NOT NULL AS locked, author_id FROM posts
+             WHERE type = $1 AND status <> 'trash'
+             ORDER BY parent_id NULLS FIRST, position, id",
+        )
+        .bind(post_type.as_str())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("tree read failed: {e}")))
+    }
+
+    /// Writes new parents, positions and paths in one transaction.
+    ///
+    /// Two entries may be exchanging addresses, so writing them one by one
+    /// could briefly give two live rows the same path. Every affected path
+    /// is first moved to a unique placeholder (`~<id>`), then to its final
+    /// value; a collision with an entry outside the change set rolls
+    /// everything back as a [`AppError::Conflict`].
+    ///
+    /// # Errors
+    /// [`AppError::Conflict`] for a taken path, [`AppError::Db`] otherwise.
+    pub async fn apply_tree(
+        &self,
+        post_type: PostType,
+        changes: &[TreeChange],
+    ) -> Result<(), AppError> {
+        let mut tx = self.begin().await?;
+        let ids: Vec<i64> = changes.iter().map(|c| c.id).collect();
+        sqlx::query("UPDATE posts SET path = '~' || id WHERE type = $1 AND id = ANY($2)")
+            .bind(post_type.as_str())
+            .bind(&ids)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| AppError::db(format!("tree write failed: {e}")))?;
+        for c in changes {
+            sqlx::query("UPDATE posts SET parent_id = $2, position = $3, path = $4 WHERE id = $1 AND type = $5")
+                .bind(c.id)
+                .bind(c.parent_id)
+                .bind(c.position)
+                .bind(&c.path)
+                .bind(post_type.as_str())
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| write_err(&e, "tree write failed", &c.path))?;
+        }
+        commit(tx).await
+    }
+
+    /// The published, unprotected entries of a hierarchical type in
+    /// reading order (parents before children, siblings by position then
+    /// id), at most `limit`. An entry whose parent is not itself published
+    /// and open is left out with everything below it.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn published_tree(
+        &self,
+        post_type: PostType,
+        limit: usize,
+    ) -> Result<Vec<PostRow>, AppError> {
+        let flat: Vec<(i64, Option<i64>, i32)> = sqlx::query_as(
+            "SELECT id, parent_id, position FROM posts
+             WHERE type = $1 AND status = 'published' AND password_hash IS NULL
+             ORDER BY position, id",
+        )
+        .bind(post_type.as_str())
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("published tree failed: {e}")))?;
+        let mut kids: std::collections::HashMap<Option<i64>, Vec<i64>> =
+            std::collections::HashMap::new();
+        for (id, parent, _) in &flat {
+            kids.entry(*parent).or_default().push(*id);
+        }
+        // Depth-first from the roots; a parent that is not in the set
+        // (draft, protected, deleted) simply is never reached.
+        let mut order = Vec::with_capacity(flat.len().min(limit));
+        let mut stack: Vec<i64> = kids.remove(&None).unwrap_or_default();
+        stack.reverse();
+        while let Some(id) = stack.pop() {
+            if order.len() >= limit {
+                break;
+            }
+            order.push(id);
+            if let Some(mut children) = kids.remove(&Some(id)) {
+                children.reverse();
+                stack.extend(children);
+            }
+        }
+        let mut rows: std::collections::HashMap<i64, PostRow> = self
+            .get_many(&order)
+            .await?
+            .into_iter()
+            .map(|p| (p.id, p))
+            .collect();
+        Ok(order
+            .into_iter()
+            .filter_map(|id| rows.remove(&id))
+            .collect())
+    }
+
+    /// The published, unprotected children of entry `parent_id`, in reading
+    /// order (`position`, then id).
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn published_children(&self, parent_id: i64) -> Result<Vec<PostRow>, AppError> {
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {POST_COLUMNS} FROM posts
+             WHERE parent_id = $1 AND status = 'published' AND password_hash IS NULL
+               AND type = (SELECT type FROM posts WHERE id = $1)
+             ORDER BY position, id"
+        )))
+        .bind(parent_id)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("children lookup failed: {e}")))
+    }
+
+    /// The live entry of `post_type` at `path`.
+    ///
+    /// # Errors
+    /// [`AppError::NotFound`] when there is none (a trashed entry has no address).
+    pub async fn get_by_path(&self, post_type: PostType, path: &str) -> Result<PostRow, AppError> {
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {POST_COLUMNS} FROM posts WHERE type = $1 AND path = $2 AND status <> 'trash'"
+        )))
+        .bind(post_type.as_str())
+        .bind(path)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("path lookup failed: {e}")))?
+        .ok_or_else(|| AppError::not_found("post", path))
+    }
+
+    /// The first published, unprotected root entry in reading order: where
+    /// the type's archive address redirects.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn first_root(&self, post_type: PostType) -> Result<Option<PostRow>, AppError> {
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {POST_COLUMNS} FROM posts
+             WHERE type = $1 AND status = 'published' AND password_hash IS NULL
+               AND (parent_id IS NULL OR NOT EXISTS (SELECT 1 FROM posts q WHERE q.id = posts.parent_id))
+             ORDER BY position, id LIMIT 1"
+        )))
+        .bind(post_type.as_str())
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("first root failed: {e}")))
+    }
+
+    /// Gives every entry of a type that has no path one equal to its slug
+    /// (the type just became hierarchical). Returns how many.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn backfill_paths(&self, post_type: PostType) -> Result<u64, AppError> {
+        sqlx::query("UPDATE posts SET path = slug WHERE type = $1 AND path IS NULL")
+            .bind(post_type.as_str())
+            .execute(&self.pool)
+            .await
+            .map(|r| r.rows_affected())
+            .map_err(|e| AppError::db(format!("backfill failed: {e}")))
+    }
+
+    /// Clears every path of a type that stopped being hierarchical.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn clear_paths(&self, post_type: PostType) -> Result<u64, AppError> {
+        sqlx::query("UPDATE posts SET path = NULL WHERE type = $1 AND path IS NOT NULL")
+            .bind(post_type.as_str())
+            .execute(&self.pool)
+            .await
+            .map(|r| r.rows_affected())
+            .map_err(|e| AppError::db(format!("clear failed: {e}")))
     }
 }

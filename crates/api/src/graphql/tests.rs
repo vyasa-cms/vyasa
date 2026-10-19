@@ -156,6 +156,7 @@ async fn seed_for_graphql(pool: &sqlx::PgPool) -> AppState {
                 password: None,
                 term_ids: Some(vec![91_010]),
                 layout: None,
+                position: None,
             })
             .await
             .expect("create post");
@@ -178,6 +179,7 @@ async fn seed_for_graphql(pool: &sqlx::PgPool) -> AppState {
             password: None,
             term_ids: None,
             layout: None,
+            position: None,
         })
         .await
         .expect("draft");
@@ -943,6 +945,7 @@ async fn subscription_post_published_and_updated() {
             password: None,
             term_ids: None,
             layout: None,
+            position: None,
         })
         .await
         .expect("sched");
@@ -1005,6 +1008,7 @@ async fn protected_content_and_key_grants_are_enforced_before_pagination() {
             slug: protected.slug.clone(),
             title: "Confidential".into(),
             body: "Confidential protected body".into(),
+            terms: Vec::new(),
         })
         .unwrap();
     assert_eq!(index.search("Confidential", None, 10, 0).unwrap().len(), 1);
@@ -1015,6 +1019,8 @@ async fn protected_content_and_key_grants_are_enforced_before_pagination() {
         axum::extract::Query(crate::rest::search::SearchParams {
             q: "Confidential".into(),
             limit: None,
+            post_type: None,
+            term: None,
         }),
     )
     .await
@@ -1329,6 +1335,7 @@ async fn field_definitions_are_read_once_per_request() {
                 description: String::new(),
                 public: true,
                 has_archive: true,
+                hierarchical: false,
             },
             &[] as &[String],
         )
@@ -1366,6 +1373,7 @@ async fn field_definitions_are_read_once_per_request() {
                     password: None,
                     term_ids: None,
                     layout: None,
+                    position: None,
                 },
                 Some(serde_json::json!({"colour": format!("c{n}")})),
             )

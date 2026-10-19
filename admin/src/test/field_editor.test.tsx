@@ -48,6 +48,7 @@ function field(key: string, kind: ContentField["kind"], position: number, extra:
     required: false,
     options: {},
     position,
+    owner: "admin",
     created_at: "",
     updated_at: "",
     ...extra,
@@ -110,6 +111,20 @@ describe("field editor", () => {
     expect(within(rowOf("Price")).getByText("Required")).toBeInTheDocument();
     expect(within(rowOf("Price")).getByText("Number")).toBeInTheDocument();
     expect(within(rowOf("Manual")).getByText("Link")).toBeInTheDocument();
+  });
+
+  it("shows a field a plugin declared as locked, without edit or delete controls", async () => {
+    mocked.listFields.mockResolvedValue([
+      field("section_label", "text", 0, { owner: "docs-sync" }),
+      field("mine", "text", 1),
+    ]);
+    mount();
+    await screen.findByText("Section_label", { selector: "[data-testid=field-label]" });
+    const locked = within(rowOf("Section_label"));
+    expect(locked.getByTestId("field-locked")).toHaveTextContent("docs-sync");
+    expect(locked.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+    expect(locked.queryByRole("button", { name: "Delete" })).not.toBeInTheDocument();
+    expect(within(rowOf("Mine")).getByRole("button", { name: "Edit" })).toBeInTheDocument();
   });
 
   type User = ReturnType<typeof userEvent.setup>;

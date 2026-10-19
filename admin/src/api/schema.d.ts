@@ -1612,6 +1612,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/post-types/{type}/tree": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * `GET /api/v1/post-types/{type}/tree` — the entries of a hierarchical
+         *     type in reading order. Public callers see published, unprotected
+         *     entries; `status=all` (needs `edit_posts`) lists everything.
+         */
+        get: operations["get"];
+        /**
+         * `PUT /api/v1/post-types/{type}/tree` — reorder and re-parent entries
+         *     in one request, applied as a whole. Published entries whose address
+         *     changes keep a redirect from the old one.
+         */
+        put: operations["put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/posts": {
         parameters: {
             query?: never;
@@ -1866,6 +1892,30 @@ export interface paths {
          *     the page is missing, 422 when the designer cannot produce a valid tree.
          */
         post: operations["compose"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/posts/{id}/detach": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * `POST /api/v1/posts/{id}/detach` — take over an entry a plugin keeps in
+         *     step with an outside source. The plugin never writes it again; the
+         *     entry becomes an ordinary one.
+         * @description # Errors
+         *
+         *     403/404 as for editing the entry; 400 when it is not a managed entry.
+         */
+        post: operations["detach"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3736,6 +3786,8 @@ export interface components {
             description: string;
             /** @description Whether `/{slug}` lists the entries. */
             has_archive: boolean;
+            /** @description Whether entries nest under one another. */
+            hierarchical: boolean;
             /** @description Plural label. */
             plural: string;
             /** @description Whether entries get public URLs. */
@@ -4064,6 +4116,8 @@ export interface components {
             label: string;
             /** @description Per-kind options. */
             options: unknown;
+            /** @description Who defined it: `admin`, or a plugin's name (then it is locked). */
+            owner: string;
             /**
              * Format: int32
              * @description Order within the type, lowest first.
@@ -4150,6 +4204,8 @@ export interface components {
         };
         /** @description One content type as the designer sees it. */
         ContentType: {
+            /** @description First segment of the public addresses (the slug unless declared). */
+            base: string;
             /**
              * Format: int64
              * @description Published entries right now.
@@ -4159,6 +4215,8 @@ export interface components {
             description: string;
             /** @description Whether `/{slug}` lists entries. */
             has_archive: boolean;
+            /** @description Whether entries nest under one another. */
+            hierarchical: boolean;
             /**
              * @description Who owns it: `builtin`, `plugin` or `admin` (only `admin` types
              *     can be relabelled or deleted here).
@@ -4246,6 +4304,11 @@ export interface components {
             /** @description Optional password for private posts. */
             password?: string | null;
             /**
+             * Format: int32
+             * @description Order among siblings of a hierarchical type; omit to append.
+             */
+            position?: number | null;
+            /**
              * Format: date-time
              * @description Scheduled time (required when status is `scheduled`).
              */
@@ -4304,6 +4367,8 @@ export interface components {
             description?: string;
             /** @description Whether `/{slug}` lists the entries (default true). */
             has_archive?: boolean;
+            /** @description Whether entries nest under one another (default false). */
+            hierarchical?: boolean;
             /** @description Plural label, 1 to 120 characters. */
             plural: string;
             /** @description Whether entries get public URLs (default true). */
@@ -4719,6 +4784,17 @@ export interface components {
         MailTestBody: {
             to: string;
         };
+        /** @description Who keeps an entry in step with an outside source, and where to edit it. */
+        ManagedInfo: {
+            /** @description An author took the entry over: the plugin no longer writes it. */
+            detached: boolean;
+            /** @description Where editors go to change it (empty for nowhere). */
+            edit_url: string;
+            /** @description The plugin's own key for the entry. */
+            key: string;
+            /** @description The plugin's name. */
+            plugin: string;
+        };
         /** @description Response shape for a media item. */
         MediaResponse: {
             /** @description Alt text. */
@@ -4908,6 +4984,23 @@ export interface components {
             /** @description Unused recovery codes left. */
             recovery_codes_left: number;
         };
+        /** @description One requested move. */
+        MoveJson: {
+            /** @description Entry id. */
+            id: string;
+            /** @description New parent, `null` for the top. */
+            parent_id?: string | null;
+            /**
+             * Format: int32
+             * @description New position.
+             */
+            position: number;
+        };
+        /** @description `PUT …/tree` body. */
+        MovesBody: {
+            /** @description The moves, applied as a whole. */
+            moves: components["schemas"]["MoveJson"][];
+        };
         /** @description New-model body. */
         NewModelBody: {
             /**
@@ -5077,6 +5170,7 @@ export interface components {
              *     entry renders through its theme template.
              */
             layout?: unknown;
+            managed?: components["schemas"]["ManagedInfo"] | null;
             /**
              * @description Extension metadata (SEO and the like). Field values are not in
              *     here: they are `fields`.
@@ -5087,6 +5181,13 @@ export interface components {
              * @description Optional parent.
              */
             parent_id?: number | null;
+            /** @description Slash-joined slugs from the root; present on hierarchical types only. */
+            path?: string | null;
+            /**
+             * Format: int32
+             * @description Order among siblings of a hierarchical type.
+             */
+            position: number;
             /** @description Canonical public path under the current permalink setting. */
             public_url?: string | null;
             /**
@@ -5621,6 +5722,41 @@ export interface components {
             /** @description Its title. */
             title: string;
         };
+        /** @description One node of the tree. */
+        TreeNodeJson: {
+            /** @description Nesting depth, 1 at the top. */
+            depth: number;
+            /** @description Entry id, as a string. */
+            id: string;
+            /** @description Parent id, as a string. */
+            parent_id?: string | null;
+            /** @description Slash-joined slugs from the root. */
+            path: string;
+            /**
+             * Format: int32
+             * @description Order among siblings.
+             */
+            position: number;
+            /** @description URL segment. */
+            slug: string;
+            /** @description Lifecycle status. */
+            status: string;
+            /** @description Title. */
+            title: string;
+            /** @description Public address. */
+            url: string;
+        };
+        /** @description The tree answer. */
+        TreeResponse: {
+            /** @description Always true (a type that is not hierarchical answers 400). */
+            hierarchical: boolean;
+            /** @description Nodes in reading order. */
+            nodes: components["schemas"]["TreeNodeJson"][];
+            /** @description More nodes exist than were returned. */
+            truncated: boolean;
+            /** @description The post type. */
+            type: string;
+        };
         /** @description Partial update for a menu item. Absent fields are left alone. */
         UpdateItemBody: {
             /** @description Move the item to the top level, clearing any parent. */
@@ -5673,8 +5809,18 @@ export interface components {
              *     `fields`.
              */
             meta?: unknown;
+            /**
+             * Format: int64
+             * @description New parent (hierarchical types): omit to keep, `null` to move to the top.
+             */
+            parent_id?: number | null;
             /** @description New password (`""` clears). */
             password?: string | null;
+            /**
+             * Format: int32
+             * @description New position among siblings (hierarchical types).
+             */
+            position?: number | null;
             /**
              * Format: date-time
              * @description New scheduled time. Omit to keep it, send `null` to clear it.
@@ -5771,6 +5917,8 @@ export interface components {
             description?: string | null;
             /** @description New archive flag. */
             has_archive?: boolean | null;
+            /** @description New hierarchical flag; turning it off is refused while entries have parents. */
+            hierarchical?: boolean | null;
             /** @description New plural label. */
             plural?: string | null;
             /** @description New public flag. */
@@ -8994,6 +9142,113 @@ export interface operations {
             };
         };
     };
+    get: {
+        parameters: {
+            query?: {
+                /** @description `all` returns every status; it needs `edit_posts`. */
+                status?: string | null;
+            };
+            header?: never;
+            path: {
+                /** @description Post type slug */
+                type: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The tree */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TreeResponse"];
+                };
+            };
+            /** @description Not a hierarchical type */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description status=all without edit_posts */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Post type slug */
+                type: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["MovesBody"];
+            };
+        };
+        responses: {
+            /** @description The new tree */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["TreeResponse"];
+                };
+            };
+            /** @description A rule the final tree breaks */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Missing edit_posts / edit_others */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description An id is not an entry of the type */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description A path is taken */
+            409: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
     list: {
         parameters: {
             query?: {
@@ -9660,6 +9915,56 @@ export interface operations {
                 };
             };
             /** @description Missing edit_posts / edit_others */
+            403: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Not found */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    detach: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Post id */
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description The entry, now detached */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PostResponse"];
+                };
+            };
+            /** @description Not a managed entry */
+            400: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+            /** @description Forbidden */
             403: {
                 headers: {
                     [name: string]: unknown;
@@ -11074,6 +11379,13 @@ export interface operations {
                 q: string;
                 /** @description Maximum hits (1..=50, default 10). */
                 limit?: number | null;
+                /** @description Only entries of this post type. */
+                type?: string | null;
+                /**
+                 * @description Only entries filed under this term, as `taxonomy:slug`; a value
+                 *     without a colon is ignored.
+                 */
+                term?: string | null;
             };
             header?: never;
             path?: never;

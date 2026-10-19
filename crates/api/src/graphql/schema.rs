@@ -13,6 +13,17 @@ use crate::graphql::context::GqlContext;
 use crate::graphql::types::comment::{CommentConnection, CommentEdge, CommentPageInfo, GqlComment};
 use crate::graphql::types::media::GqlMedia;
 use crate::graphql::types::post::{GqlPost, GqlSearchHit, PageInfo, PostConnection, PostEdge};
+
+/// One node of a type's published tree.
+#[derive(async_graphql::SimpleObject)]
+pub struct GqlPostTreeNode {
+    /// The entry.
+    pub post: GqlPost,
+    /// Nesting depth, 1 at the top.
+    pub depth: i32,
+    /// Parent entry id.
+    pub parent_id: Option<i64>,
+}
 use crate::graphql::types::term::{GqlTerm, GqlTermWithCount, GqlTermWrapper};
 use crate::graphql::types::user::GqlUser;
 
@@ -169,6 +180,81 @@ impl QueryRoot {
         Ok(Some(GqlPost(row)))
     }
 
+    /// The published tree of a hierarchical type, in reading order.
+    async fn post_tree(
+        &self,
+        ctx: &Context<'_>,
+        post_type: String,
+        first: Option<i32>,
+    ) -> async_graphql::Result<Vec<GqlPostTreeNode>> {
+        use vyasa_core::post::hierarchy;
+        let gql = ctx.data::<GqlContext>()?;
+        let ty = PostType::parse(&post_type)
+            .map_err(|_| async_graphql::Error::new(format!("unknown post type: {post_type:?}")))?;
+        if !ty.is_hierarchical() {
+            return Err(async_graphql::Error::new(format!(
+                "{post_type} is not a hierarchical type"
+            )));
+        }
+        if !crate::policy::may_read_type(&gql.state, gql.principal.as_ref(), ty).await {
+            return Ok(Vec::new());
+        }
+        let limit = usize::try_from(first.unwrap_or(2000).clamp(1, 2000)).unwrap_or(2000);
+        let rows = gql
+            .state
+            .posts
+            .tree(ty)
+            .await
+            .map_err(|e| async_graphql::Error::new(e.to_string()))?;
+        let nodes: Vec<hierarchy::Node> = rows
+            .iter()
+            .map(|r| hierarchy::Node {
+                id: r.id,
+                parent_id: r.parent_id,
+                position: r.position,
+                slug: r.slug.clone(),
+            })
+            .collect();
+        let by_id: std::collections::HashMap<i64, &vyasa_db::repo::TreeRow> =
+            rows.iter().map(|r| (r.id, r)).collect();
+        let mut shown = std::collections::HashSet::new();
+        let mut order = Vec::new();
+        for (id, depth) in hierarchy::preorder(&nodes) {
+            let Some(row) = by_id.get(&id) else { continue };
+            let parent_shown = row
+                .parent_id
+                .filter(|p| by_id.contains_key(p))
+                .is_none_or(|p| shown.contains(&p));
+            if row.status != PostStatus::Published || row.locked || !parent_shown {
+                continue;
+            }
+            shown.insert(id);
+            order.push((id, depth, row.parent_id));
+            if order.len() >= limit {
+                break;
+            }
+        }
+        let ids: Vec<i64> = order.iter().map(|(id, _, _)| *id).collect();
+        let full: std::collections::HashMap<i64, vyasa_db::content_models::PostRow> =
+            vyasa_db::repo::PostsRepo::new(gql.state.pool.clone())
+                .get_many(&ids)
+                .await
+                .map_err(|e| async_graphql::Error::new(e.to_string()))?
+                .into_iter()
+                .map(|p| (p.id, p))
+                .collect();
+        Ok(order
+            .into_iter()
+            .filter_map(|(id, depth, parent_id)| {
+                full.get(&id).cloned().map(|post| GqlPostTreeNode {
+                    post: GqlPost(post),
+                    depth: i32::try_from(depth).unwrap_or(i32::MAX),
+                    parent_id,
+                })
+            })
+            .collect())
+    }
+
     /// Full-text search over published posts.
     ///
     /// Published-only regardless of who is asking: the index holds nothing
@@ -179,6 +265,8 @@ impl QueryRoot {
         ctx: &Context<'_>,
         query: String,
         limit: Option<i32>,
+        post_type: Option<String>,
+        #[graphql(name = "term")] term_scope: Option<String>,
     ) -> async_graphql::Result<Vec<GqlSearchHit>> {
         let gql = ctx.data::<GqlContext>()?;
         let term = query.trim();
@@ -194,7 +282,14 @@ impl QueryRoot {
         };
 
         let mut out = Vec::new();
-        for hit in index.search(term, None, limit, 0).unwrap_or_default() {
+        let scope = vyasa_search::Scope {
+            post_type: post_type.filter(|t| !t.is_empty()),
+            term: term_scope.filter(|t| t.contains(':')),
+        };
+        for hit in index
+            .search_scoped(term, &scope, limit, 0)
+            .unwrap_or_default()
+        {
             let Ok(id) = i64::try_from(hit.id) else {
                 continue;
             };
@@ -458,7 +553,7 @@ impl OptionEntry {
     }
 }
 
-fn can_see(gql: &GqlContext, row: &vyasa_db::content_models::PostRow) -> bool {
+pub(crate) fn can_see(gql: &GqlContext, row: &vyasa_db::content_models::PostRow) -> bool {
     if row.status == PostStatus::Published && row.password_hash.is_none() {
         return true;
     }

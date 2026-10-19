@@ -287,6 +287,20 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
         Some(name) if engine.template_names().contains(&name.as_str()) => name,
         _ => default_name,
     };
+    // A composed entry (its own tree, or its type's) must show its tree
+    // even when the theme's template for this slot never prints `sections`.
+    // A template named for the type (`single-doc.html`) is the theme saying
+    // it handles the type itself, so it is left alone.
+    let composed_fallback = !page.sections.is_empty()
+        && template == TemplateType::Single
+        && specific.as_deref() != Some(template_name)
+        && !engine.prints_sections(template_name)
+        && engine.template_names().contains(&"composed.html");
+    let template_name: &str = if composed_fallback {
+        "composed.html"
+    } else {
+        template_name
+    };
 
     let mut regions =
         resolve_sections(layout, template, template_name, registry, &ctx_resolve).await?;

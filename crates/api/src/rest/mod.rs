@@ -23,6 +23,7 @@ pub mod menus;
 pub mod options;
 pub mod patterns;
 pub mod plugins;
+pub mod post_tree;
 pub mod posts;
 pub mod privacy;
 pub mod registration;
@@ -141,6 +142,10 @@ fn post_routes() -> Guarded {
             r.get(Authenticated, posts::list)
                 .post(Cap(EditPosts), posts::create)
         })
+        .at("/post-types/{type}/tree", |r| {
+            r.get(Public, post_tree::get)
+                .put(Cap(EditPosts), post_tree::put)
+        })
         .at("/posts/batch", |r| r.post(Cap(EditPosts), posts::batch))
         .at("/posts/{id}/duplicate", |r| {
             r.post(Cap(EditPosts), posts::duplicate)
@@ -152,6 +157,9 @@ fn post_routes() -> Guarded {
         })
         .at("/posts/slug/{type}/{slug}", |r| {
             r.get(Authenticated, posts::get_by_slug)
+        })
+        .at("/posts/{id}/detach", |r| {
+            r.post(Cap(EditPosts), posts::detach)
         })
         .at("/posts/{id}/restore", |r| {
             r.post(Cap(EditPosts), posts::restore)

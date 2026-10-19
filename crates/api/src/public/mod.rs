@@ -34,7 +34,7 @@ pub fn router(state: &AppState) -> Router<AppState> {
         // Registered post types: `/{type}/{slug}`. Static prefixes above
         // (`/post`, `/category`, `/tag`, `/archive`) still win, because
         // the router prefers a literal segment to a parameter.
-        .route("/{type}/{slug}", get(routes::custom_single))
+        .route("/{type}/{*rest}", get(routes::custom_entry))
         .route("/archive/{year}/{month}", get(routes::date_archive))
         .route("/category/{slug}", get(routes::category_archive))
         .route("/tag/{slug}", get(routes::tag_archive))

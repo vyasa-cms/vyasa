@@ -16,6 +16,12 @@ pub struct SearchParams {
     pub q: String,
     /// Maximum hits (1..=50, default 10).
     pub limit: Option<usize>,
+    /// Only entries of this post type.
+    #[serde(rename = "type")]
+    pub post_type: Option<String>,
+    /// Only entries filed under this term, as `taxonomy:slug`; a value
+    /// without a colon is ignored.
+    pub term: Option<String>,
 }
 
 /// `GET /api/v1/search?q=…` — full-text search over published posts.
@@ -56,8 +62,14 @@ pub async fn search(
         })));
     };
 
+    // The scope is part of the query, so `limit` hits of the scope come back
+    // rather than the best hits of everything filtered afterwards.
+    let scope = vyasa_search::Scope {
+        post_type: params.post_type.clone().filter(|t| !t.is_empty()),
+        term: params.term.clone().filter(|t| t.contains(':')),
+    };
     let mut found: Vec<(i64, vyasa_search::SearchHit)> = index
-        .search(term, None, limit, 0)
+        .search_scoped(term, &scope, limit, 0)
         .unwrap_or_default()
         .into_iter()
         .filter_map(|hit| i64::try_from(hit.id).ok().map(|id| (id, hit)))

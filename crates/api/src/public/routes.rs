@@ -8,7 +8,7 @@ use serde::Deserialize;
 
 use vyasa_db::content_models::PostRow;
 use vyasa_db::content_models::{PostStatus, PostType};
-use vyasa_db::repo::PostFilter;
+use vyasa_db::repo::{PostFilter, PostsRepo};
 use vyasa_themes::{
     cache, keys, CachedPage, Engine, Layout, PageContext, PostCard, RenderRequest, SiteMeta,
     TemplateType, TokenSet,
@@ -438,6 +438,12 @@ pub struct ListParams {
     pub search: Option<String>,
     #[serde(default)]
     pub page: Option<u32>,
+    /// Search scope: only this post type (`/search?type=doc`).
+    #[serde(rename = "type", default)]
+    pub post_type: Option<String>,
+    /// Search scope: only entries filed under this `taxonomy:slug`.
+    #[serde(default)]
+    pub term: Option<String>,
 }
 
 /// `GET /` — home index with pagination and basic search (`?s=`).
@@ -680,6 +686,13 @@ pub struct EntryParams {
     /// Listing page, when this path turns out to be a post-type archive.
     #[serde(default)]
     pub page: Option<u32>,
+    /// Search text, when this path turns out to be a hierarchical type's
+    /// `search` address (redirected to the site search).
+    #[serde(default)]
+    pub q: Option<String>,
+    /// A `taxonomy:term` scope for the same redirect.
+    #[serde(default)]
+    pub term: Option<String>,
 }
 
 /// Shared single-post/page implementation.
@@ -691,11 +704,22 @@ pub(super) async fn single_impl(
     headers: HeaderMap,
     params: EntryParams,
 ) -> R {
-    let Ok(bundle) = load_bundle(&state).await else {
-        return crate::public::errors::internal_error();
-    };
     let Ok(post) = state.posts.get_by_slug(t, &slug).await else {
         return missing(&state).await;
+    };
+    Box::pin(render_single(state, post, headers, params)).await
+}
+
+/// Renders an entry already looked up, by slug or by path.
+#[allow(clippy::too_many_lines)]
+pub(super) async fn render_single(
+    state: AppState,
+    post: PostRow,
+    headers: HeaderMap,
+    params: EntryParams,
+) -> R {
+    let Ok(bundle) = load_bundle(&state).await else {
+        return crate::public::errors::internal_error();
     };
     // Public visibility: drafts/scheduled/trashed are 404 here; previews go
     // through the signed /preview route.
@@ -719,7 +743,7 @@ pub(super) async fn single_impl(
     let key = cacheable.then(|| {
         keys::single(
             &bundle.version,
-            &post.slug,
+            post.path.as_deref().unwrap_or(&post.slug),
             post.updated_at.timestamp_millis(),
         )
     });
@@ -753,6 +777,7 @@ pub(super) async fn single_impl(
             .get(&post.author_id)
             .cloned();
         let path = site.permalinks.path_for(&post);
+        let breadcrumbs = breadcrumbs_for(state_ref, &site, &post, &path).await;
         let notice = params
             .comment
             .as_deref()
@@ -809,6 +834,7 @@ pub(super) async fn single_impl(
             lang: (!post.lang.is_empty()).then(|| post.lang.clone()),
             head: page_meta::Head::entry(&post, &path, author)
                 .with_alternates(alternates)
+                .with_breadcrumbs(breadcrumbs)
                 .filtered(state_ref)
                 .await
                 .render(&site),
@@ -820,7 +846,7 @@ pub(super) async fn single_impl(
             // A page that composes itself renders its own tree instead of
             // the theme's `page` body. Anything else leaves this empty and
             // the template lays the entry out exactly as before.
-            sections: vyasa_themes::page_sections(post.layout.as_ref()),
+            sections: sections_for_entry(state_ref, &bundle, &post).await,
             // Lets `single-book.html` override `single.html` for a theme
             // that ships one; a theme that does not renders as before.
             post_type_slug: match post.post_type {
@@ -857,6 +883,30 @@ pub(super) async fn single_impl(
     } else {
         respond_cached(state_ref, &headers, key, render).await
     }
+}
+
+/// The entry's own composition, else its type's tree from the theme, else
+/// the one its plugin supplies, else none (the theme's `single` template).
+async fn sections_for_entry(
+    state: &AppState,
+    bundle: &ThemeBundle,
+    post: &PostRow,
+) -> Vec<vyasa_themes::Section> {
+    let own = vyasa_themes::page_sections(post.layout.as_ref());
+    if !own.is_empty() {
+        return own;
+    }
+    let PostType::Custom(slug) = post.post_type else {
+        return Vec::new();
+    };
+    if let Some(tree) = bundle.layout.type_sections(slug) {
+        return tree.to_vec();
+    }
+    state
+        .plugin_surface
+        .type_layout(slug)
+        .await
+        .unwrap_or_default()
 }
 
 /// `hreflang` alternates for an entry that belongs to a translation
@@ -915,6 +965,38 @@ async fn hreflang_links(state: &AppState, site: &page_meta::SiteContext, post_id
     out
 }
 
+/// The entry's published ancestors then the entry, as (title, path), for
+/// structured data. Empty for an entry at the top of its tree. An ancestor
+/// that is not live (draft, private, password) means no trail, rather than
+/// one that leaks its title or skips a level.
+async fn breadcrumbs_for(
+    state: &AppState,
+    site: &page_meta::SiteContext,
+    post: &PostRow,
+    path: &str,
+) -> Vec<(String, String)> {
+    let Some(tree_path) = post.path.as_deref().filter(|p| p.contains('/')) else {
+        return Vec::new();
+    };
+    let mut trail = Vec::new();
+    let mut prefix = String::new();
+    let segments: Vec<&str> = tree_path.split('/').collect();
+    for segment in &segments[..segments.len() - 1] {
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(segment);
+        match state.posts.get_by_path(post.post_type, &prefix).await {
+            Ok(row) if crate::seo::is_live(row.status) && row.password_hash.is_none() => {
+                trail.push((row.title.clone(), site.permalinks.path_for(&row)));
+            }
+            _ => return Vec::new(),
+        }
+    }
+    trail.push((post.title.clone(), path.to_owned()));
+    trail
+}
+
 /// Renders one entry, handing the renderer its structured content and the
 /// comment being replied to.
 #[allow(clippy::too_many_arguments)]
@@ -965,10 +1047,22 @@ pub(super) async fn markdown_mirror(
     slug: &str,
     headers: &HeaderMap,
 ) -> R {
-    use std::fmt::Write as _;
     let Ok(post) = state.posts.get_by_slug(t, slug).await else {
         return missing(state).await;
     };
+    markdown_of(state, post, headers).await
+}
+
+/// [`markdown_mirror`] for an entry of a hierarchical type, by path.
+async fn markdown_mirror_path(state: &AppState, t: PostType, path: &str, headers: &HeaderMap) -> R {
+    let Ok(post) = state.posts.get_by_path(t, path).await else {
+        return missing(state).await;
+    };
+    markdown_of(state, post, headers).await
+}
+
+async fn markdown_of(state: &AppState, post: PostRow, headers: &HeaderMap) -> R {
+    use std::fmt::Write as _;
     if !matches!(post.status, PostStatus::Published) || post.password_hash.is_some() {
         return missing(state).await;
     }
@@ -1043,7 +1137,7 @@ pub async fn single_page(
         return markdown_mirror(&state, PostType::Page, bare, &headers).await;
     }
     if let Some(decl) =
-        crate::entry_fields::served_type(&state.plugin_surface, &state.pool, &slug).await
+        crate::entry_fields::served_type_by_base(&state.plugin_surface, &state.pool, &slug).await
     {
         if decl.public
             && decl.has_archive
@@ -1053,36 +1147,82 @@ pub async fn single_page(
                 .await
                 .is_err()
         {
+            // A documentation-style type has no listing: its address is
+            // the first page in reading order.
+            if decl.hierarchical {
+                if let Ok(post_type) = PostType::parse(&decl.slug) {
+                    return match PostsRepo::new(state.pool.clone())
+                        .first_root(post_type)
+                        .await
+                    {
+                        Ok(Some(first)) => {
+                            let to = crate::permalinks::path(&state, &first).await;
+                            found(&to)
+                        }
+                        _ => missing(&state).await,
+                    };
+                }
+            }
             return custom_archive(&state, &decl, params.page.unwrap_or(1), &headers).await;
         }
     }
     single_impl(state, PostType::Page, slug, headers, params).await
 }
 
-/// `GET /{type}/{slug}` — one entry of a registered post type (a plugin's
-/// or an administrator's).
-pub async fn custom_single(
+/// `GET /{type}/{*rest}` — one entry of a registered post type (a
+/// plugin's or an administrator's): `/{base}/{slug}` for a flat type,
+/// `/{base}/{path…}` for a hierarchical one.
+pub async fn custom_entry(
     State(state): State<AppState>,
-    Path((first, slug)): Path<(String, String)>,
+    Path((first, rest)): Path<(String, String)>,
     Query(params): Query<EntryParams>,
     headers: HeaderMap,
 ) -> R {
-    // `/{first}/{slug}` is claimed by two kinds of registration. Post
+    // `/{first}/…` is claimed by two kinds of registration. Post
     // types win, and `collect_taxonomies` refuses a slug a post type
     // already holds, so the two can never both match.
     if let Some(decl) =
-        crate::entry_fields::served_type(&state.plugin_surface, &state.pool, &first).await
+        crate::entry_fields::served_type_by_base(&state.plugin_surface, &state.pool, &first).await
     {
-        let Ok(post_type) = PostType::parse(&first) else {
+        let Ok(post_type) = PostType::parse(&decl.slug) else {
             return missing(&state).await;
         };
         if !decl.public {
             return missing(&state).await;
         }
-        if let Some(bare) = slug.strip_suffix(".md") {
+        if decl.hierarchical {
+            if let Some(bare) = rest.strip_suffix(".md") {
+                return markdown_mirror_path(&state, post_type, bare, &headers).await;
+            }
+            // `/{base}/search` is a sub-route of the type, not an entry:
+            // it hands over to the site search scoped to the type.
+            if rest == "search" {
+                return found(&search_address(&decl.slug, &params));
+            }
+            let Ok(post) = state.posts.get_by_path(post_type, &rest).await else {
+                return missing(&state).await;
+            };
+            return Box::pin(render_single(state, post, headers, params)).await;
+        }
+        if rest.contains('/') {
+            return missing(&state).await;
+        }
+        if let Some(bare) = rest.strip_suffix(".md") {
             return markdown_mirror(&state, post_type, bare, &headers).await;
         }
-        return single_impl(state, post_type, slug, headers, params).await;
+        return single_impl(state, post_type, rest, headers, params).await;
+    }
+    // A type that moved to another base keeps answering at its slug.
+    if let Some(decl) =
+        crate::entry_fields::served_type(&state.plugin_surface, &state.pool, &first).await
+    {
+        if decl.public && decl.base != first {
+            return moved(&format!("/{}/{rest}", decl.base));
+        }
+        return missing(&state).await;
+    }
+    if rest.contains('/') {
+        return missing(&state).await;
     }
     if let Some(decl) = state.plugin_surface.taxonomy(&first).await {
         if !decl.public {
@@ -1093,9 +1233,51 @@ pub async fn custom_single(
         let Ok(tax) = vyasa_db::content_models::Taxonomy::parse(&first) else {
             return missing(&state).await;
         };
-        return archive_impl(state, tax.as_str(), slug, params.page.unwrap_or(1), headers).await;
+        return archive_impl(state, tax.as_str(), rest, params.page.unwrap_or(1), headers).await;
     }
     missing(&state).await
+}
+
+/// A `302` to `to`.
+fn found(to: &str) -> R {
+    match axum::http::HeaderValue::from_str(to) {
+        Ok(value) => (StatusCode::FOUND, [(header::LOCATION, value)]).into_response(),
+        Err(_) => crate::public::errors::internal_error(),
+    }
+}
+
+/// A `301` to `to`.
+fn moved(to: &str) -> R {
+    match axum::http::HeaderValue::from_str(to) {
+        Ok(value) => (StatusCode::MOVED_PERMANENTLY, [(header::LOCATION, value)]).into_response(),
+        Err(_) => crate::public::errors::internal_error(),
+    }
+}
+
+/// Percent-encodes a query value (spaces as `%20`).
+fn percent_encode(raw: &str) -> String {
+    raw.bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            other => format!("%{other:02X}"),
+        })
+        .collect()
+}
+
+/// The site search address for `/{base}/search?q=…&term=…`.
+fn search_address(type_slug: &str, params: &EntryParams) -> String {
+    let mut to = format!(
+        "/search?s={}&type={}",
+        percent_encode(params.q.as_deref().unwrap_or("")),
+        percent_encode(type_slug)
+    );
+    if let Some(term) = params.term.as_deref().filter(|t| !t.is_empty()) {
+        to.push_str("&term=");
+        to.push_str(&percent_encode(term));
+    }
+    to
 }
 
 /// The listing for one registered post type.
@@ -1537,10 +1719,14 @@ async fn published_by_id(state: &AppState, ids: &[i64]) -> Vec<PostRow> {
 /// nothing, so search still works on a deployment that has not been
 /// reindexed. Snippets travel with the hits: they say *why* a post
 /// matched, and were once computed and discarded.
-async fn search_hits(state: &AppState, term: &str) -> Option<Vec<(i64, String)>> {
+async fn search_hits(
+    state: &AppState,
+    term: &str,
+    scope: &vyasa_search::Scope,
+) -> Option<Vec<(i64, String)>> {
     let hits: Option<Vec<(i64, String)>> = match (&state.search_index, term.is_empty()) {
         (Some(index), false) => index
-            .search(term, None, usize::try_from(PAGE_SIZE).unwrap_or(10), 0)
+            .search_scoped(term, scope, usize::try_from(PAGE_SIZE).unwrap_or(10), 0)
             .ok()
             .filter(|hits| !hits.is_empty())
             .map(|hits| {
@@ -1572,6 +1758,7 @@ async fn search_hits(state: &AppState, term: &str) -> Option<Vec<(i64, String)>>
 }
 
 /// `GET /search?s=…` — full-text via Tantivy with DB fallback.
+#[allow(clippy::too_many_lines)]
 pub async fn search(
     State(state): State<AppState>,
     Query(q): Query<ListParams>,
@@ -1595,23 +1782,44 @@ pub async fn search(
     // The page number belongs in the key: without it every page of a
     // search answered — and cached — as page one.
     let page_no = q.page.unwrap_or(1).max(1);
-    let key = keys::search(&bundle.version, &term, page_no);
+    // The scope is part of what was asked, so it is part of the key.
+    let scope = vyasa_search::Scope {
+        post_type: q.post_type.clone().filter(|t| !t.is_empty()),
+        term: q.term.clone().filter(|t| t.contains(':')),
+    };
+    let key = keys::search(
+        &bundle.version,
+        &format!(
+            "{term}\u{1f}{}\u{1f}{}",
+            scope.post_type.as_deref().unwrap_or(""),
+            scope.term.as_deref().unwrap_or("")
+        ),
+        page_no,
+    );
     let origin = crate::feeds::origin_from_headers(&headers);
     respond_cached(state_ref, &headers, Some(key), async move {
         let site = page_meta::SiteContext::load(state_ref, &origin).await;
         let per_page = u32::try_from(site.per_page).unwrap_or(10);
-        let hits = search_hits(state_ref, &term).await;
+        let hits = search_hits(state_ref, &term, &scope).await;
         let indexed_ids: Option<Vec<i64>> =
             hits.as_ref().map(|h| h.iter().map(|(id, _)| *id).collect());
 
         let rows = if let Some(ids) = indexed_ids {
             published_by_id(state_ref, &ids).await
+        } else if scope.term.is_some() {
+            // The SQL fallback cannot honour a term, and showing results
+            // from outside the scope would be wrong: no match is no match.
+            Vec::new()
         } else {
             // Only types the public may see: no patterns, no custom type
             // that is not served publicly.
             let filter = PostFilter {
                 status: Some(PostStatus::Published),
                 search: Some(term.clone()).filter(|t| !t.is_empty()),
+                post_type: scope
+                    .post_type
+                    .as_deref()
+                    .and_then(|t| PostType::parse(t).ok()),
                 limit: per_page + 1,
                 offset: (page_no - 1).saturating_mul(per_page),
                 readable_types: crate::policy::readable_custom_types(state_ref, None).await,
@@ -1639,9 +1847,27 @@ pub async fn search(
                 }
             }
         }
-        let query = urlencode(&term);
+        let mut query = urlencode(&term);
+        if let Some(t) = &scope.post_type {
+            query.push_str("&type=");
+            query.push_str(&urlencode(t));
+        }
+        if let Some(t) = &scope.term {
+            query.push_str("&term=");
+            query.push_str(&urlencode(t));
+        }
+        let heading = match scope.post_type.as_deref() {
+            Some(t) => {
+                let plural =
+                    crate::entry_fields::served_type(&state_ref.plugin_surface, &state_ref.pool, t)
+                        .await
+                        .map_or_else(|| t.to_owned(), |d| d.plural);
+                format!("Search: {term} in {plural}")
+            }
+            None => format!("Search: {term}"),
+        };
         let page_ctx = PageContext {
-            title: format!("Search: {term}"),
+            title: heading.clone(),
             archive_title: Some(term.clone()),
             posts,
             pagination_page: page_no,
@@ -1650,7 +1876,7 @@ pub async fn search(
                 .then(|| format!("/search?s={query}&page={}", page_no - 1)),
             // A search result page is thin content; keep it out of the index.
             head: {
-                let mut head = page_meta::Head::page("/search", &format!("Search: {term}"), "");
+                let mut head = page_meta::Head::page("/search", &heading, "");
                 head.indexable = false;
                 head.filtered(state_ref).await.render(&site)
             },
@@ -1702,7 +1928,7 @@ pub async fn preview(
         // A composed page previewed without its own sections showed the
         // theme's default entry layout -- the one thing the author was
         // trying to look at was the thing left out.
-        sections: vyasa_themes::page_sections(post.layout.as_ref()),
+        sections: sections_for_entry(&state, &bundle, &post).await,
         post_type_slug: match post.post_type {
             PostType::Custom(t) => Some(t.to_owned()),
             _ => None,
@@ -2021,7 +2247,7 @@ async fn preview_single(
             ("body".to_owned(), content_html.clone()),
             ("content".to_owned(), content_html),
         ],
-        sections: vyasa_themes::page_sections(post.layout.as_ref()),
+        sections: sections_for_entry(state, bundle, &post).await,
         post_type_slug: match post.post_type {
             PostType::Custom(t) => Some(t.to_owned()),
             _ => None,
