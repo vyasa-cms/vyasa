@@ -164,7 +164,10 @@ fn parse_inner(
         let f = archive
             .by_index_raw(i)
             .map_err(|e| err(format!("corrupt entry #{i}: {e}")))?;
-        let name = f.name().to_owned();
+        let name = f
+            .name()
+            .map_err(|e| err(format!("entry #{i} has an unreadable name: {e}")))?
+            .into_owned();
         if name.starts_with('/')
             || name.contains('\\')
             || name.split('/').any(|s| s == ".." || s == ".")
