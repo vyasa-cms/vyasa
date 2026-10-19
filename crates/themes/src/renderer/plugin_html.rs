@@ -92,7 +92,7 @@ fn allowed_tags() -> HashSet<&'static str> {
 
 fn allowed_tag_attributes() -> HashMap<&'static str, HashSet<&'static str>> {
     HashMap::from([
-        ("a", set(["href", "title"])),
+        ("a", set(["href", "title", "rel"])),
         (
             "img",
             set(["src", "alt", "title", "width", "height", "loading"]),
@@ -149,8 +149,29 @@ fn filter_attribute<'u>(element: &str, attribute: &str, value: &'u str) -> Optio
             ok.then(keep).flatten()
         }
         ("input", "value") if v.len() > 256 => None,
+        ("a", "rel") => Some(Cow::Owned(safe_rel(v))),
         _ => Some(Cow::Borrowed(value)),
     }
+}
+
+/// Link relations a plugin may set; anything else is dropped.
+const RELS: &[&str] = &["prev", "next", "nofollow", "ugc", "sponsored", "external"];
+
+/// Keeps the allowed relations a plugin wrote and always adds
+/// `noopener noreferrer`, so a pager can say `prev`/`next` without
+/// giving up the safe default.
+fn safe_rel(value: &str) -> String {
+    let mut out: Vec<&str> = Vec::new();
+    for token in value.split_ascii_whitespace() {
+        let token = RELS.iter().find(|r| r.eq_ignore_ascii_case(token));
+        if let Some(t) = token {
+            if !out.contains(t) {
+                out.push(t);
+            }
+        }
+    }
+    out.extend(["noopener", "noreferrer"]);
+    out.join(" ")
 }
 
 /// Sanitizes HTML produced by a plugin block or section.
@@ -180,9 +201,33 @@ pub fn sanitize_plugin_html(html: &str) -> String {
         .set_tag_attribute_value("button", "type", "button")
         .set_tag_attribute_value("form", "method", "get")
         .url_relative(ammonia::UrlRelative::PassThrough)
-        .link_rel(Some("noopener noreferrer"))
+        .link_rel(None)
         .attribute_filter(filter_attribute);
-    builder.clean(html).to_string()
+    add_default_rel(&builder.clean(html).to_string())
+}
+
+/// Gives every link that has no `rel` the safe default. The filter above
+/// only sees attributes that exist, so a bare `<a>` is handled here, on
+/// the sanitiser's own output, where `<a` is followed by a space and
+/// `>` inside an attribute value is escaped as `&gt;`.
+fn add_default_rel(html: &str) -> String {
+    let mut out = String::with_capacity(html.len());
+    let mut rest = html;
+    while let Some(i) = rest.find("<a ") {
+        let (head, tail) = rest.split_at(i);
+        out.push_str(head);
+        let end = tail.find('>').map_or(tail.len(), |e| e + 1);
+        let tag = &tail[..end];
+        if tag.contains(" rel=\"") || !tag.ends_with('>') {
+            out.push_str(tag);
+        } else {
+            out.push_str(&tag[..tag.len() - 1]);
+            out.push_str(" rel=\"noopener noreferrer\">");
+        }
+        rest = &tail[end..];
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Replaces `[[vy-child-N]]` in a plugin block's sanitised HTML with the
@@ -330,6 +375,21 @@ mod tests {
     fn links_get_a_safe_rel() {
         assert!(sanitize_plugin_html(r#"<a href="https://x.test">x</a>"#)
             .contains("rel=\"noopener noreferrer\""));
+        assert_eq!(
+            sanitize_plugin_html(r#"<a href="/x" title="a > b">x</a>"#),
+            r#"<a href="/x" title="a &gt; b" rel="noopener noreferrer">x</a>"#
+        );
+    }
+
+    #[test]
+    fn allowed_rels_survive_and_others_are_dropped() {
+        let out = sanitize_plugin_html(
+            r#"<a href="/a" rel="prev">a</a><a href="/b" rel="NEXT opener me">b</a>"#,
+        );
+        assert!(out.contains(r#"rel="prev noopener noreferrer""#), "{out}");
+        assert!(out.contains(r#"rel="next noopener noreferrer""#), "{out}");
+        assert!(!out.contains("opener me"), "{out}");
+        assert_eq!(out.matches("rel=").count(), 2, "{out}");
     }
 }
 

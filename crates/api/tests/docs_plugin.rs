@@ -354,7 +354,8 @@ async fn documentation_renders_navigates_mirrors_and_searches() {
         "{page}"
     );
     assert!(
-        page.contains("docs-pager__prev") && page.contains("docs-pager__next"),
+        page.contains("rel=\"prev noopener noreferrer\"")
+            && page.contains("rel=\"next noopener noreferrer\""),
         "{page}"
     );
     assert!(page.contains("docs-crumbs"), "{page}");
