@@ -24,6 +24,8 @@ mod cdn;
 mod client_ip;
 mod comment_notifier;
 mod content_queries;
+#[cfg(test)]
+mod docs_sync_tests;
 mod entry_fields;
 mod error;
 mod event_bridge;
