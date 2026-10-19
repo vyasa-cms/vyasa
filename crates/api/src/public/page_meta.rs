@@ -255,6 +255,9 @@ pub struct Head {
     pub social_description: Option<String>,
     /// A second JSON-LD document (FAQ, HowTo, Product) beside Article.
     pub structured: Option<serde_json::Value>,
+    /// The entry's ancestors then itself, as (title, site path), for a
+    /// `BreadcrumbList`. Empty for a top-level entry.
+    pub breadcrumbs: Vec<(String, String)>,
     /// Translations of this page: (language tag, absolute or site path).
     pub alternates: Vec<(String, String)>,
 }
@@ -277,6 +280,13 @@ fn pick_canonical(
 }
 
 impl Head {
+    /// Attaches the entry's ancestors and itself, for `BreadcrumbList`.
+    #[must_use]
+    pub fn with_breadcrumbs(mut self, breadcrumbs: Vec<(String, String)>) -> Self {
+        self.breadcrumbs = breadcrumbs;
+        self
+    }
+
     /// Attaches the page's translations, for hreflang links.
     #[must_use]
     pub fn with_alternates(mut self, alternates: Vec<(String, String)>) -> Self {
@@ -345,6 +355,7 @@ impl Head {
             social_title: meta("og_title"),
             social_description: meta("og_description"),
             structured: crate::seo::structured_data(post, path),
+            breadcrumbs: Vec::new(),
         }
     }
 
@@ -524,7 +535,12 @@ impl Head {
     }
 
     fn json_ld(&self, site: &SiteContext) -> String {
-        let main = self.json_ld_main(site);
+        let mut main = self.json_ld_main(site);
+        if let Some(list) = self.breadcrumb_list(site) {
+            main.push_str("\n<script type=\"application/ld+json\">");
+            main.push_str(&list.replace("</", "<\\/"));
+            main.push_str("</script>");
+        }
         match &self.structured {
             Some(doc) => format!(
                 "{main}\n<script type=\"application/ld+json\">{}</script>",
@@ -534,6 +550,33 @@ impl Head {
             ),
             None => main,
         }
+    }
+
+    /// `BreadcrumbList` for an entry with ancestors; needs the site's own
+    /// address, since schema.org wants absolute item URLs.
+    fn breadcrumb_list(&self, site: &SiteContext) -> Option<String> {
+        if self.breadcrumbs.len() < 2 {
+            return None;
+        }
+        let items = self
+            .breadcrumbs
+            .iter()
+            .enumerate()
+            .map(|(i, (name, path))| {
+                Some(serde_json::json!({
+                    "@type": "ListItem",
+                    "position": i + 1,
+                    "name": name,
+                    "item": site.absolute(path)?,
+                }))
+            })
+            .collect::<Option<Vec<_>>>()?;
+        serde_json::to_string(&serde_json::json!({
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            "itemListElement": items,
+        }))
+        .ok()
     }
 
     fn json_ld_main(&self, site: &SiteContext) -> String {

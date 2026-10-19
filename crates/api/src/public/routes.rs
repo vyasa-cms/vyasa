@@ -777,6 +777,7 @@ pub(super) async fn render_single(
             .get(&post.author_id)
             .cloned();
         let path = site.permalinks.path_for(&post);
+        let breadcrumbs = breadcrumbs_for(state_ref, &site, &post, &path).await;
         let notice = params
             .comment
             .as_deref()
@@ -833,6 +834,7 @@ pub(super) async fn render_single(
             lang: (!post.lang.is_empty()).then(|| post.lang.clone()),
             head: page_meta::Head::entry(&post, &path, author)
                 .with_alternates(alternates)
+                .with_breadcrumbs(breadcrumbs)
                 .filtered(state_ref)
                 .await
                 .render(&site),
@@ -961,6 +963,38 @@ async fn hreflang_links(state: &AppState, site: &page_meta::SiteContext, post_id
         }
     }
     out
+}
+
+/// The entry's published ancestors then the entry, as (title, path), for
+/// structured data. Empty for an entry at the top of its tree. An ancestor
+/// that is not live (draft, private, password) means no trail, rather than
+/// one that leaks its title or skips a level.
+async fn breadcrumbs_for(
+    state: &AppState,
+    site: &page_meta::SiteContext,
+    post: &PostRow,
+    path: &str,
+) -> Vec<(String, String)> {
+    let Some(tree_path) = post.path.as_deref().filter(|p| p.contains('/')) else {
+        return Vec::new();
+    };
+    let mut trail = Vec::new();
+    let mut prefix = String::new();
+    let segments: Vec<&str> = tree_path.split('/').collect();
+    for segment in &segments[..segments.len() - 1] {
+        if !prefix.is_empty() {
+            prefix.push('/');
+        }
+        prefix.push_str(segment);
+        match state.posts.get_by_path(post.post_type, &prefix).await {
+            Ok(row) if crate::seo::is_live(row.status) && row.password_hash.is_none() => {
+                trail.push((row.title.clone(), site.permalinks.path_for(&row)));
+            }
+            _ => return Vec::new(),
+        }
+    }
+    trail.push((post.title.clone(), path.to_owned()));
+    trail
 }
 
 /// Renders one entry, handing the renderer its structured content and the

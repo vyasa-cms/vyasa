@@ -549,6 +549,31 @@ async fn the_archive_of_a_hierarchical_type_redirects_to_its_first_root_and_sear
 }
 
 #[tokio::test]
+async fn a_nested_entry_carries_breadcrumb_structured_data() {
+    let (_db, server, a) = site().await;
+    let base = server.base();
+    let g = post(base, &a, "guide", "Guides", None);
+    let api = post(base, &a, "guide", "API", Some(&g));
+    let _i = post(base, &a, "guide", "Install", Some(&api));
+    let (s, html) = get_public(base, "/guide/guides/api/install");
+    assert_eq!(s, 200, "{html}");
+    let list: Value = html
+        .split("<script type=\"application/ld+json\">")
+        .filter_map(|s| s.split("</script>").next())
+        .filter_map(|s| serde_json::from_str::<Value>(s).ok())
+        .find(|v| v["@type"] == "BreadcrumbList")
+        .expect("a BreadcrumbList");
+    let items = list["itemListElement"].as_array().expect("items");
+    let names: Vec<&str> = items.iter().filter_map(|i| i["name"].as_str()).collect();
+    assert_eq!(names, ["Guides", "API", "Install"]);
+    assert_eq!(items[2]["position"], 3);
+    assert_eq!(items[1]["item"], format!("{base}/guide/guides/api"));
+
+    let (_, top) = get_public(base, "/guide/guides");
+    assert!(!top.contains("BreadcrumbList"), "a root entry has no trail");
+}
+
+#[tokio::test]
 async fn existing_urls_are_unchanged() {
     let db = TestDb::new().await;
     let admin = common::seed_user(db.pool(), Role::Admin).await;
