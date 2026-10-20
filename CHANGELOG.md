@@ -15,6 +15,7 @@ follows [semantic versioning](https://semver.org) as described in
   earlier keys stay trusted, so every package they signed still installs.
   Packages signed only with the new key (the first is the Docs plugin's
   listing) need 0.3.1 or later.
+- wasmtime 49.0.4 (RUSTSEC-2026-0378, RUSTSEC-2026-0379).
 
 ## [0.3.0] - 2026-10-19
 
