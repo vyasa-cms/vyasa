@@ -7,6 +7,15 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-10-20
+
+### Security
+
+- A new marketplace signing key is compiled in as the live key; the two
+  earlier keys stay trusted, so every package they signed still installs.
+  Packages signed only with the new key (the first is the Docs plugin's
+  listing) need 0.3.1 or later.
+
 ## [0.3.0] - 2026-10-19
 
 Documentation sites. Entries of a content type can now form a tree with
