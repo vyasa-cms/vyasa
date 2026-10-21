@@ -22,6 +22,12 @@ follows [semantic versioning](https://semver.org) as described in
   Each page shows its title as a heading, and the page drawer is labelled
   "Pages".
 
+### Security
+
+- rustls-webpki 0.103.16 and webpki-roots / webpki-root-certs 1.0.10
+  (RUSTSEC-2026-0381, RUSTSEC-2026-0382, RUSTSEC-2026-0383); vite 8.3.4 in
+  the admin build (launch-editor advisories).
+
 ## [0.3.1] - 2026-10-20
 
 ### Security
