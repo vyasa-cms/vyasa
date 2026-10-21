@@ -1,6 +1,6 @@
 # The official image plus an entrypoint that takes ownership of the volume
 # (platforms mount it as root) and drops to the image's user to serve.
-FROM ghcr.io/vyasa-cms/vyasa:0.3.1
+FROM ghcr.io/vyasa-cms/vyasa:0.3.2
 USER root
 COPY entrypoint.sh /usr/local/bin/vyasa-entrypoint
 RUN chmod 0755 /usr/local/bin/vyasa-entrypoint

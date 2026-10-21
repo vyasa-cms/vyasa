@@ -2729,7 +2729,7 @@ dependencies = [
  "tokio",
  "tokio-rustls",
  "url",
- "webpki-roots 1.0.9",
+ "webpki-roots 1.0.10",
 ]
 
 [[package]]
@@ -4113,9 +4113,9 @@ checksum = "f87165f0995f63a9fbeea62b64d10b4d9d8e78ec6d7d51fb2125fda7bb36788f"
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.15"
+version = "0.103.16"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c3cf1d8b1e7d4927e2d154c3fcb02979afb9939629c62cd9048d4f07b60ac2"
+checksum = "4443b1b6d39d7c663139942cc4558262562d2c84123bb6282ef177009ca8b281"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -4547,7 +4547,7 @@ dependencies = [
  "tokio-stream",
  "tracing",
  "url",
- "webpki-roots 1.0.9",
+ "webpki-roots 1.0.10",
 ]
 
 [[package]]
@@ -5006,7 +5006,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "32497e9a4c7b38532efcdebeef879707aa9f794296a4f0244f6f69e9bc8574bd"
 dependencies = [
  "fastrand",
- "getrandom 0.4.3",
+ "getrandom 0.3.4",
  "once_cell",
  "rustix",
  "windows-sys 0.61.2",
@@ -5683,7 +5683,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vyasa-ai"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "base64 0.23.1",
  "reqwest",
@@ -5699,7 +5699,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-api"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ammonia",
  "async-graphql",
@@ -5757,7 +5757,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-common"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "config",
  "criterion",
@@ -5770,7 +5770,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-core"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "argon2",
  "async-trait",
@@ -5803,7 +5803,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-db"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "chrono",
  "serde",
@@ -5818,7 +5818,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-jobs"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "chrono",
  "lettre",
@@ -5838,7 +5838,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-plugins"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ammonia",
  "chrono",
@@ -5863,7 +5863,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-search"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "tantivy",
  "tempfile",
@@ -5874,7 +5874,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-testkit"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ed25519-dalek",
  "hex",
@@ -5891,7 +5891,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-themes"
-version = "0.3.1"
+version = "0.3.2"
 dependencies = [
  "ammonia",
  "chrono",
@@ -6435,9 +6435,9 @@ dependencies = [
 
 [[package]]
 name = "webpki-root-certs"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b96554aa2acc8ccdb7e1c9a58a7a68dd5d13bccc69cd124cb09406db612a1c9b"
+checksum = "58ec80e73fd8baf57bf0d9615554c75348bda990d6d5bbeab964dd068319fecb"
 dependencies = [
  "rustls-pki-types",
 ]
@@ -6448,14 +6448,14 @@ version = "0.26.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "521bc38abb08001b01866da9f51eb7c5d647a19260e00054a8c7fd5f9e57f7a9"
 dependencies = [
- "webpki-roots 1.0.9",
+ "webpki-roots 1.0.10",
 ]
 
 [[package]]
 name = "webpki-roots"
-version = "1.0.9"
+version = "1.0.10"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dcd9d09a39985f5344844e66b0c530a33843579125f23e21e9f0f220850f22a"
+checksum = "1c1c8e20c8a38fc7d65abfe74eb7280e4aa667e8eec8bc84996d2874810748d9"
 dependencies = [
  "rustls-pki-types",
 ]

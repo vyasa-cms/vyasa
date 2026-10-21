@@ -513,3 +513,45 @@ async fn the_webhook_queues_a_sync_only_for_a_correctly_signed_push() {
         Some("0123456789abcdef0123456789abcdef01234567")
     );
 }
+
+async fn task_names(pool: &PgPool, plugin_id: i64) -> Vec<String> {
+    sqlx::query_scalar("SELECT name FROM plugin_tasks WHERE plugin_id = $1 ORDER BY name")
+        .bind(plugin_id)
+        .fetch_all(pool)
+        .await
+        .unwrap()
+}
+
+/// A plugin enabled on a running site has its scheduled tasks at once, not
+/// after the next restart; disabling it takes them away again.
+#[tokio::test]
+async fn enabling_at_runtime_schedules_the_plugins_tasks() {
+    let db = TestDb::new().await;
+    seed(db.pool()).await;
+    let id: i64 = sqlx::query_scalar("SELECT id FROM plugins WHERE name = 'vyasa-docs'")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    vyasa_db::repo::PluginsRepo::new(db.pool().clone())
+        .set_enabled(id, false)
+        .await
+        .unwrap();
+    let server = TestServer::start(common::BIN, &db);
+    let base = server.base();
+    let cookie = login(base);
+    assert!(task_names(db.pool(), id).await.is_empty());
+
+    let toggle = |action: &str| {
+        http(
+            ureq::post(format!("{base}/api/v1/plugins/{id}/{action}").as_str())
+                .set("Cookie", &cookie)
+                .set("Origin", base)
+                .call(),
+        )
+        .status()
+    };
+    assert_eq!(toggle("enable"), 200);
+    assert_eq!(task_names(db.pool(), id).await, vec!["sync".to_owned()]);
+    assert_eq!(toggle("disable"), 200);
+    assert!(task_names(db.pool(), id).await.is_empty());
+}
