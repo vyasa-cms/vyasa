@@ -7,6 +7,12 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Fixed
+
+- Docs plugin 0.1.3: after an upgrade that changes how pages are imported,
+  the next sync rewrites them even when the repository has no new commit.
+  0.1.2's changes reached existing sites only with the next push.
+
 ## [0.3.3] - 2026-10-21
 
 ### Fixed

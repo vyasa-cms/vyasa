@@ -280,7 +280,10 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
                 github::encode_path(&cx.cfg.branch)
             );
             let etag = cx.env.kv_get("sync/commit-etag");
-            let done = cx.env.kv_get("sync/complete").as_deref() == Some("1");
+            // Done means done by this importer: after an upgrade that
+            // changes what pages are made of, the same commit syncs again.
+            let done = cx.env.kv_get("sync/complete").as_deref() == Some("1")
+                && cx.env.kv_get("sync/format").as_deref() == Some(FORMAT);
             let r = cx.get(
                 &url,
                 "application/vnd.github.sha",
@@ -458,6 +461,7 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
         cx.env.kv_set("sync/commit-etag", &next)?;
     }
     cx.env.kv_set("sync/complete", "1")?;
+    cx.env.kv_set("sync/format", FORMAT)?;
     cx.env
         .kv_set("sync/last-ok-ms", &cx.env.now_ms().to_string())?;
     Ok(())
@@ -1243,6 +1247,27 @@ mod tests {
         assert!(report.up_to_date && report.finished, "{report:?}");
         assert_eq!(f.borrow().requests.len() - before, 1);
         assert_eq!(report.created + report.updated, 0);
+    }
+
+    #[test]
+    fn a_sync_by_an_older_importer_runs_again_on_the_same_commit() {
+        let f = fake_with(repo_one());
+        let b = budget(&f);
+        run(&mut Wrap(&f), &cfg(), None, b).unwrap();
+        // What a site synced by the previous plugin version holds: complete,
+        // with no format recorded (or an older one).
+        f.borrow().kv.borrow_mut().remove("sync/format");
+        let b = budget(&f);
+        let report = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
+        assert!(!report.up_to_date && report.finished, "{report:?}");
+        assert_eq!(
+            f.borrow()
+                .kv
+                .borrow()
+                .get("sync/format")
+                .map(String::as_str),
+            Some(FORMAT)
+        );
     }
 
     #[test]
