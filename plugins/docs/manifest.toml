@@ -1,5 +1,5 @@
 name = "vyasa-docs"
-version = "0.1.0"
+version = "0.1.1"
 min_host_api = 2
 description = "Documentation sites: a Docs section synced from a GitHub repository, with a sidebar, contents, pager, versions, search, tabs, steps and callouts."
 author = "Vyasa Team"

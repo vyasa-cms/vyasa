@@ -177,7 +177,7 @@ impl Page {
 #[must_use]
 pub fn sidebar(page: &Page, latest_label: &str) -> String {
     let mut out = String::from(
-        "<details class=\"docs-drawer\" open><summary class=\"docs-drawer__toggle\">Menu</summary>",
+        "<details class=\"docs-drawer\" open><summary class=\"docs-drawer__toggle\">Pages</summary>",
     );
     out.push_str(&version_switcher(page, latest_label));
     out.push_str("<nav class=\"docs-nav\" aria-label=\"Documentation\">");
@@ -348,6 +348,12 @@ pub fn breadcrumbs(page: &Page, home_label: &str) -> String {
         "<li aria-current=\"page\">{}</li></ol></nav>",
         esc(&cur.title)
     ));
+    // The page's own `# Heading` became its title and left the body, so
+    // the heading is drawn here, under the trail that leads to it.
+    out.push_str(&format!(
+        "<h1 class=\"docs-title\">{}</h1>",
+        esc(&cur.title)
+    ));
     out
 }
 
@@ -514,6 +520,7 @@ mod tests {
         assert!(html.contains("<a href=\"/docs\">Docs</a>"));
         assert!(!html.contains(">v1<"));
         assert!(html.contains("aria-current=\"page\">Old install"));
+        assert!(html.ends_with("<h1 class=\"docs-title\">Old install</h1>"));
     }
 
     #[test]

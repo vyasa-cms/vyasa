@@ -23,13 +23,31 @@
   max-width: 90rem;
   margin-inline: auto;
 }
-.vy-section.vy-columns[data-section="docs-layout"] > * { min-width: 0; }
+.vy-section.vy-columns[data-section="docs-layout"] > * { min-width: 0; margin-inline: 0; }
 [data-section="docs-side"], [data-section="docs-aside"] { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; }
 @media (max-width: 64rem) {
   .vy-section.vy-columns[data-section="docs-layout"] { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
   [data-section="docs-side"], [data-section="docs-aside"] { position: static; max-height: none; overflow: visible; }
-  [data-section="docs-aside"] { order: -1; }
+  /* On a phone: search and the menu, then "On this page", then the page. */
+  [data-section="docs-main"] { order: 1; }
 }
+
+/* A theme's section rules are written for full-width bands on a landing
+   page (generous block padding, a gutter on every child). Applied again at
+   every level inside the docs layout they stack into empty gaps and a page
+   wider than the phone, so the layout keeps one gutter, its own. */
+.vy-section.vy-columns[data-section="docs-layout"] { padding-block: 1.5rem; }
+[data-section="docs-layout"] .vy-section { padding-block: 0; margin-block: 0; }
+[data-section="docs-layout"] .vy-section > * { padding-inline: 0; max-width: none; }
+[data-section="docs-layout"] > .vy-group { margin-block: 0; }
+[data-section="docs-layout"] .vy-group > * + * { margin-top: 1rem; }
+[data-section="docs-layout"] .vy-table, [data-section="docs-layout"] pre { max-width: 100%; overflow-x: auto; }
+[data-section="docs-layout"] :not(pre) > code { overflow-wrap: anywhere; }
+[data-section="docs-layout"] img, [data-section="docs-layout"] video { max-width: 100%; height: auto; }
+/* No banner on the latest version: no empty band either. */
+.vy-section--docs\/version-banner:not(:has(.docs-banner)) { display: none; }
+
+.docs-title { margin: .5rem 0 1rem; font-size: clamp(1.75rem, 1.2rem + 2.4vw, 2.5rem); line-height: 1.15; letter-spacing: -.02em; }
 
 /* Drawers: always open on a wide screen; the script closes them on a phone. */
 .docs-drawer > summary, .docs-toc__drawer > summary {

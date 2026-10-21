@@ -7,6 +7,21 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-21
+
+### Fixed
+
+- A plugin installed or enabled on a running site has its scheduled tasks at
+  once. Before, they were only recorded at the next restart, so the Docs
+  plugin installed from the marketplace never synced until then. Disabling a
+  plugin drops its tasks.
+- Docs plugin 0.1.1: documentation reads well on a phone. The layout keeps a
+  single gutter whatever the theme's section padding, wide tables and code
+  scroll inside their box, long inline code wraps, an empty version banner
+  leaves no gap, and the order is search, pages, contents, then the page.
+  Each page shows its title as a heading, and the page drawer is labelled
+  "Pages".
+
 ## [0.3.1] - 2026-10-20
 
 ### Security
