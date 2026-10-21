@@ -7,6 +7,17 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-10-21
+
+### Fixed
+
+- Site search leaves out entries marked `noindex`, as search engines do.
+- Indexed text is the words a reader sees: inline markup (`<code>`, links,
+  `&amp;`) no longer shows in search snippets.
+- Docs plugin 0.1.2: a hidden folder hides everything in it, and hidden pages
+  are marked `noindex`, so they stay out of the sidebar, the pager and
+  search while keeping their addresses. The next sync rewrites every page.
+
 ## [0.3.2] - 2026-10-21
 
 ### Fixed

@@ -28,7 +28,13 @@ use crate::state::AppState;
 /// Only published posts belong in the index — search must not leak drafts,
 /// scheduled posts or private ones.
 fn is_publicly_searchable(row: &PostRow) -> bool {
-    row.status == PostStatus::Published && row.password_hash.is_none()
+    row.status == PostStatus::Published && row.password_hash.is_none() && !asks_noindex(&row.meta)
+}
+
+/// An entry that asks search engines to skip it (`seo_noindex`) is kept out
+/// of the site's own search too: a hidden documentation page, for one.
+fn asks_noindex(meta: &serde_json::Value) -> bool {
+    meta.get("seo_noindex").and_then(serde_json::Value::as_bool) == Some(true)
 }
 
 /// Whether entries of this type belong in public search at all.
@@ -382,6 +388,13 @@ pub fn converge_on_boot(state: &AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_entry_marked_noindex_stays_out_of_search() {
+        assert!(asks_noindex(&serde_json::json!({"seo_noindex": true})));
+        assert!(!asks_noindex(&serde_json::json!({"seo_noindex": false})));
+        assert!(!asks_noindex(&serde_json::json!({})));
+    }
 
     #[test]
     fn only_publicly_served_types_are_searchable() {

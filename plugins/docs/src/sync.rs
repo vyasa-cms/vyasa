@@ -19,7 +19,7 @@ use crate::github::{self, Repo};
 use crate::plan::{self, Kind, Meta, PageInfo, Planned, Root};
 
 /// Bump to rewrite every entry after an importer change.
-pub const FORMAT: &str = "f1";
+pub const FORMAT: &str = "f2";
 /// Largest page the importer reads.
 pub const MAX_PAGE_BYTES: u64 = 512 * 1024;
 /// Page text kept between the scan and the write of one run.
@@ -847,10 +847,16 @@ fn build_page_entry(
                 .then_some(latest)
         })
         .flatten();
-    let seo = canonical.map_or_else(
-        || "{}".to_owned(),
-        |c| serde_json::json!({ "canonical-path": c }).to_string(),
-    );
+    // A hidden page is reachable by its address but kept out of search
+    // and search engines, like it is kept out of the sidebar.
+    let mut seo = serde_json::Map::new();
+    if let Some(c) = canonical {
+        seo.insert("canonical-path".to_owned(), c.into());
+    }
+    if pe.planned.hide {
+        seo.insert("noindex".to_owned(), true.into());
+    }
+    let seo = serde_json::Value::Object(seo).to_string();
     let mut blocks = converted.blocks;
     if blocks.is_empty() {
         blocks
@@ -1423,6 +1429,27 @@ mod tests {
         assert!(run(&mut Wrap(&f), &cfg(), None, b)
             .unwrap_err()
             .contains("token"));
+    }
+
+    #[test]
+    fn hidden_pages_and_folders_are_kept_out_of_search() {
+        let mut files = repo_one();
+        files.insert(
+            "docs/secret.md".into(),
+            "---\nhide: true\n---\n# Secret\n".into(),
+        );
+        files.insert(
+            "docs/_meta.json".into(),
+            r#"{"guides": {"title": "Guides", "hidden": true}}"#.into(),
+        );
+        let f = fake_with(files);
+        let b = budget(&f);
+        assert!(run(&mut Wrap(&f), &cfg(), None, b).unwrap().finished);
+        let fk = f.borrow();
+        let noindex = |key: &str| fk.entries[key].0.seo_json.contains("\"noindex\":true");
+        assert!(noindex("main:secret.md"));
+        assert!(noindex("main:guides/install.md"), "inside a hidden folder");
+        assert!(!noindex("main:intro.md"));
     }
 
     #[test]

@@ -228,6 +228,17 @@ pub fn plan_tree(
         &mut out,
         &mut warnings,
     );
+    // A hidden folder hides what it holds: out of the sidebar, the pager
+    // and search alike. Parents come before their children in `out`.
+    let mut hidden: BTreeSet<String> = BTreeSet::new();
+    for p in &mut out {
+        if p.parent_key.as_ref().is_some_and(|k| hidden.contains(k)) {
+            p.hide = true;
+        }
+        if p.hide {
+            hidden.insert(p.key.clone());
+        }
+    }
     (out, warnings)
 }
 
@@ -483,6 +494,27 @@ mod tests {
         assert_eq!(order, ["beta", "alpha", "gamma", "zeta"]);
         assert_eq!(planned[0].position, 10);
         assert_eq!(planned[3].position, 40);
+    }
+
+    #[test]
+    fn everything_inside_a_hidden_folder_is_hidden() {
+        let pages = vec![
+            page("index.md", "Welcome"),
+            page("guide.md", "Guide"),
+            page("specs/a.md", "A"),
+            page("specs/deep/b.md", "B"),
+        ];
+        let mut metas = BTreeMap::new();
+        metas.insert(
+            String::new(),
+            parse_meta(r#"{"specs": {"title": "Specs", "hidden": true}}"#),
+        );
+        let (planned, _) = plan_tree(&pages, &metas, &root());
+        for p in &planned {
+            let inside = p.site_path.starts_with("/docs/specs");
+            assert_eq!(p.hide, inside, "{} hide={}", p.site_path, p.hide);
+        }
+        assert!(planned.iter().any(|p| p.site_path == "/docs/specs/deep/b"));
     }
 
     #[test]
