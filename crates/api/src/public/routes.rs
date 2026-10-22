@@ -739,7 +739,11 @@ pub(super) async fn render_single(
     // fresh, or the cached page would show the old state until its TTL.
     let near_boundary = serde_json::from_value::<vyasa_core::BlockDocument>(post.content.clone())
         .is_ok_and(|d| vyasa_themes::timed_boundary_within(&d.blocks, 3600));
-    let cacheable = params.comment.is_none() && params.reply_to.is_none() && !near_boundary;
+    // A later page of a paginated listing is not the entry's cached page.
+    let cacheable = params.comment.is_none()
+        && params.reply_to.is_none()
+        && params.page.is_none()
+        && !near_boundary;
     let key = cacheable.then(|| {
         keys::single(
             &bundle.version,
@@ -854,6 +858,8 @@ pub(super) async fn render_single(
                 _ => None,
             },
             entry: Some(entry_context(state_ref, &post).await),
+            // Which page a paginated listing on this entry shows.
+            pagination_page: params.page.unwrap_or(1).max(1),
             ..PageContext::default()
         };
         let mut page_ctx = page_ctx;

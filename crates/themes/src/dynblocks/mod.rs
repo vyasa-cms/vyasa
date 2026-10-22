@@ -35,6 +35,8 @@ pub struct ResolveContext<'a> {
     /// Comment the visitor is replying to (`?reply_to=`), when any. The
     /// comment form nests its reply under it.
     pub reply_to: Option<i64>,
+    /// Page of a paginated listing on this entry (`?page=`), 1-based.
+    pub page: u32,
     /// Studio preview render: resolvers may emit editing markers
     /// (`data-vy-edit`). Never set on public renders — a test guards it.
     pub editor: bool,
@@ -49,6 +51,7 @@ impl<'a> ResolveContext<'a> {
             post_id,
             content_blocks: None,
             reply_to: None,
+            page: 1,
             editor: false,
         }
     }
@@ -336,10 +339,12 @@ fn check_collection(s: &MapSettings) -> Vec<String> {
 }
 
 fn check_latest_posts(s: &MapSettings) -> Vec<String> {
-    uint_setting(s, "count", 1, 20, 5)
+    let mut errors: Vec<String> = uint_setting(s, "count", 1, 20, 5)
         .err()
         .into_iter()
-        .collect()
+        .collect();
+    errors.extend(bool_setting(s, "paginate").err());
+    errors
 }
 
 fn check_categories_list(s: &MapSettings) -> Vec<String> {
@@ -418,7 +423,10 @@ fn blocks_first_half() -> [Builtin; 6] {
             description: "Most recent published posts",
             schema: serde_json::json!({
                 "type": "object",
-                "properties": {"count": {"type": "integer", "minimum": 1, "maximum": 20}},
+                "properties": {
+                    "count": {"type": "integer", "minimum": 1, "maximum": 20},
+                    "paginate": {"type": "boolean"}
+                },
                 "additionalProperties": false
             }),
             check: check_latest_posts,

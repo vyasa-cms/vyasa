@@ -47,17 +47,26 @@ pub fn card_html_for_test(p: &PostCardData) -> String {
 
 /// One entry card, shared by every card-list block so they all read the
 /// same to a stylesheet.
+/// "Author · date", leaving out whichever is missing so a card never
+/// starts or ends with a stray separator.
+fn card_meta(author: &str, date: &str) -> String {
+    [author, date]
+        .into_iter()
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(" · ")
+}
+
 fn card_html(html: &mut String, p: &PostCardData, show_image: bool, show_excerpt: bool) {
     let _ = std::fmt::Write::write_fmt(
         html,
         format_args!(
             "<article class=\"vy-post-card\">\
              <a class=\"vy-post-card__link\" href=\"{}\">{}</a>\
-             <span class=\"vy-post-card__meta\">{} · {}</span>",
+             <span class=\"vy-post-card__meta\">{}</span>",
             esc(&p.url),
             esc(&p.title),
-            esc(&p.author),
-            esc(&p.date),
+            esc(&card_meta(&p.author, &p.date)),
         ),
     );
     if show_image {
@@ -101,12 +110,26 @@ pub fn latest_posts<'a>(
 ) -> BoxFut<'a, BlockPayload> {
     let count = uint(settings, "count", 5);
     let category = str_of(settings, "category");
-    let fut = ctx
-        .queries
-        .entries("post", EntrySort::Newest, count, category);
+    // A paginated list reads `?page=` and asks for one more entry than it
+    // shows: that extra one is how it knows an older page exists.
+    let paginate = settings
+        .get("paginate")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    let page = if paginate { ctx.page.max(1) } else { 1 };
+    let offset = (page - 1).saturating_mul(count);
+    let fut = ctx.queries.entries_page(
+        "post",
+        EntrySort::Newest,
+        count + u32::from(paginate),
+        offset,
+        category,
+    );
     Box::pin(async move {
-        let posts = fut.await?;
-        if posts.is_empty() {
+        let mut posts = fut.await?;
+        let older = posts.len() > count as usize;
+        posts.truncate(count as usize);
+        if posts.is_empty() && page == 1 {
             return Ok(BlockPayload::Empty);
         }
         let mut html = String::from("<div class=\"vy-latest-posts\">");
@@ -114,6 +137,23 @@ pub fn latest_posts<'a>(
             card_html(&mut html, p, true, true);
         }
         html.push_str("</div>");
+        if paginate && (page > 1 || older) {
+            html.push_str("<nav class=\"vy-pagination\">");
+            if page > 1 {
+                let _ = std::fmt::Write::write_fmt(
+                    &mut html,
+                    format_args!("<a href=\"?page={}\" rel=\"prev\">← Newer</a>", page - 1),
+                );
+            }
+            let _ = std::fmt::Write::write_fmt(&mut html, format_args!("<span>{page}</span>"));
+            if older {
+                let _ = std::fmt::Write::write_fmt(
+                    &mut html,
+                    format_args!("<a href=\"?page={}\" rel=\"next\">Older →</a>", page + 1),
+                );
+            }
+            html.push_str("</nav>");
+        }
         Ok(BlockPayload::Html(html))
     })
 }

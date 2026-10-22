@@ -57,6 +57,8 @@ pub struct BoundQuery<'a> {
     pub filters: &'a [(String, serde_json::Value)],
     /// At most this many.
     pub limit: u32,
+    /// Skipping this many first.
+    pub offset: u32,
 }
 
 /// How a listing orders its rows.
@@ -400,7 +402,10 @@ impl PostsRepo {
                     SELECT 1 FROM jsonb_array_elements($3::jsonb) c
                     WHERE NOT COALESCE((p.meta->'fields'->(c->>0)) @> (c->1), false))
              ORDER BY {order}
-             LIMIT $4"
+             LIMIT $4 OFFSET {offset}",
+            // An integer, so formatting it in cannot inject anything; the
+            // optional `$5` above keeps the numbered binds from taking it.
+            offset = q.offset
         );
         let mut query = sqlx::query_as(sqlx::AssertSqlSafe(sql))
             .bind(q.post_type.as_str())

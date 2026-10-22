@@ -272,6 +272,7 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
         post_id,
         content_blocks,
         reply_to,
+        page: page.pagination_page.max(1),
         editor,
     };
     let default_name = match template {
