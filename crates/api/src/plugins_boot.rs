@@ -283,11 +283,17 @@ mod tests {
         "/../../plugin-sdk/examples/bookshelf/bookshelf-component.wasm"
     );
 
+    /// The content-type registry is shared by every test in this process,
+    /// and one test here puts the plugin's slug in it for a while; the
+    /// tests that enable bookshelf take turns.
+    static REGISTRY: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
     /// A refused enable leaves nothing of the plugin behind in this
     /// process: not its declarations, and not the compiled instance or the
     /// capability grants its init call cached.
     #[tokio::test]
     async fn a_refused_enable_evicts_the_plugins_instance() {
+        let _turn = REGISTRY.lock().await;
         let db = TestDb::new().await;
         let state = test_state(&db);
         // An administrator's type holds the slug the plugin declares as
@@ -338,5 +344,42 @@ mod tests {
             !state.broker.has_cached_grants(row.id).await,
             "its cached grants are gone"
         );
+    }
+
+    /// Enabling a plugin while the site runs records its scheduled tasks
+    /// at once, and disabling it drops them, without a restart.
+    #[tokio::test]
+    async fn enable_and_disable_reconcile_the_plugins_tasks() {
+        let _turn = REGISTRY.lock().await;
+        let db = TestDb::new().await;
+        let state = test_state(&db);
+        let wasm = std::fs::read(BOOKSHELF_WASM).expect("bookshelf fixture");
+        let repo = vyasa_db::repo::PluginsRepo::new(state.pool.clone());
+        let row = repo
+            .create(
+                "bookshelf",
+                "0.1.0",
+                &wasm,
+                &vyasa_plugins::host::sha256_hex(&wasm),
+                &serde_json::json!(["log:write", "db:read:posts", "kv:read", "kv:write"]),
+            )
+            .await
+            .expect("install plugin");
+        let tasks = || async {
+            sqlx::query_scalar::<_, String>("SELECT name FROM plugin_tasks WHERE plugin_id = $1")
+                .bind(row.id)
+                .fetch_all(&state.pool)
+                .await
+                .expect("tasks")
+        };
+
+        repo.set_enabled(row.id, true).await.expect("enable");
+        let refused = crate::rest::plugins::refresh(&state, row.id, Collect::Enable).await;
+        assert!(refused.is_none(), "{refused:?}");
+        assert_eq!(tasks().await, vec!["tally".to_owned()]);
+
+        repo.set_enabled(row.id, false).await.expect("disable");
+        crate::rest::plugins::refresh(&state, row.id, Collect::Boot).await;
+        assert!(tasks().await.is_empty());
     }
 }

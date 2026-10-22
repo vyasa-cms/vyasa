@@ -7,6 +7,16 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-10-21
+
+### Fixed
+
+- A plugin's scheduled tasks now start when it is enabled, upgraded or
+  rolled back, and stop when it is disabled or removed. Before, they were
+  recorded only when the site started, so a plugin enabled on a running
+  site (such as the Docs plugin, whose sync is a task) did nothing until
+  the next restart.
+
 ## [0.3.1] - 2026-10-20
 
 ### Security

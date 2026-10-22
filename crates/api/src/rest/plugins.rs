@@ -195,6 +195,13 @@ pub(crate) async fn refresh(
     }
     state.plugin_surface.release_stale_types(&kept_types).await;
 
+    // Its scheduled tasks follow its declarations: an enabled plugin's
+    // tasks start running now, not after the next restart, and a disabled
+    // or removed one's stop.
+    if let Err(e) = crate::plugin_tasks::reconcile(state).await {
+        tracing::warn!("could not record plugin tasks: {e}");
+    }
+
     // Rendered pages carry a plugin's block output and its asset links, so
     // a lifecycle change makes every cached page stale at once. Bumping
     // the epoch changes every key rather than emptying the cache: entries
