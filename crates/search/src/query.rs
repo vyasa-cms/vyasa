@@ -166,7 +166,10 @@ impl IndexManager {
         };
 
         let top = searcher
-            .search(&query, &TopDocs::with_limit(limit + offset))
+            .search(
+                &query,
+                &TopDocs::with_limit(limit + offset).order_by_score(),
+            )
             .map_err(|e| AppError::internal_msg(format!("search: {e}")))?;
 
         // Snippets are highlighted against the text query alone: the scope
