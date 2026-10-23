@@ -7,6 +7,11 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Security
+
+- zod 4.6.7 in the admin build tooling (memory exhaustion on oversized
+  input; build-time only).
+
 ## [0.3.4] - 2026-10-22
 
 ### Added
