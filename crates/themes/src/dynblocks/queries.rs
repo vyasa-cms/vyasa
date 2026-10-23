@@ -175,6 +175,24 @@ pub trait ContentQueries: Send + Sync {
         term: Option<&'a str>,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<PostCardData>, String>> + Send + 'a>>;
 
+    /// Like [`Self::entries`], skipping the first `offset`: one page of a
+    /// paginated listing. The default has no way to skip, so it serves
+    /// the first page only and later pages as empty.
+    fn entries_page<'a>(
+        &'a self,
+        source: &'a str,
+        sort: EntrySort,
+        limit: u32,
+        offset: u32,
+        term: Option<&'a str>,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<PostCardData>, String>> + Send + 'a>> {
+        if offset == 0 {
+            self.entries(source, sort, limit, term)
+        } else {
+            Box::pin(std::future::ready(Ok(Vec::new())))
+        }
+    }
+
     /// Published entries for a bound section, honouring its field sort
     /// and `where` conditions. The default ignores those (an
     /// implementation without fields shows the plain listing); the site's
