@@ -7,9 +7,7 @@
 //! Parsing rejects unknown keys; [`validate_token_set`] enforces ranges and
 //! reports non-fatal warnings (e.g. low contrast) alongside hard errors.
 
-use schemars::gen::SchemaGenerator;
-use schemars::schema::{InstanceType, Metadata, Schema, SchemaObject, StringValidation};
-use schemars::JsonSchema;
+use schemars::{json_schema, JsonSchema, Schema, SchemaGenerator};
 use serde::{Deserialize, Deserializer, Serialize};
 
 /// The token schema version this crate understands.
@@ -226,24 +224,16 @@ impl<'de> Deserialize<'de> for HexColor {
 }
 
 impl JsonSchema for HexColor {
-    fn schema_name() -> String {
-        "HexColor".to_owned()
+    fn schema_name() -> std::borrow::Cow<'static, str> {
+        "HexColor".into()
     }
 
     fn json_schema(_gen: &mut SchemaGenerator) -> Schema {
-        SchemaObject {
-            metadata: Some(Box::new(Metadata {
-                description: Some("RGB hex color, `#rgb` or `#rrggbb`.".to_owned()),
-                ..Metadata::default()
-            })),
-            instance_type: Some(InstanceType::String.into()),
-            string: Some(Box::new(StringValidation {
-                pattern: Some(r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$".to_owned()),
-                ..StringValidation::default()
-            })),
-            ..SchemaObject::default()
-        }
-        .into()
+        json_schema!({
+            "description": "RGB hex color, `#rgb` or `#rrggbb`.",
+            "type": "string",
+            "pattern": r"^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$",
+        })
     }
 }
 
@@ -844,11 +834,10 @@ fn contrast_warnings(tokens: &TokenSet) -> Vec<TokenDiagnostic> {
 #[must_use]
 pub fn json_schema() -> serde_json::Value {
     let mut schema = schemars::schema_for!(TokenSet);
-    schema
-        .schema
-        .metadata
-        .get_or_insert_with(Box::default)
-        .description = Some("Vyasa design-token schema v1.".to_owned());
+    schema.insert(
+        "description".to_owned(),
+        "Vyasa design-token schema v1.".into(),
+    );
     serde_json::to_value(schema).unwrap_or(serde_json::Value::Null)
 }
 

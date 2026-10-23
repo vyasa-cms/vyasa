@@ -7,6 +7,11 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Changed
+
+- `docs/theme-token-schema.json` is JSON Schema 2020-12 (`$defs`, plain
+  `$ref`) instead of draft-07, from schemars 1.
+
 ### Security
 
 - zod 4.6.7 in the admin build tooling (memory exhaustion on oversized
