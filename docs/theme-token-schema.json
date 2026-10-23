@@ -1,17 +1,11 @@
 {
-  "$schema": "http://json-schema.org/draft-07/schema#",
-  "additionalProperties": false,
-  "definitions": {
+  "$defs": {
     "ColorPalette": {
       "additionalProperties": false,
-      "description": "The seven color roles Vyasa themes understand.\n\nDefaults form an accessible neutral palette with blue accent; every role ships a dark variant so `[data-theme=dark]` works out of the box.",
+      "description": "The seven color roles Vyasa themes understand.\n\nDefaults form an accessible neutral palette with blue accent; every role\nships a dark variant so `[data-theme=dark]` works out of the box.",
       "properties": {
         "bg": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ColorSlot"
-            }
-          ],
+          "$ref": "#/$defs/ColorSlot",
           "default": {
             "dark": "#101013",
             "light": "#ffffff"
@@ -19,11 +13,7 @@
           "description": "Page background."
         },
         "border": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ColorSlot"
-            }
-          ],
+          "$ref": "#/$defs/ColorSlot",
           "default": {
             "dark": "#27272a",
             "light": "#e4e4e7"
@@ -31,11 +21,7 @@
           "description": "Hairlines and separators."
         },
         "on_primary": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ColorSlot"
-            }
-          ],
+          "$ref": "#/$defs/ColorSlot",
           "default": {
             "dark": "#0b1220",
             "light": "#ffffff"
@@ -43,11 +29,7 @@
           "description": "Text placed on top of `primary`."
         },
         "primary": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ColorSlot"
-            }
-          ],
+          "$ref": "#/$defs/ColorSlot",
           "default": {
             "dark": "#60a5fa",
             "light": "#2563eb"
@@ -55,11 +37,7 @@
           "description": "Brand / accent color."
         },
         "surface": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ColorSlot"
-            }
-          ],
+          "$ref": "#/$defs/ColorSlot",
           "default": {
             "dark": "#1b1b1f",
             "light": "#f4f4f5"
@@ -67,11 +45,7 @@
           "description": "Cards and raised panels."
         },
         "text": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ColorSlot"
-            }
-          ],
+          "$ref": "#/$defs/ColorSlot",
           "default": {
             "dark": "#f4f4f5",
             "light": "#18181b"
@@ -79,11 +53,7 @@
           "description": "Primary text color."
         },
         "text_muted": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ColorSlot"
-            }
-          ],
+          "$ref": "#/$defs/ColorSlot",
           "default": {
             "dark": "#a1a1aa",
             "light": "#52525b"
@@ -100,7 +70,7 @@
         "dark": {
           "anyOf": [
             {
-              "$ref": "#/definitions/HexColor"
+              "$ref": "#/$defs/HexColor"
             },
             {
               "type": "null"
@@ -109,11 +79,7 @@
           "description": "Value used in dark contexts; `None` keeps the light value."
         },
         "light": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/HexColor"
-            }
-          ],
+          "$ref": "#/$defs/HexColor",
           "description": "Value used in the light palette (`:root`)."
         }
       },
@@ -126,24 +92,18 @@
       "description": "UI whitespace density.",
       "oneOf": [
         {
+          "const": "compact",
           "description": "Tighter paddings (`×0.85`).",
-          "enum": [
-            "compact"
-          ],
           "type": "string"
         },
         {
+          "const": "comfortable",
           "description": "Default rhythm (`×1`).",
-          "enum": [
-            "comfortable"
-          ],
           "type": "string"
         },
         {
+          "const": "spacious",
           "description": "Airy paddings (`×1.25`).",
-          "enum": [
-            "spacious"
-          ],
           "type": "string"
         }
       ]
@@ -152,48 +112,38 @@
       "description": "Site-wide text direction.",
       "oneOf": [
         {
+          "const": "ltr",
           "description": "Left-to-right (default).",
-          "enum": [
-            "ltr"
-          ],
           "type": "string"
         },
         {
+          "const": "rtl",
           "description": "Right-to-left; flips the layout engine's logical properties.",
-          "enum": [
-            "rtl"
-          ],
           "type": "string"
         }
       ]
     },
     "FontChoice": {
-      "description": "A font selection: a built-in system-safe stack or a custom family name.\n\nCustom families should be backed by an entry in [`Typography::font_faces`] when they are web fonts; system generics fall back gracefully in every browser.",
+      "description": "A font selection: a built-in system-safe stack or a custom family name.\n\nCustom families should be backed by an entry in\n[`Typography::font_faces`] when they are web fonts; system generics fall\nback gracefully in every browser.",
       "oneOf": [
         {
+          "const": "system_ui",
           "description": "`system-ui` stack (default; always available offline).",
-          "enum": [
-            "system_ui"
-          ],
           "type": "string"
         },
         {
+          "const": "serif",
           "description": "Classic serif stack.",
-          "enum": [
-            "serif"
-          ],
           "type": "string"
         },
         {
+          "const": "mono",
           "description": "Monospace stack for code-heavy themes.",
-          "enum": [
-            "mono"
-          ],
           "type": "string"
         },
         {
           "additionalProperties": false,
-          "description": "A custom family name (e.g. `\"Inter\"`), optionally served via `@font-face`.",
+          "description": "A custom family name (e.g. `\"Inter\"`), optionally served via\n`@font-face`.",
           "properties": {
             "custom": {
               "type": "string"
@@ -211,11 +161,11 @@
       "description": "One `@font-face` declaration.",
       "properties": {
         "family": {
-          "description": "Family name this face registers; must match a [`FontChoice::Custom`] usage to have any effect.",
+          "description": "Family name this face registers; must match a\n[`FontChoice::Custom`] usage to have any effect.",
           "type": "string"
         },
         "src": {
-          "description": "Web font source; `https://` or a bundled `/theme-assets/fonts/` path, so themes can never inject insecure or `javascript:` URLs into rendered pages.",
+          "description": "Web font source; `https://` or a bundled `/theme-assets/fonts/` path, so themes can never\ninject insecure or `javascript:` URLs into rendered pages.",
           "type": [
             "string",
             "null"
@@ -244,7 +194,7 @@
         },
         "breakpoint_sm_px": {
           "default": 640.0,
-          "description": "Width below which columns collapse and type steps down, in px.\n\nA breakpoint is a theme decision like any other metric, but CSS media queries cannot read custom properties, so these are interpolated into the generated stylesheets rather than emitted as variables. They were two magic numbers in the stylesheet source until they were named here.",
+          "description": "Width below which columns collapse and type steps down, in px.\n\nA breakpoint is a theme decision like any other metric, but CSS\nmedia queries cannot read custom properties, so these are\ninterpolated into the generated stylesheets rather than emitted as\nvariables. They were two magic numbers in the stylesheet source\nuntil they were named here.",
           "format": "float",
           "type": "number"
         },
@@ -255,11 +205,7 @@
           "type": "number"
         },
         "density": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/Density"
-            }
-          ],
+          "$ref": "#/$defs/Density",
           "default": "comfortable",
           "description": "Whitespace density preset for lists and cards."
         },
@@ -276,38 +222,28 @@
       "description": "Modular scale ratios with well-known names plus a numeric escape hatch.",
       "oneOf": [
         {
+          "const": "major_second",
           "description": "1.125",
-          "enum": [
-            "major_second"
-          ],
           "type": "string"
         },
         {
+          "const": "minor_third",
           "description": "1.2",
-          "enum": [
-            "minor_third"
-          ],
           "type": "string"
         },
         {
+          "const": "major_third",
           "description": "1.25",
-          "enum": [
-            "major_third"
-          ],
           "type": "string"
         },
         {
+          "const": "perfect_fourth",
           "description": "1.333…",
-          "enum": [
-            "perfect_fourth"
-          ],
           "type": "string"
         },
         {
+          "const": "golden",
           "description": "1.618…",
-          "enum": [
-            "golden"
-          ],
           "type": "string"
         },
         {
@@ -330,31 +266,23 @@
       "description": "Box-shadow elevation presets.",
       "oneOf": [
         {
+          "const": "none",
           "description": "No shadow at all.",
-          "enum": [
-            "none"
-          ],
           "type": "string"
         },
         {
+          "const": "small",
           "description": "Subtle card lift.",
-          "enum": [
-            "small"
-          ],
           "type": "string"
         },
         {
+          "const": "medium",
           "description": "Standard dropdown / card shadow.",
-          "enum": [
-            "medium"
-          ],
           "type": "string"
         },
         {
+          "const": "large",
           "description": "Modal / popover shadow.",
-          "enum": [
-            "large"
-          ],
           "type": "string"
         }
       ]
@@ -397,11 +325,7 @@
           "type": "number"
         },
         "body": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/FontChoice"
-            }
-          ],
+          "$ref": "#/$defs/FontChoice",
           "default": "system_ui",
           "description": "Body font."
         },
@@ -409,25 +333,17 @@
           "default": [],
           "description": "`@font-face` declarations backing [`FontChoice::Custom`] families.",
           "items": {
-            "$ref": "#/definitions/FontFace"
+            "$ref": "#/$defs/FontFace"
           },
           "type": "array"
         },
         "heading": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/FontChoice"
-            }
-          ],
+          "$ref": "#/$defs/FontChoice",
           "default": "system_ui",
           "description": "Heading font."
         },
         "scale_ratio": {
-          "allOf": [
-            {
-              "$ref": "#/definitions/ScaleRatio"
-            }
-          ],
+          "$ref": "#/$defs/ScaleRatio",
           "default": "major_third",
           "description": "Named or numeric type-scale ratio."
         }
@@ -435,14 +351,12 @@
       "type": "object"
     }
   },
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
   "description": "Vyasa design-token schema v1.",
   "properties": {
     "colors": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/ColorPalette"
-        }
-      ],
+      "$ref": "#/$defs/ColorPalette",
       "default": {
         "bg": {
           "dark": "#101013",
@@ -476,20 +390,12 @@
       "description": "Light/dark color roles."
     },
     "direction": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/Direction"
-        }
-      ],
+      "$ref": "#/$defs/Direction",
       "default": "ltr",
       "description": "Text direction for the whole site."
     },
     "layout": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/LayoutMetrics"
-        }
-      ],
+      "$ref": "#/$defs/LayoutMetrics",
       "default": {
         "breakpoint_md_px": 900.0,
         "breakpoint_sm_px": 640.0,
@@ -506,20 +412,12 @@
       "type": "number"
     },
     "shadow": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/ShadowLevel"
-        }
-      ],
+      "$ref": "#/$defs/ShadowLevel",
       "default": "small",
       "description": "Elevation preset for cards and overlays."
     },
     "spacing": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/Spacing"
-        }
-      ],
+      "$ref": "#/$defs/Spacing",
       "default": {
         "section_scale": [
           1.0,
@@ -532,11 +430,7 @@
       "description": "Spacing unit and section rhythm multipliers."
     },
     "typography": {
-      "allOf": [
-        {
-          "$ref": "#/definitions/Typography"
-        }
-      ],
+      "$ref": "#/$defs/Typography",
       "default": {
         "base_size_px": 16.0,
         "body": "system_ui",
@@ -550,7 +444,7 @@
       "default": 1,
       "description": "Schema version; must equal [`TOKEN_SCHEMA_VERSION`].",
       "format": "uint32",
-      "minimum": 0.0,
+      "minimum": 0,
       "type": "integer"
     }
   },
