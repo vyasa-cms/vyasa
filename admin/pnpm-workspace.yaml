@@ -7,5 +7,7 @@ overrides:
   # GHSA-cg2g-xh64-v4q7, GHSA-mrv2-3pqr-j5jr and the SMIL href guard
   dompurify: ">=3.4.17"
   js-yaml: "^4.3.2"
+  # Zod memory exhaustion on oversized input (build-time, via @tanstack/router-generator)
+  zod: ">=4.6.6"
   brace-expansion@2: "^2.1.7"
   brace-expansion@5: "^5.0.12"
