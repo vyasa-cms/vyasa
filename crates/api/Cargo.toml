@@ -73,7 +73,7 @@ semver = "1.0.28"
 
 [dev-dependencies]
 totp-rs = { version = "6", features = ["otpauth"] }
-feed-rs = "2.4.0"
+feed-rs = "3.0.0"
 futures = { version = "0.3.34", features = ["executor"] }
 vyasa-core = { path = "../core" }
 vyasa-testkit = { path = "../testkit" }
