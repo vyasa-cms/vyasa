@@ -7,11 +7,28 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-10-22
+
+### Added
+
+- The `latest-posts` section takes `"paginate": true`: on a page that lists
+  posts, `?page=2` shows the next `count` and the list links to newer and
+  older pages. A blog index page is no longer stuck at 20 posts.
+
 ### Fixed
 
+- A post card with no author shows only its date, without a leading ` · `.
+- Logs carry colour codes only when a terminal reads them; under systemd
+  they arrived as `ESC[32m` noise in the journal and in log viewers.
 - Docs plugin 0.1.3: after an upgrade that changes how pages are imported,
   the next sync rewrites them even when the repository has no new commit.
   0.1.2's changes reached existing sites only with the next push.
+
+### Security
+
+- dompurify 3.4.17 in the admin build (GHSA-cg2g-xh64-v4q7,
+  GHSA-mrv2-3pqr-j5jr); tokio 1.54.1 and ctutils 0.4.5
+  (RUSTSEC-2026-0385, RUSTSEC-2026-0386).
 
 ## [0.3.3] - 2026-10-21
 

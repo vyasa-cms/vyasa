@@ -55,6 +55,9 @@ pub struct Binding {
     pub filters: Vec<(String, serde_json::Value)>,
     /// How many entries, clamped to [`MAX_BOUND_ENTRIES`].
     pub limit: u32,
+    /// Entries skipped first: a later page of a paginated listing. Never
+    /// read from settings; the renderer sets it from the request.
+    pub offset: u32,
 }
 
 /// The grammar of a field key: `^[a-z][a-z0-9_]{0,39}$`.
@@ -231,6 +234,7 @@ impl Binding {
                 field_sort,
                 filters,
                 limit,
+                offset: 0,
             }))
         } else {
             Err(errors)

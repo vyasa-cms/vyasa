@@ -201,6 +201,7 @@ impl ApiContentQueries {
         source: &str,
         sort: vyasa_themes::EntrySort,
         limit: u32,
+        offset: u32,
         term: Option<&str>,
     ) -> Result<Vec<PostCardData>, String> {
         let bind = vyasa_themes::Binding {
@@ -210,6 +211,7 @@ impl ApiContentQueries {
             field_sort: None,
             filters: Vec::new(),
             limit,
+            offset,
         };
         self.bound_impl(&bind).await
     }
@@ -286,6 +288,7 @@ impl ApiContentQueries {
                 field_sort,
                 filters: &bind.filters,
                 limit: bind.limit.clamp(1, vyasa_themes::MAX_BOUND_ENTRIES),
+                offset: bind.offset,
             })
             .await
             .map_err(|e| e.to_string())?;
@@ -351,7 +354,20 @@ impl ContentQueries for ApiContentQueries {
     ) -> std::pin::Pin<
         Box<dyn std::future::Future<Output = Result<Vec<PostCardData>, String>> + Send + 'a>,
     > {
-        Box::pin(self.entries_impl(source, sort, limit, term))
+        Box::pin(self.entries_impl(source, sort, limit, 0, term))
+    }
+
+    fn entries_page<'a>(
+        &'a self,
+        source: &'a str,
+        sort: vyasa_themes::EntrySort,
+        limit: u32,
+        offset: u32,
+        term: Option<&'a str>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<PostCardData>, String>> + Send + 'a>,
+    > {
+        Box::pin(self.entries_impl(source, sort, limit, offset, term))
     }
 
     fn bound_entries<'a>(
