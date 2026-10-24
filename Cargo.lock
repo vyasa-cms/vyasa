@@ -5693,7 +5693,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vyasa-ai"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "base64 0.23.1",
  "reqwest",
@@ -5709,7 +5709,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-api"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "ammonia",
  "async-graphql",
@@ -5767,7 +5767,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-common"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "config",
  "criterion",
@@ -5780,7 +5780,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-core"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "argon2",
  "async-trait",
@@ -5813,7 +5813,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-db"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "chrono",
  "serde",
@@ -5828,7 +5828,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-jobs"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "chrono",
  "lettre",
@@ -5848,7 +5848,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-plugins"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "ammonia",
  "chrono",
@@ -5873,7 +5873,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-search"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "tantivy",
  "tempfile",
@@ -5884,7 +5884,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-testkit"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "ed25519-dalek",
  "hex",
@@ -5901,7 +5901,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-themes"
-version = "0.3.4"
+version = "0.3.5"
 dependencies = [
  "ammonia",
  "chrono",

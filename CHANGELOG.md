@@ -7,8 +7,12 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.3.5] - 2026-10-24
+
 ### Changed
 
+- Search runs on tantivy 0.27; existing indexes are read as they are.
+- Feeds are parsed with feed-rs 3.
 - `docs/theme-token-schema.json` is JSON Schema 2020-12 (`$defs`, plain
   `$ref`) instead of draft-07, from schemars 1.
 
