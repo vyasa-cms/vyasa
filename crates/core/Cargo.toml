@@ -16,7 +16,7 @@ base64 = "0.23"
 chrono-tz = "0.10"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 hmac = "0.13"
-rand = "0.8"
+rand = "0.10"
 sha2 = "0.11"
 chacha20poly1305 = "0.11"
 vyasa-common = { path = "../common" }
