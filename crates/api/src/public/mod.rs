@@ -42,6 +42,14 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route("/search", get(routes::search))
         .route("/comment", post(comment_form::submit))
         .route("/form", post(form_submit::submit))
+        .route(
+            "/form/confirm",
+            get(form_submit::form_confirm_page).post(form_submit::form_confirm),
+        )
+        .route(
+            "/form/delete",
+            get(form_submit::form_delete_page).post(form_submit::form_delete),
+        )
         .route("/newsletter/confirm", get(form_submit::confirm))
         .route("/newsletter/unsubscribe", get(form_submit::unsubscribe))
         .route("/preview/{post_id}", get(routes::preview))

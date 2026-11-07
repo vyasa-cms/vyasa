@@ -79,11 +79,12 @@ function FormEditor({ form, onClose, onSaved }: { form: FormDef | null; onClose:
   const [notify_email, setNotify] = React.useState(form?.notify_email ?? "");
   const [success, setSuccess] = React.useState(form?.success_message ?? "");
   const [enabled, setEnabled] = React.useState(form?.enabled ?? true);
+  const [confirm, setConfirm] = React.useState(form?.confirm ?? false);
   const [choices, setChoices] = React.useState<Record<string, string>>({});
   const [fields, setFields] = React.useState<FormField[]>(form?.fields ?? NEW_FORM);
   const save = useMutation({
     mutationFn: () => {
-      const body = { name: name.trim(), fields: fields.map((f, i) => ({ ...f, options: choices[i] === undefined ? f.options : choices[i].split(",").map(s => s.trim()).filter(Boolean) })), notify_email: notify_email.trim(), success_message: success, enabled };
+      const body = { name: name.trim(), fields: fields.map((f, i) => ({ ...f, options: choices[i] === undefined ? f.options : choices[i].split(",").map(s => s.trim()).filter(Boolean) })), notify_email: notify_email.trim(), success_message: success, enabled, confirm };
       return form ? api.updateForm(form.id, body) : api.createForm(body);
     },
     onSuccess: (f) => { onSaved(); onClose(); notify.success(form ? "Form saved" : "Form created", `Add a Form block with the slug ${f.slug}.`); },
@@ -101,6 +102,7 @@ function FormEditor({ form, onClose, onSaved }: { form: FormDef | null; onClose:
           <div className="sm:col-span-2"><Field label="Message after sending" htmlFor="fm-ok"><Input id="fm-ok" value={success} onChange={(e) => setSuccess(e.target.value)} placeholder="Thanks — your message has been received." /></Field></div>
         </div>
         <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-primary" checked={enabled} onChange={(e) => setEnabled(e.target.checked)} />Live: the form accepts answers</label>
+        <label className="flex items-center gap-2 text-sm"><input type="checkbox" className="accent-primary" checked={confirm} onChange={(e) => setConfirm(e.target.checked)} />Hold each entry until its sender confirms by email (needs a required email field)</label>
         <div>
           <h3 className="mb-1 text-sm font-medium">Fields</h3>
           <ul className="space-y-2" data-testid="form-fields">

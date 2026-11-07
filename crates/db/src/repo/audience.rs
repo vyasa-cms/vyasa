@@ -43,6 +43,28 @@ pub struct FormSubmissionRow {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// Days an unconfirmed form entry is kept before it is deleted.
+pub const PENDING_FORM_DAYS: i32 = 7;
+
+/// A submission held until its sender confirms.
+#[derive(Debug, Clone, Copy)]
+pub struct PendingSubmission<'a> {
+    /// Form slug.
+    pub form: &'a str,
+    /// Sender name, may be empty.
+    pub name: &'a str,
+    /// Sender email (the confirmation goes here).
+    pub email: &'a str,
+    /// Message, may be empty.
+    pub message: &'a str,
+    /// Page the form was on.
+    pub path: &'a str,
+    /// The answers, by field key.
+    pub data: &'a serde_json::Value,
+    /// Secret in the confirm and delete links.
+    pub token: &'a str,
+}
+
 /// A newsletter subscriber.
 #[derive(Debug, Clone, Serialize, sqlx::FromRow)]
 pub struct SubscriberRow {
@@ -174,7 +196,9 @@ impl AudienceRepo {
     pub async fn submissions(&self, limit: i64) -> Result<Vec<FormSubmissionRow>, AppError> {
         sqlx::query_as(
             "SELECT id, form, name, email, message, path, created_at, data, read_at
-             FROM form_submissions ORDER BY created_at DESC LIMIT $1",
+             FROM form_submissions
+             WHERE (token IS NULL OR confirmed_at IS NOT NULL)
+             ORDER BY created_at DESC LIMIT $1",
         )
         .bind(limit)
         .fetch_all(&self.pool)
@@ -213,6 +237,109 @@ impl AudienceRepo {
         Ok(id)
     }
 
+    /// Records a submission that waits for the submitter's confirmation.
+    /// It stays out of the inbox, the CSV and the counts until
+    /// [`Self::confirm_submission`] is called with the same token.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn add_pending_submission(
+        &self,
+        sub: &PendingSubmission<'_>,
+    ) -> Result<i64, AppError> {
+        let id = vyasa_common::next_id_i64();
+        sqlx::query(
+            "INSERT INTO form_submissions (id, form, name, email, message, path, data, token)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)",
+        )
+        .bind(id)
+        .bind(sub.form)
+        .bind(sub.name)
+        .bind(sub.email)
+        .bind(sub.message)
+        .bind(sub.path)
+        .bind(sub.data)
+        .bind(sub.token)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("pending submission: {e}")))?;
+        Ok(id)
+    }
+
+    /// Confirms a pending submission. Returns the submission when this call
+    /// confirmed it, `None` for an unknown token or one already confirmed.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn confirm_submission(
+        &self,
+        token: &str,
+        max_age_days: i32,
+    ) -> Result<Option<FormSubmissionRow>, AppError> {
+        sqlx::query_as(
+            "UPDATE form_submissions SET confirmed_at = now(), created_at = now()
+             WHERE token = $1 AND confirmed_at IS NULL
+               AND created_at > now() - make_interval(days => $2)
+             RETURNING id, form, name, email, message, path, created_at, data, read_at",
+        )
+        .bind(token)
+        .bind(max_age_days)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("confirm submission: {e}")))
+    }
+
+    /// Deletes the submission behind a token, pending or confirmed (the
+    /// submitter's own delete link). Returns whether a row went.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn delete_by_token(&self, token: &str) -> Result<bool, AppError> {
+        Ok(sqlx::query("DELETE FROM form_submissions WHERE token = $1")
+            .bind(token)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::db(format!("delete by token: {e}")))?
+            .rows_affected()
+            > 0)
+    }
+
+    /// Drops the held (unconfirmed) entries of one address on one form, so a
+    /// repeat submission replaces them instead of piling up.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn drop_pending_for(&self, form: &str, email: &str) -> Result<u64, AppError> {
+        Ok(sqlx::query(
+            "DELETE FROM form_submissions
+             WHERE form = $1 AND lower(email) = lower($2)
+               AND token IS NOT NULL AND confirmed_at IS NULL",
+        )
+        .bind(form)
+        .bind(email)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("drop pending: {e}")))?
+        .rows_affected())
+    }
+
+    /// Deletes pending submissions older than `days`. Returns how many.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn expire_pending(&self, days: i32) -> Result<u64, AppError> {
+        Ok(sqlx::query(
+            "DELETE FROM form_submissions
+             WHERE token IS NOT NULL AND confirmed_at IS NULL
+               AND created_at < now() - make_interval(days => $1)",
+        )
+        .bind(days)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("expire pending: {e}")))?
+        .rows_affected())
+    }
+
     /// Submissions for one form, newest first.
     ///
     /// # Errors
@@ -224,7 +351,9 @@ impl AudienceRepo {
     ) -> Result<Vec<FormSubmissionRow>, AppError> {
         sqlx::query_as(
             "SELECT id, form, name, email, message, path, created_at, data, read_at
-             FROM form_submissions WHERE form = $1 ORDER BY created_at DESC LIMIT $2",
+             FROM form_submissions WHERE form = $1
+               AND (token IS NULL OR confirmed_at IS NOT NULL)
+             ORDER BY created_at DESC LIMIT $2",
         )
         .bind(form)
         .bind(limit)
@@ -239,7 +368,8 @@ impl AudienceRepo {
     /// [`AppError::Db`] on failure.
     pub async fn unread_by_form(&self) -> Result<Vec<(String, i64)>, AppError> {
         sqlx::query_as::<_, (String, i64)>(
-            "SELECT form, count(*) FROM form_submissions WHERE read_at IS NULL GROUP BY form",
+            "SELECT form, count(*) FROM form_submissions
+             WHERE read_at IS NULL AND (token IS NULL OR confirmed_at IS NOT NULL) GROUP BY form",
         )
         .fetch_all(&self.pool)
         .await

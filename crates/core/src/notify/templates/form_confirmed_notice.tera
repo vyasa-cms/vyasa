@@ -1,0 +1,4 @@
+{{ site }}: a "{{ form }}" entry was confirmed
+Someone confirmed their entry on the "{{ form }}" form on {{ site }}.
+
+Read it under Forms in the admin.

@@ -1,4 +1,5 @@
-//! Purge of accounts that registered and never confirmed their address.
+//! Purge of accounts that registered, and form entries that were submitted,
+//! and never confirmed their address.
 
 use std::time::Duration;
 
@@ -25,6 +26,18 @@ pub async fn purge_unconfirmed_once(pool: &PgPool) -> Result<u64, vyasa_common::
     UsersRepo::new(pool.clone()).purge_unconfirmed(cutoff).await
 }
 
+/// Deletes form entries that were never confirmed within
+/// [`vyasa_db::repo::audience::PENDING_FORM_DAYS`], once. Returns how many went.
+///
+/// # Errors
+///
+/// Returns [`vyasa_common::AppError::Db`] on database failure.
+pub async fn purge_pending_form_entries_once(pool: &PgPool) -> Result<u64, vyasa_common::AppError> {
+    vyasa_db::repo::AudienceRepo::new(pool.clone())
+        .expire_pending(vyasa_db::repo::audience::PENDING_FORM_DAYS)
+        .await
+}
+
 /// Spawns the purge loop: once at start, then every [`PURGE_INTERVAL`].
 #[must_use]
 pub fn spawn(pool: PgPool) -> tokio::task::JoinHandle<()> {
@@ -36,6 +49,11 @@ pub fn spawn(pool: PgPool) -> tokio::task::JoinHandle<()> {
                 Ok(0) => {}
                 Ok(n) => tracing::info!("purged {n} unconfirmed account(s)"),
                 Err(err) => tracing::warn!("unconfirmed account purge failed: {err}"),
+            }
+            match purge_pending_form_entries_once(&pool).await {
+                Ok(0) => {}
+                Ok(n) => tracing::info!("purged {n} unconfirmed form entr(ies)"),
+                Err(err) => tracing::warn!("unconfirmed form entry purge failed: {err}"),
             }
         }
     })
@@ -92,5 +110,40 @@ mod tests {
         assert_eq!(left, vec![2, 3, 4, 5]);
         assert_eq!(purge_unconfirmed_once(&pool).await.expect("again"), 0);
         pool.close().await;
+    }
+
+    #[tokio::test]
+    async fn only_unconfirmed_form_entries_past_seven_days_are_purged() {
+        let db = TestDb::new().await;
+        let pool = db.pool().clone();
+        for (id, token, confirmed, age) in [
+            (1_i64, Some("old"), false, "8 days"),
+            (2, Some("fresh"), false, "1 day"),
+            (3, Some("done"), true, "30 days"),
+            (4, None, false, "30 days"),
+        ] {
+            sqlx::query(
+                "INSERT INTO form_submissions (id, form, email, token, confirmed_at, created_at)
+                 VALUES ($1, 'f', 'a@b.c', $2, CASE WHEN $3 THEN now() END, now() - $4::interval)",
+            )
+            .bind(id)
+            .bind(token)
+            .bind(confirmed)
+            .bind(age)
+            .execute(&pool)
+            .await
+            .expect("insert");
+        }
+        assert_eq!(
+            super::purge_pending_form_entries_once(&pool)
+                .await
+                .expect("purge"),
+            1
+        );
+        let left: Vec<i64> = sqlx::query_scalar("SELECT id FROM form_submissions ORDER BY id")
+            .fetch_all(&pool)
+            .await
+            .expect("left");
+        assert_eq!(left, vec![2, 3, 4]);
     }
 }
