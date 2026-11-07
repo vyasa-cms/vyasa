@@ -139,6 +139,13 @@ Two ways to keep old documentation online:
 2. **A `version:` key in front matter.** A page with `version: v2` moves
    under that version's entry, keeping its relative path.
 
+3. **A version from another branch or tag.** Add `@ ref` to a line under
+   *Older versions*: `next = docs @ main` serves the `docs` folder of the
+   `main` branch at `/docs/next/`, while `/docs` keeps following the
+   plugin's branch (for example a release branch or tag). Pushes to that
+   branch or tag reach the webhook like pushes to the main one, and each
+   page's *Edit source* link points at its own ref. Up to 4 distinct refs.
+
 Releasing v4 means setting *Latest version* to `v4` and adding `v3 =
 docs-v3`; the next sync moves the pages.
 

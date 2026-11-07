@@ -7,6 +7,13 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Added
+
+- vyasa-docs: a version can be read from another branch or tag
+  (`next = docs @ main`), so the unreleased docs can be served at
+  `/docs/next/` beside the latest release. The webhook accepts pushes to
+  those refs.
+
 ## [0.3.5] - 2026-10-24
 
 ### Changed

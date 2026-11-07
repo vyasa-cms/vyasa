@@ -1,9 +1,14 @@
 //! The plugin's settings form and what the importer makes of it.
 
+use std::collections::BTreeMap;
+
 use serde_json::{json, Value};
 
 use crate::github;
 use crate::sync::Config;
+
+/// Most distinct branches or tags versions may be read from.
+const MAX_REFS: usize = 4;
 
 /// Most older versions one site may declare.
 pub const MAX_VERSIONS: usize = 12;
@@ -122,7 +127,7 @@ impl Settings {
         {
             return Err("Branch: must be a branch name without spaces".to_owned());
         }
-        let versions = parse_versions(&self.versions)?;
+        let (versions, version_refs) = parse_versions(&self.versions)?;
         Ok(Config {
             repo,
             branch: self.branch.clone(),
@@ -130,16 +135,29 @@ impl Settings {
             token: Some(self.token.clone()).filter(|t| !t.is_empty()),
             latest_version: self.latest_version.clone(),
             versions,
+            version_refs,
         })
     }
 }
 
-/// `label = folder` lines.
+/// The versions in order, and the ref of each version that has one.
+pub type ParsedVersions = (Vec<(String, Vec<String>)>, BTreeMap<String, String>);
+
+/// A branch or tag name an operator typed: no spaces or control characters.
+fn valid_ref(r: &str) -> bool {
+    !r.is_empty() && r.len() <= 200 && !r.chars().any(|c| c.is_control() || c.is_whitespace())
+}
+
+/// Version lines: `label = folder`, or `label = folder @ ref` when that
+/// version is read from another branch or tag of the repository.
+///
+/// Returns the versions in order and the ref of each version that has one.
 ///
 /// # Errors
 /// A message naming the bad line.
-pub fn parse_versions(text: &str) -> Result<Vec<(String, Vec<String>)>, String> {
+pub fn parse_versions(text: &str) -> Result<ParsedVersions, String> {
     let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    let mut refs: BTreeMap<String, String> = BTreeMap::new();
     for line in text
         .lines()
         .map(str::trim)
@@ -159,6 +177,18 @@ pub fn parse_versions(text: &str) -> Result<Vec<(String, Vec<String>)>, String> 
                 "Older versions: `{label}` is not a usable version label (letters, digits, . - _)"
             ));
         }
+        let (folder, git_ref) = match folder.rsplit_once('@') {
+            Some((f, r)) => (f, Some(r.trim())),
+            None => (folder, None),
+        };
+        if let Some(r) = git_ref {
+            if !valid_ref(r) {
+                return Err(format!(
+                    "Older versions: `{r}` is not a branch or tag name (after the @ in `{line}`)"
+                ));
+            }
+            refs.insert(label.to_owned(), r.to_owned());
+        }
         let folder = github::folder_segments(folder).map_err(|e| format!("Older versions: {e}"))?;
         if out.iter().any(|(l, _)| l == label) {
             return Err(format!("Older versions: {label} appears twice"));
@@ -168,7 +198,13 @@ pub fn parse_versions(text: &str) -> Result<Vec<(String, Vec<String>)>, String> 
     if out.len() > MAX_VERSIONS {
         return Err(format!("Older versions: at most {MAX_VERSIONS}"));
     }
-    Ok(out)
+    let distinct: std::collections::BTreeSet<&String> = refs.values().collect();
+    if distinct.len() > MAX_REFS {
+        return Err(format!(
+            "Older versions: at most {MAX_REFS} different branches or tags"
+        ));
+    }
+    Ok((out, refs))
 }
 
 /// The `register-admin` form.
@@ -186,7 +222,7 @@ pub fn admin_form() -> Value {
             {"key": "poll_minutes", "label": "Check every (minutes)", "type": "number", "default": 60, "help": "Between 5 and 1440. A check with nothing new costs one conditional request."},
             {"key": "latest_version", "label": "Latest version label", "type": "text", "help": "Leave empty for unversioned docs. Pages without a version belong to this one and are served at /docs."},
             {"key": "latest_label", "label": "Name for the latest version", "type": "text", "default": "Latest"},
-            {"key": "versions", "label": "Older versions", "type": "textarea", "help": "One per line: `v1 = docs-v1` (label = folder in the same repository). They are served at /docs/<label>/ and carry a notice pointing to the latest."},
+            {"key": "versions", "label": "Older versions", "type": "textarea", "help": "One per line: `v1 = docs-v1` (label = folder in the same repository), or `next = docs @ main` to read a version from another branch or tag. They are served at /docs/<label>/ and carry a notice pointing to the latest."},
             {"key": "docs_title", "label": "Breadcrumb root", "type": "text", "default": "Docs"},
             {"key": "search_placeholder", "label": "Search placeholder", "type": "text", "default": "Search the docs"}
         ]
@@ -274,7 +310,14 @@ mod tests {
         assert!(parse_versions("v1 = a\nv1 = b").is_err());
         assert!(parse_versions("v 1 = a").is_err());
         assert!(parse_versions("v1 = ../a").is_err());
-        assert_eq!(parse_versions("").unwrap(), vec![]);
+        assert_eq!(parse_versions("").unwrap(), (vec![], BTreeMap::new()));
+        let (v, r) = parse_versions("next = docs @ main\nv1 = old").unwrap();
+        assert_eq!(v.len(), 2);
+        assert_eq!(r.get("next").map(String::as_str), Some("main"));
+        assert!(!r.contains_key("v1"));
+        assert!(parse_versions("next = docs @ ").is_err());
+        assert!(parse_versions("next = docs @ a b").is_err());
+        assert!(parse_versions("a=d@r1\nb=d@r2\nc=d@r3\ne=d@r4\nf=d@r5").is_err());
     }
 
     #[test]
