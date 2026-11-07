@@ -23,7 +23,7 @@ const MAX_MESSAGE: usize = 4000;
 
 /// A plausible-enough email: something@something.something. Real
 /// validation is the confirm click.
-fn email_ok(email: &str) -> bool {
+pub(crate) fn email_ok(email: &str) -> bool {
     let Some((local, domain)) = email.split_once('@') else {
         return false;
     };
@@ -237,6 +237,125 @@ async fn flip(state: &AppState, token: &str, status: &str, done: &str) -> Respon
             )
         }
     }
+}
+
+/// A page with one button. The link in the mail only opens this page; the
+/// change happens on the POST, so a mail scanner that fetches every link
+/// can neither confirm nor delete anyone's entry.
+fn action_page(site: &str, heading: &str, button: &str, action: &str, token: &str) -> Response {
+    let esc = |t: &str| {
+        t.replace('&', "&amp;")
+            .replace('<', "&lt;")
+            .replace('>', "&gt;")
+            .replace('"', "&quot;")
+    };
+    Html(format!(
+        "<!doctype html><html lang=\"en\"><head><meta charset=\"utf-8\">\
+         <meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">\
+         <meta name=\"robots\" content=\"noindex\"><title>{}</title>\
+         <style>body{{font-family:system-ui,sans-serif;display:grid;place-items:center;\
+         min-height:100vh;margin:0;background:#fafaf9;color:#1c1917}}\
+         main{{max-width:26rem;padding:2rem;text-align:center}}\
+         button{{font:inherit;padding:.6rem 1.2rem;cursor:pointer}}</style></head><body><main>\
+         <h1 style=\"font-size:1.2rem\">{}</h1>\
+         <form method=\"post\" action=\"{}\"><input type=\"hidden\" name=\"token\" value=\"{}\">\
+         <button type=\"submit\">{}</button></form></main></body></html>",
+        esc(site),
+        esc(heading),
+        action,
+        esc(token),
+        esc(button)
+    ))
+    .into_response()
+}
+
+/// `GET /form/confirm?token=` — shows the confirm button; changes nothing.
+pub async fn form_confirm_page(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<TokenQuery>,
+) -> Response {
+    let site = site_name(&state).await;
+    action_page(&site, "Confirm your entry", "Confirm", "confirm", &q.token)
+}
+
+/// `GET /form/delete?token=` — shows the delete button; changes nothing.
+pub async fn form_delete_page(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<TokenQuery>,
+) -> Response {
+    let site = site_name(&state).await;
+    action_page(
+        &site,
+        "Delete your entry?",
+        "Delete my entry",
+        "delete",
+        &q.token,
+    )
+}
+
+/// `POST /form/confirm` — the click that makes a held entry count.
+pub async fn form_confirm(State(state): State<AppState>, body: String) -> Response {
+    let site = site_name(&state).await;
+    let token = token_of(&body);
+    match state
+        .audience
+        .confirm_submission(&token, crate::forms::PENDING_DAYS)
+        .await
+    {
+        Ok(Some(row)) => {
+            if let Some(def) = crate::forms::by_slug(&state, &row.form).await {
+                crate::forms::notify_owner(&state, &def, &[], &row.path, false).await;
+            }
+            thanks_page(&site, "Thanks — your entry is confirmed.")
+        }
+        Ok(None) => thanks_page(&site, "This link was already used or has expired."),
+        Err(err) => {
+            tracing::warn!("form confirm failed: {err}");
+            thanks_page(
+                &site,
+                "Something went wrong on our side — please try again.",
+            )
+        }
+    }
+}
+
+/// `POST /form/delete` — removes the entry behind the link.
+pub async fn form_delete(State(state): State<AppState>, body: String) -> Response {
+    let site = site_name(&state).await;
+    let token = token_of(&body);
+    match state.audience.delete_by_token(&token).await {
+        Ok(true) => thanks_page(&site, "Your entry has been deleted."),
+        Ok(false) => thanks_page(&site, "Nothing to delete — it is already gone."),
+        Err(err) => {
+            tracing::warn!("form delete failed: {err}");
+            thanks_page(
+                &site,
+                "Something went wrong on our side — please try again.",
+            )
+        }
+    }
+}
+
+fn token_of(body: &str) -> String {
+    if body.len() > 1024 {
+        return String::new();
+    }
+    super::comment_form::parse_form(body)
+        .into_iter()
+        .find(|(k, _)| k == "token")
+        .map(|(_, v)| v)
+        .unwrap_or_default()
+}
+
+async fn site_name(state: &AppState) -> String {
+    state
+        .options_service
+        .site_identity()
+        .await
+        .map(|i| i.title)
+        .ok()
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| "this site".to_owned())
 }
 
 #[cfg(test)]

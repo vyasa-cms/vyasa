@@ -28,7 +28,7 @@ pub struct RenderedEmail {
 }
 
 /// Every template the system can send, embedded at compile time.
-const TEMPLATES: [(&str, &str); 10] = [
+const TEMPLATES: [(&str, &str); 12] = [
     (
         "password_reset",
         include_str!("templates/password_reset.tera"),
@@ -54,6 +54,13 @@ const TEMPLATES: [(&str, &str); 10] = [
     (
         "newsletter_post",
         include_str!("templates/newsletter_post.tera"),
+    ),
+    // Double opt-in for a defined form: confirm and delete links.
+    ("form_confirm", include_str!("templates/form_confirm.tera")),
+    // A held entry was confirmed: names the form, carries no answers.
+    (
+        "form_confirmed_notice",
+        include_str!("templates/form_confirmed_notice.tera"),
     ),
     // A defined form's answers, to whoever the form names.
     (
@@ -284,6 +291,8 @@ mod tests {
             "excerpt": "One line about the post.",
             "unsubscribe_url": "https://x.test/newsletter/unsubscribe?token=t",
             "form": "Contact us", "path": "/contact",
+            "confirm_url": "https://x.test/form/confirm?token=t",
+            "delete_url": "https://x.test/form/delete?token=t",
             "fields": [{"label": "Email", "value": "ada@example.com"}],
             "password_cleared": true,
             "sign_in_url": "https://x.test/admin/login",
