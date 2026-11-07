@@ -9,6 +9,9 @@ follows [semantic versioning](https://semver.org) as described in
 
 ### Added
 - Docs plugin 0.1.4: a section slug may be `product/version` (`app/2.0`), served at `/docs/app/2.0/` with its own sidebar and search scope; a hidden `product` root is generated when no section of that name exists.
+- Forms can hold each entry until its sender confirms by email (double opt-in). A held entry stays out of the
+  inbox, the CSV and the unread counts, the owner is mailed only after the click, and the confirmation mail
+  carries a link that deletes the entry. The links open a page with a button, so a mail scanner that fetches them changes nothing. The owner mail after a confirmation names the form only (`/form/confirm`, `/form/delete`).
 
 ## [0.4.1] - 2026-11-10
 
