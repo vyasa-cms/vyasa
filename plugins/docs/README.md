@@ -39,6 +39,7 @@ read correctly without it).
 | Latest version | The label of the version served at `/docs`; empty for unversioned docs |
 | Latest label | How the version switcher names it, default `Latest` |
 | Older versions | One `label = folder` per line, for example `v1 = docs-v1` |
+| Sections | One `slug = Title \| folder [@ ref]` per line, for example `sql = SQL reference \| reference/sql` |
 | Docs title | The breadcrumb root, default `Docs` |
 | Search placeholder | Default `Search the docs` |
 
@@ -148,6 +149,13 @@ Two ways to keep old documentation online:
 
 Releasing v4 means setting *Latest version* to `v4` and adding `v3 =
 docs-v3`; the next sync moves the pages.
+
+## Sections
+
+A section is a separate folder served under `/docs/<slug>/` with its own
+sidebar, a breadcrumb that starts at the section title, and a search box
+limited to it (`doc-section:<slug>`). Sections are single-version. Removing a
+line trashes the section's pages on the next sync.
 
 ## Limits
 
