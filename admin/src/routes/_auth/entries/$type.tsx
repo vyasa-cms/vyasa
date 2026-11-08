@@ -4,7 +4,8 @@ import * as React from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Boxes, ExternalLink, PlusCircle, RotateCcw, SquarePen, Trash2 } from "lucide-react";
-import { api, type PostResponse } from "@/api/client";
+import { api, type PostResponse, type TreeMove } from "@/api/client";
+import { EntryTree } from "@/components/entries/EntryTree";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { DataList, FilterSelect, type Column } from "@/components/ui/data-list";
 import { useConfirm } from "@/components/ui/dialog";
@@ -48,6 +49,7 @@ function EntriesPage({ slug }: { slug: string }) {
   const [debounced, setDebounced] = React.useState("");
   const [status, setStatus] = React.useState("");
   const [selected, setSelected] = React.useState<Set<string | number>>(new Set());
+  const [view, setView] = React.useState<"list" | "tree">("list");
 
   React.useEffect(() => {
     const t = setTimeout(() => setDebounced(term), 300);
@@ -156,6 +158,29 @@ function EntriesPage({ slug }: { slug: string }) {
         description={entries.isPending ? "Loading…" : `${total} ${total === 1 ? singular.toLowerCase() : plural.toLowerCase()}`}
         actions={newLink(`New ${singular.toLowerCase()}`)}
       />
+      {type?.hierarchical === true ? (
+        <div role="radiogroup" aria-label="View" className="inline-flex gap-0.5 rounded-lg bg-muted p-0.5">
+          {(["list", "tree"] as const).map((v) => (
+            <button
+              key={v}
+              type="button"
+              role="radio"
+              aria-checked={view === v}
+              aria-label={v === "list" ? "List" : "Tree"}
+              onClick={() => setView(v)}
+              className={cn(
+                "inline-flex h-7 items-center rounded-md px-3 text-xs transition-colors",
+                view === v ? "bg-background font-medium text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
+              )}
+            >
+              {v === "list" ? "List" : "Tree"}
+            </button>
+          ))}
+        </div>
+      ) : null}
+      {type?.hierarchical === true && view === "tree" ? (
+        <EntryTreeView slug={slug} />
+      ) : (
       <DataList
         testId="entries-table"
         rowTestId="entry-row"
@@ -250,6 +275,32 @@ function EntriesPage({ slug }: { slug: string }) {
         }
         pagination={{ page, totalPages, total, onPage: setPage, label: `${total} · page ${page} of ${totalPages}` }}
       />
+      )}
     </div>
+  );
+}
+
+/** The tree of a hierarchical type: drag, or use the buttons, to reorder and nest. */
+export function EntryTreeView({ slug }: { slug: string }) {
+  const queryClient = useQueryClient();
+  const tree = useQuery({ queryKey: ["post-tree", slug], queryFn: () => api.getPostTree(slug, true) });
+  const move = useMutation({
+    mutationFn: (moves: TreeMove[]) => api.movePostTree(slug, moves),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["post-tree", slug] });
+      void queryClient.invalidateQueries({ queryKey: ["posts"] });
+      notify.success("Moved");
+    },
+    onError: (e) => notify.error("Couldn't move", e),
+  });
+  if (tree.isPending) return <p className="text-sm text-muted-foreground">Loading…</p>;
+  if (tree.error) return <ErrorNote title="Couldn't load the tree" error={tree.error} />;
+  return (
+    <EntryTree
+      nodes={tree.data.nodes.map((n) => ({ ...n, parent_id: n.parent_id ?? null }))}
+      busy={move.isPending}
+      onMoves={(moves) => move.mutate(moves)}
+      href={(id) => `/admin/posts/${id}`}
+    />
   );
 }

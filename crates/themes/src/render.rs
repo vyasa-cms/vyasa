@@ -27,6 +27,8 @@ pub struct SiteMeta {
     /// every page it renders, and because a preview has to link the
     /// *draft's* assets rather than the live theme's.
     pub asset_head: String,
+    /// Whether to add the "Made with Vyasa" line to the footer.
+    pub footer_credit: bool,
 }
 
 impl Default for SiteMeta {
@@ -37,6 +39,7 @@ impl Default for SiteMeta {
             lang: "en".to_owned(),
             logo_url: None,
             asset_head: String::new(),
+            footer_credit: true,
         }
     }
 }
@@ -269,6 +272,7 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
         post_id,
         content_blocks,
         reply_to,
+        page: page.pagination_page.max(1),
         editor,
     };
     let default_name = match template {
@@ -283,6 +287,20 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
     let template_name: &str = match &specific {
         Some(name) if engine.template_names().contains(&name.as_str()) => name,
         _ => default_name,
+    };
+    // A composed entry (its own tree, or its type's) must show its tree
+    // even when the theme's template for this slot never prints `sections`.
+    // A template named for the type (`single-doc.html`) is the theme saying
+    // it handles the type itself, so it is left alone.
+    let composed_fallback = !page.sections.is_empty()
+        && template == TemplateType::Single
+        && specific.as_deref() != Some(template_name)
+        && !engine.prints_sections(template_name)
+        && engine.template_names().contains(&"composed.html");
+    let template_name: &str = if composed_fallback {
+        "composed.html"
+    } else {
+        template_name
     };
 
     let mut regions =
@@ -368,7 +386,29 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
         body_placed,
     );
     fill_field_refs(&mut ctx, &engine.field_refs(template_name));
-    engine.render_json(template_name, &ctx)
+    let html = engine.render_json(template_name, &ctx)?;
+    Ok(if site.footer_credit {
+        add_footer_credit(html)
+    } else {
+        html
+    })
+}
+
+/// The "Made with Vyasa" line.
+pub const FOOTER_CREDIT: &str =
+    "<p class=\"vy-credit\">Made with <a href=\"https://vyasa.site\" rel=\"noopener\">Vyasa</a></p>";
+
+/// Puts [`FOOTER_CREDIT`] at the end of the page's footer.
+///
+/// Done on the finished page, not in a template, so every theme gets it,
+/// including one whose own base template prints its own footer. The last
+/// `</footer>` is the page's: an entry's body can hold earlier ones. A
+/// page with no footer element gets none.
+fn add_footer_credit(mut html: String) -> String {
+    if let Some(at) = html.rfind("</footer>") {
+        html.insert_str(at, FOOTER_CREDIT);
+    }
+    html
 }
 
 /// Gives every field a template names a value, so a field that was

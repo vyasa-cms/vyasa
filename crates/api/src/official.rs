@@ -12,9 +12,10 @@ use vyasa_common::VyasaConfig;
 pub const MARKETPLACE_URL: &str = "https://marketplace.vyasa.site/index.json";
 /// The official release manifest.
 pub const UPDATES_URL: &str = "https://updates.vyasa.site/stable.json";
-/// Keys that sign marketplace packages: the live key, then the spare
-/// kept offline for rotation.
+/// Keys that sign marketplace packages: the live key (added in 0.3.1),
+/// then the two earlier keys, kept so packages they signed still install.
 pub const MARKETPLACE_KEYS: &[&str] = &[
+    "dcb5b2b184c9c45f27d5f5547c249bdd40cc914c5a83c1d75bd67494902e110a",
     "5018b58f3167bed3f08fba4680f7ddf84a17c96aed43ae147f0a30e2d2f188ff",
     "c6e47c76bc3680ded88ff4aa14d02d4ab2a475d3dd8209c76f84385d248026d5",
 ];
@@ -170,7 +171,7 @@ mod tests {
             let bytes: [u8; 32] = hex::decode(key).unwrap().try_into().unwrap();
             ed25519_dalek::VerifyingKey::from_bytes(&bytes).unwrap();
         }
-        assert_eq!(MARKETPLACE_KEYS.len(), 2);
+        assert_eq!(MARKETPLACE_KEYS.len(), 3);
         assert_eq!(RELEASE_KEYS.len(), 2);
     }
 
@@ -196,7 +197,7 @@ mod tests {
         ));
         assert_eq!(m.state, SourceState::Mirror);
         assert_eq!(m.url, "https://m.example/index.json");
-        assert_eq!(m.keys.len(), 2);
+        assert_eq!(m.keys.len(), MARKETPLACE_KEYS.len());
     }
 
     #[test]

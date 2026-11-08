@@ -536,6 +536,7 @@ fn regions_extra_overrides_layout_content() {
         page: vec![lb("f-page", "post-content")],
         search: vec![lb("f-search", "search-box")],
         not_found: vec![lb("f-nf", "content")],
+        types: std::collections::BTreeMap::new(),
     };
 
     let page = PageContext {
@@ -903,4 +904,143 @@ fn timed_block_renders_only_inside_its_window() {
     let html = render_blocks(&[inside, past, future]).expect("renders");
     assert!(html.contains("Now"), "{html}");
     assert!(!html.contains("Gone") && !html.contains("Later"), "{html}");
+}
+
+#[test]
+fn footer_credit_shows_by_default_and_follows_the_option() {
+    let engine = Engine::builtin().expect("engine");
+    let mut layout = Layout::default();
+    *layout.for_template_mut(TemplateType::Single) =
+        vec![lb("body", "content"), lb("foot", "footer")];
+    let render = |site: &SiteMeta| {
+        futures::executor::block_on(render_page(vyasa_themes::RenderRequest {
+            engine: &engine,
+            layout: &layout,
+            registry: &builtin_registry(),
+            tokens: &TokenSet::default(),
+            template: TemplateType::Single,
+            site,
+            page: &PageContext::default(),
+            queries: fake_queries::FakeQueries::shared(),
+            post_id: None,
+            content_blocks: None,
+            reply_to: None,
+            editor: false,
+        }))
+        .expect("renders")
+    };
+    let on = render(&SiteMeta::default());
+    assert!(
+        on.contains(
+            "<p class=\"vy-credit\">Made with \
+             <a href=\"https://vyasa.site\" rel=\"noopener\">Vyasa</a></p></footer>"
+        ),
+        "credit closes the footer: {on}"
+    );
+    let copyright = on.find("vy-footer-inner").expect("copyright line");
+    assert!(
+        copyright < on.find("<p class=\"vy-credit\">").unwrap(),
+        "after the © line"
+    );
+    let off = render(&SiteMeta {
+        footer_credit: false,
+        ..SiteMeta::default()
+    });
+    assert!(
+        !off.contains("<p class=\"vy-credit\">"),
+        "no credit when off"
+    );
+    assert!(off.contains("vy-footer-inner"), "footer itself stays");
+}
+
+#[test]
+fn a_plugin_block_places_its_children_in_its_slots() {
+    let child = |text: &str| Block {
+        kind: BlockKind::Paragraph,
+        plugin_kind: None,
+        attrs: serde_json::json!({ "text": text }),
+        children: vec![],
+    };
+    let block = Block {
+        kind: BlockKind::Plugin,
+        plugin_kind: Some("acme/steps".into()),
+        attrs: serde_json::json!({ vyasa_themes::PLUGIN_BLOCK_RESOLVED_ATTR: "<ol class=\"s\"><li>[[vy-child-0]]</li><li>[[vy-child-1]]</li></ol>" }),
+        children: vec![child("first"), child("second")],
+    };
+    let html = vyasa_themes::render_blocks(&[block]).expect("renders");
+    assert!(html.contains("<ol class=\"s\"><li><p class=\"vy-p\">first</p></li><li><p class=\"vy-p\">second</p></li></ol>"), "{html}");
+}
+
+#[test]
+fn a_plugin_block_keeps_data_attributes_roles_and_prefixed_ids_but_not_handlers() {
+    let block = Block {
+        kind: BlockKind::Plugin,
+        plugin_kind: Some("acme/tabs".into()),
+        attrs: serde_json::json!({ vyasa_themes::PLUGIN_BLOCK_RESOLVED_ATTR:
+            "<div role=\"tablist\" data-x=\"1\" id=\"t\" onclick=\"x()\" style=\"color:red\"><button type=\"submit\">a</button></div>" }),
+        children: vec![],
+    };
+    let html = vyasa_themes::render_blocks(&[block]).expect("renders");
+    assert!(
+        html.contains("role=\"tablist\"")
+            && html.contains("data-x=\"1\"")
+            && html.contains("id=\"pl-t\""),
+        "{html}"
+    );
+    assert!(
+        html.contains("type=\"button\"") && !html.contains("onclick") && !html.contains("style="),
+        "{html}"
+    );
+}
+
+#[test]
+fn heading_ids_stay_in_document_order_across_plugin_children() {
+    let h = |t: &str| Block {
+        kind: BlockKind::Heading,
+        plugin_kind: None,
+        attrs: serde_json::json!({"level": 2, "text": t}),
+        children: vec![],
+    };
+    let wrap = Block {
+        kind: BlockKind::Plugin,
+        plugin_kind: Some("acme/tabs".into()),
+        attrs: serde_json::json!({ vyasa_themes::PLUGIN_BLOCK_RESOLVED_ATTR: "<div>[[vy-child-0]]</div>" }),
+        children: vec![h("Inside")],
+    };
+    let blocks = vec![h("Before"), wrap, h("After")];
+    let html = vyasa_themes::render_blocks(&blocks).expect("renders");
+    let order: Vec<usize> = ["vy-h-1\">Before", "vy-h-2\">Inside", "vy-h-3\">After"]
+        .iter()
+        .map(|n| html.find(n).unwrap_or_else(|| panic!("{n} in {html}")))
+        .collect();
+    assert!(order.windows(2).all(|w| w[0] < w[1]), "{html}");
+    let toc = vyasa_themes::toc_of(&blocks);
+    assert_eq!(
+        toc.iter().map(|t| t.anchor.as_str()).collect::<Vec<_>>(),
+        ["#vy-h-1", "#vy-h-2", "#vy-h-3"]
+    );
+}
+
+#[test]
+fn the_markdown_mirror_uses_the_plugin_blocks_own_markdown_or_its_children() {
+    let with_md = Block {
+        kind: BlockKind::Plugin,
+        plugin_kind: Some("acme/params".into()),
+        attrs: serde_json::json!({"markdown": "| a | b |\n|---|---|"}),
+        children: vec![],
+    };
+    let p = Block {
+        kind: BlockKind::Paragraph,
+        plugin_kind: None,
+        attrs: serde_json::json!({"text": "kid"}),
+        children: vec![],
+    };
+    let without = Block {
+        kind: BlockKind::Plugin,
+        plugin_kind: Some("acme/steps".into()),
+        attrs: serde_json::json!({}),
+        children: vec![p],
+    };
+    let md = vyasa_themes::blocks_to_markdown(&[with_md, without]);
+    assert_eq!(md, "| a | b |\n|---|---|\n\nkid\n");
 }

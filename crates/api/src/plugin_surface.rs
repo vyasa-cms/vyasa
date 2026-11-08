@@ -37,6 +37,9 @@ pub struct RouteDecl {
     /// Path below the mount point, without a leading slash. `*` matches
     /// the rest of the path.
     pub path: String,
+    /// Extra request headers the plugin asked to receive (lower-case
+    /// `x-…` names, at most 8), on top of the usual negotiation headers.
+    pub headers: Vec<String>,
 }
 
 /// A served asset: its bytes and the hash in its URL.
@@ -82,7 +85,8 @@ pub struct AdminField {
     pub key: String,
     /// Label shown to the operator.
     pub label: String,
-    /// One of `text`, `textarea`, `number`, `boolean`, `select`.
+    /// One of `text`, `textarea`, `number`, `boolean`, `select`, `secret`
+    /// (write-only: its value is never returned by a settings read).
     pub kind: String,
     /// Optional help text.
     pub help: Option<String>,
@@ -118,10 +122,26 @@ pub struct SectionDecl {
     pub binds: bool,
     /// String settings the canvas edits in place.
     pub inline: Vec<String>,
+    /// What the section wants besides its settings: any of `entry`,
+    /// `tree` and `toc` (unknown names are ignored).
+    pub context: Vec<String>,
     /// Owning plugin.
     pub plugin_id: i64,
     /// Owning plugin's name, for the studio's "plugin" badge.
     pub plugin_name: String,
+}
+
+/// A field a plugin's post type declares.
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct DeclaredField {
+    /// `^[a-z][a-z0-9_]{0,39}$`.
+    pub key: String,
+    /// Label shown in the editor.
+    pub label: String,
+    /// Help text.
+    pub help: String,
+    /// `text`, `textarea`, `number`, `boolean`, `date` or `url`.
+    pub kind: String,
 }
 
 /// A custom post type a plugin registered.
@@ -137,6 +157,12 @@ pub struct PostTypeDecl {
     pub public: bool,
     /// Whether `/{slug}/` lists them.
     pub has_archive: bool,
+    /// Whether entries nest under one another.
+    pub hierarchical: bool,
+    /// First segment of the public addresses (the slug unless declared).
+    pub base: String,
+    /// Fields the plugin declares for the type (locked to administrators).
+    pub fields: Vec<DeclaredField>,
     /// Owning plugin.
     pub plugin_id: i64,
 }
@@ -167,6 +193,9 @@ pub struct TaskDecl {
     pub name: String,
     /// Requested interval, clamped to at least [`MIN_TASK_SECONDS`].
     pub every_seconds: i32,
+    /// Asked for the extended budget (`"budget": "extended"`); it applies
+    /// only if the plugin holds `tasks:extended`.
+    pub extended: bool,
 }
 
 /// The whole contributed surface.
@@ -178,6 +207,8 @@ struct Inner {
     post_types: BTreeMap<String, PostTypeDecl>,
     taxonomies: BTreeMap<String, TaxonomyDecl>,
     sections: BTreeMap<String, SectionDecl>,
+    /// Default section trees plugins supply for their own post types.
+    layouts: BTreeMap<String, Vec<vyasa_themes::Section>>,
     tasks: Vec<TaskDecl>,
     /// Plugins implementing the superset world, in id order.
     ///
@@ -254,6 +285,12 @@ impl PluginSurface {
     /// One registered custom taxonomy.
     pub async fn taxonomy(&self, slug: &str) -> Option<TaxonomyDecl> {
         self.inner.read().await.taxonomies.get(slug).cloned()
+    }
+
+    /// The default section tree a plugin supplies for entries of the
+    /// custom type `slug`, when it supplies one.
+    pub async fn type_layout(&self, slug: &str) -> Option<Vec<vyasa_themes::Section>> {
+        self.inner.read().await.layouts.get(slug).cloned()
     }
 
     /// Every designer section enabled plugins declare.
@@ -370,6 +407,14 @@ impl PluginSurface {
         inner.routes.retain(|r| r.plugin_id != plugin_id);
         inner.assets.remove(&plugin_id);
         inner.admin.retain(|f| f.plugin_id != plugin_id);
+        // A tree belongs to whoever declared its type, so it goes first.
+        let owned: Vec<String> = inner
+            .post_types
+            .iter()
+            .filter(|(_, t)| t.plugin_id == plugin_id)
+            .map(|(slug, _)| slug.clone())
+            .collect();
+        inner.layouts.retain(|slug, _| !owned.contains(slug));
         inner.post_types.retain(|_, t| t.plugin_id != plugin_id);
         inner.taxonomies.retain(|_, t| t.plugin_id != plugin_id);
         inner.tasks.retain(|t| t.plugin_id != plugin_id);
@@ -467,6 +512,7 @@ pub enum Collect {
 /// # Errors
 /// With [`Collect::Enable`], a Conflict naming the slug an administrator's
 /// content type holds; the caller withdraws everything collected.
+#[allow(clippy::too_many_lines)]
 pub async fn collect(
     state: &AppState,
     plugin_id: i64,
@@ -528,6 +574,17 @@ pub async fn collect(
     if let Some(v) = declaration(state, plugin_id, name, Declaration::PostTypes).await {
         let mut inner = state.plugin_surface.inner.write().await;
         skipped.extend(collect_post_types(&mut inner, plugin_id, name, &v, mode)?);
+        // The fields its types declare, owned by the plugin and locked to
+        // administrators. Never deletes, and never takes over a field an
+        // administrator defined.
+        let declared: Vec<(String, Vec<DeclaredField>)> = inner
+            .post_types
+            .values()
+            .filter(|t| t.plugin_id == plugin_id && !t.fields.is_empty())
+            .map(|t| (t.slug.clone(), t.fields.clone()))
+            .collect();
+        drop(inner);
+        store_declared_fields(state, name, declared).await;
     }
     if let Some(v) = declaration(state, plugin_id, name, Declaration::Taxonomies).await {
         let mut inner = state.plugin_surface.inner.write().await;
@@ -563,11 +620,62 @@ pub async fn collect(
             }
         }
     }
+    // Default trees for the plugin's own post types, after its sections so
+    // a tree may use them.
+    {
+        let env = HostEnv::background(std::sync::Arc::clone(&state.broker), state.pool.clone());
+        if let V2Outcome::Ok(reply) = state
+            .plugin_host
+            .call_filter_at(
+                plugin_id,
+                crate::plugin_hooks::filters::REGISTER_LAYOUTS,
+                "",
+                &env,
+            )
+            .await
+        {
+            let reply = validated_layouts(state, name, &reply, &mut skipped).await;
+            let mut inner = state.plugin_surface.inner.write().await;
+            collect_layouts(&mut inner, plugin_id, name, &reply);
+        }
+    }
     if let Some(v) = declaration(state, plugin_id, name, Declaration::Schedule).await {
         let mut inner = state.plugin_surface.inner.write().await;
         collect_tasks(&mut inner, plugin_id, name, &v);
     }
     Ok(skipped)
+}
+
+/// Writes the fields a plugin's post types declare, owned by the plugin.
+async fn store_declared_fields(
+    state: &AppState,
+    name: &str,
+    declared: Vec<(String, Vec<DeclaredField>)>,
+) {
+    let repo = vyasa_db::repo::ContentFieldsRepo::new(state.pool.clone());
+    for (slug, fields) in declared {
+        for f in fields {
+            let stored = repo
+                .upsert_owned(
+                    name,
+                    &slug,
+                    &f.key,
+                    &f.label,
+                    &f.help,
+                    &f.kind,
+                    false,
+                    &serde_json::json!({}),
+                )
+                .await;
+            if let Err(e) = stored {
+                tracing::warn!(
+                    plugin = name,
+                    "field {:?} of {slug:?} not stored: {e}",
+                    f.key
+                );
+            }
+        }
+    }
 }
 
 /// The refusal or the skip for a slug an administrator's content type
@@ -623,6 +731,74 @@ fn is_valid_section_kind(kind: &str) -> bool {
                 .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
     };
     part(ns) && part(rest) && !rest.contains('/')
+}
+
+/// Drops, from a `register-layouts` reply, every tree that fails the
+/// section rules against the live registry (the plugin's own sections
+/// included), reporting each as degraded. Anything that is not a map of
+/// trees is returned untouched for [`collect_layouts`] to ignore.
+async fn validated_layouts(
+    state: &AppState,
+    name: &str,
+    reply: &str,
+    skipped: &mut Vec<String>,
+) -> String {
+    let Ok(trees) = serde_json::from_str::<BTreeMap<String, Vec<vyasa_themes::Section>>>(reply)
+    else {
+        return reply.to_owned();
+    };
+    let registry = crate::plugin_sections::registry_with_plugins(state).await;
+    let mut kept = serde_json::Map::new();
+    for (slug, tree) in trees {
+        let errors: Vec<String> = vyasa_themes::validate_sections(&tree, &registry, None, "layout")
+            .into_iter()
+            .filter(vyasa_themes::TokenDiagnostic::is_error)
+            .map(|d| format!("{d:?}"))
+            .collect();
+        if errors.is_empty() {
+            if let Ok(value) = serde_json::to_value(&tree) {
+                kept.insert(slug, value);
+            }
+        } else {
+            tracing::warn!(plugin = name, "layout for {slug:?} dropped: {errors:?}");
+            skipped.push(format!(
+                "layout for the post type {slug:?} not loaded: {}",
+                errors.join("; ")
+            ));
+        }
+    }
+    serde_json::Value::Object(kept).to_string()
+}
+
+/// Keeps, from a `register-layouts` reply (a JSON object of section trees
+/// keyed by type slug), the trees for post types this plugin declares.
+/// First declaration wins. Anything that is not such a map is ignored.
+fn collect_layouts(inner: &mut Inner, plugin_id: i64, name: &str, reply: &str) {
+    if reply.trim().is_empty() {
+        return;
+    }
+    let Ok(trees) = serde_json::from_str::<BTreeMap<String, Vec<vyasa_themes::Section>>>(reply)
+    else {
+        tracing::warn!(
+            plugin = name,
+            "register-layouts: not a map of section trees"
+        );
+        return;
+    };
+    for (slug, tree) in trees {
+        let mine = inner
+            .post_types
+            .get(&slug)
+            .is_some_and(|t| t.plugin_id == plugin_id);
+        if !mine || tree.is_empty() || inner.layouts.contains_key(&slug) {
+            tracing::warn!(
+                plugin = name,
+                "ignoring the layout for {slug:?}: not this plugin's type, empty, or already set"
+            );
+            continue;
+        }
+        inner.layouts.insert(slug, tree);
+    }
 }
 
 fn collect_sections(inner: &mut Inner, plugin_id: i64, name: &str, value: &serde_json::Value) {
@@ -695,6 +871,17 @@ fn collect_sections(inner: &mut Inner, plugin_id: i64, name: &str, value: &serde
                             .collect()
                     })
                     .unwrap_or_default(),
+                context: item
+                    .get("context")
+                    .and_then(serde_json::Value::as_array)
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(serde_json::Value::as_str)
+                            .filter(|k| matches!(*k, "entry" | "tree" | "toc"))
+                            .map(str::to_owned)
+                            .collect()
+                    })
+                    .unwrap_or_default(),
                 plugin_id,
                 plugin_name: name.to_owned(),
             },
@@ -740,7 +927,10 @@ fn collect_taxonomies(
         }
         // A taxonomy and a post type both claim `/{slug}/…`, so one may
         // never shadow the other.
-        if inner.taxonomies.contains_key(slug) || inner.post_types.contains_key(slug) {
+        if inner.taxonomies.contains_key(slug)
+            || inner.post_types.contains_key(slug)
+            || inner.post_types.values().any(|d| d.base == slug)
+        {
             tracing::warn!(plugin = name, "ignoring taxonomy {slug:?}: taken");
             continue;
         }
@@ -777,6 +967,67 @@ fn collect_taxonomies(
     Ok(skipped)
 }
 
+/// Fields a post type declares: at most 16, keys in the field grammar,
+/// the kinds an administrator has that need no options (`choice` needs
+/// its choices, `media` and `entry` need resolving).
+fn declared_fields(value: Option<&serde_json::Value>) -> Vec<DeclaredField> {
+    let Some(items) = value.and_then(serde_json::Value::as_array) else {
+        return Vec::new();
+    };
+    let mut out: Vec<DeclaredField> = Vec::new();
+    for item in items {
+        if out.len() >= 16 {
+            break;
+        }
+        let text = |k: &str| item.get(k).and_then(serde_json::Value::as_str);
+        let (Some(key), Some(kind)) = (text("key"), text("kind")) else {
+            continue;
+        };
+        let key_ok = key.len() <= 40
+            && key.starts_with(|c: char| c.is_ascii_lowercase())
+            && key
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_');
+        let kind_ok = matches!(
+            kind,
+            "text" | "textarea" | "number" | "boolean" | "date" | "url"
+        );
+        if !key_ok || !kind_ok || out.iter().any(|f| f.key == key) {
+            tracing::warn!("ignoring declared field {key:?} ({kind:?})");
+            continue;
+        }
+        out.push(DeclaredField {
+            key: key.to_owned(),
+            label: text("label").unwrap_or(key).chars().take(120).collect(),
+            help: text("help").unwrap_or("").chars().take(500).collect(),
+            kind: kind.to_owned(),
+        });
+    }
+    out
+}
+
+/// Headers a route may ask to receive: `x-` names in the usual grammar.
+/// Sessions and credentials can never be asked for (`cookie` and
+/// `authorization` are not `x-`), and the list is short.
+fn extra_headers(value: Option<&serde_json::Value>) -> Vec<String> {
+    let Some(items) = value.and_then(serde_json::Value::as_array) else {
+        return Vec::new();
+    };
+    let mut out: Vec<String> = Vec::new();
+    for raw in items.iter().filter_map(serde_json::Value::as_str) {
+        let name = raw.to_ascii_lowercase();
+        let tail = name.strip_prefix("x-").unwrap_or("");
+        let ok = (1..=40).contains(&tail.len())
+            && tail
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-');
+        if ok && !out.contains(&name) && out.len() < 8 {
+            out.push(name);
+        }
+    }
+    out
+}
+
 fn collect_routes(inner: &mut Inner, plugin_id: i64, name: &str, json: &str) {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(json) else {
         return;
@@ -808,6 +1059,7 @@ fn collect_routes(inner: &mut Inner, plugin_id: i64, name: &str, json: &str) {
             plugin_name: name.to_owned(),
             method,
             path,
+            headers: extra_headers(item.get("headers")),
         });
     }
 }
@@ -871,7 +1123,7 @@ fn collect_admin(inner: &mut Inner, plugin_id: i64, name: &str, value: &serde_js
             .and_then(serde_json::Value::as_str)
             .unwrap_or("text");
         let kind = match kind {
-            "text" | "textarea" | "number" | "boolean" | "select" => kind,
+            "text" | "textarea" | "number" | "boolean" | "select" | "secret" => kind,
             other => {
                 tracing::warn!(
                     plugin = name,
@@ -902,10 +1154,16 @@ fn collect_admin(inner: &mut Inner, plugin_id: i64, name: &str, value: &serde_js
                         .collect()
                 })
                 .unwrap_or_default(),
-            default: field
-                .get("default")
-                .cloned()
-                .unwrap_or(serde_json::Value::Null),
+            // A secret cannot ship a default: it would be a credential in
+            // the plugin's package, shown to every operator.
+            default: if kind == "secret" {
+                serde_json::Value::Null
+            } else {
+                field
+                    .get("default")
+                    .cloned()
+                    .unwrap_or(serde_json::Value::Null)
+            },
         });
     }
     if fields.is_empty() {
@@ -978,6 +1236,7 @@ pub fn is_valid_taxonomy_slug(slug: &str) -> bool {
     is_valid_post_type_slug(slug)
 }
 
+#[allow(clippy::too_many_lines)]
 fn collect_post_types(
     inner: &mut Inner,
     plugin_id: i64,
@@ -1006,6 +1265,30 @@ fn collect_post_types(
             tracing::warn!(plugin = name, "post type {slug:?} is already taken");
             continue;
         }
+        let base = item
+            .get("base")
+            .and_then(serde_json::Value::as_str)
+            .filter(|b| !b.is_empty())
+            .unwrap_or(slug);
+        if base != slug {
+            // A base is a URL segment like a slug: same grammar, and no
+            // other type, base or taxonomy may already hold it.
+            if !is_valid_post_type_slug(base) {
+                skipped.push(unusable_slug(name, "URL base", base));
+                continue;
+            }
+            let held = inner
+                .post_types
+                .values()
+                .any(|d| d.slug == base || d.base == base)
+                || decls.iter().any(|d| d.slug == base || d.base == base)
+                || inner.taxonomies.contains_key(base)
+                || PostType::owner(base) == Some(TypeOwner::Admin);
+            if held {
+                skipped.push(unusable_slug(name, "URL base", base));
+                continue;
+            }
+        }
         let singular = item
             .get("singular")
             .and_then(serde_json::Value::as_str)
@@ -1027,6 +1310,12 @@ fn collect_post_types(
                 .or_else(|| item.get("has_archive"))
                 .and_then(serde_json::Value::as_bool)
                 .unwrap_or(true),
+            hierarchical: item
+                .get("hierarchical")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false),
+            base: base.to_owned(),
+            fields: declared_fields(item.get("fields")),
             plugin_id,
         });
     }
@@ -1067,6 +1356,9 @@ fn collect_post_types(
     };
     for (decl, ok) in kept.into_iter().zip(registered) {
         if ok {
+            if let Err(e) = PostType::set_traits(&decl.slug, decl.hierarchical, Some(&decl.base)) {
+                tracing::error!(plugin = name, "post type {:?}: {e}", decl.slug);
+            }
             inner.post_types.insert(decl.slug.clone(), decl);
         }
     }
@@ -1100,6 +1392,7 @@ fn collect_tasks(inner: &mut Inner, plugin_id: i64, name: &str, value: &serde_js
             plugin_id,
             name: task.to_owned(),
             every_seconds,
+            extended: item.get("budget").and_then(serde_json::Value::as_str) == Some("extended"),
         });
     }
 }
@@ -1482,5 +1775,192 @@ mod tests {
         assert_eq!(form.fields[0].key, "url");
         // An unknown widget type falls back to text rather than vanishing.
         assert_eq!(form.fields[1].kind, "text");
+    }
+
+    #[test]
+    fn a_post_type_may_declare_hierarchy_and_a_base() {
+        let mut inner = Inner::default();
+        collect_post_types(
+            &mut inner,
+            1,
+            "p",
+            &serde_json::json!([{"slug": "doc-decl", "singular": "Doc", "hierarchical": true, "base": "docs-decl"}]),
+            Collect::Boot,
+        )
+        .expect("collected");
+        let d = &inner.post_types["doc-decl"];
+        assert!(d.hierarchical);
+        assert_eq!(d.base, "docs-decl");
+        let t = vyasa_db::content_models::PostType::parse("doc-decl").expect("registered");
+        assert!(t.is_hierarchical());
+        assert_eq!(t.base(), "docs-decl");
+    }
+
+    #[test]
+    fn a_base_that_clashes_is_reported_not_registered() {
+        let mut inner = Inner::default();
+        collect_post_types(
+            &mut inner,
+            1,
+            "p",
+            &serde_json::json!([{"slug": "alpha-decl"}]),
+            Collect::Boot,
+        )
+        .expect("collected");
+        let skipped = collect_post_types(
+            &mut inner,
+            2,
+            "q",
+            &serde_json::json!([
+                {"slug": "beta-decl", "base": "alpha-decl"},
+                {"slug": "gamma-decl", "base": "feed"},
+                {"slug": "delta-decl", "base": "Not A Base"}
+            ]),
+            Collect::Enable,
+        )
+        .expect("a clash degrades, it does not refuse");
+        assert_eq!(skipped.len(), 3, "{skipped:?}");
+        assert!(!inner.post_types.contains_key("beta-decl"));
+        assert!(!inner.post_types.contains_key("gamma-decl"));
+        assert!(!inner.post_types.contains_key("delta-decl"));
+    }
+
+    #[test]
+    fn a_base_defaults_to_the_slug_and_is_not_hierarchical() {
+        let mut inner = Inner::default();
+        collect_post_types(
+            &mut inner,
+            1,
+            "p",
+            &serde_json::json!([{"slug": "plain-decl"}]),
+            Collect::Boot,
+        )
+        .expect("collected");
+        let d = &inner.post_types["plain-decl"];
+        assert!(!d.hierarchical);
+        assert_eq!(d.base, "plain-decl");
+    }
+
+    #[test]
+    fn layouts_are_kept_only_for_types_the_plugin_declares() {
+        let mut inner = Inner::default();
+        collect_post_types(
+            &mut inner,
+            1,
+            "p",
+            &serde_json::json!([{"slug": "layout-mine"}]),
+            Collect::Boot,
+        )
+        .expect("collected");
+        let reply = serde_json::json!({
+            "layout-mine": [{"id": "body", "kind": "post-content"}],
+            "layout-theirs": [{"id": "body", "kind": "post-content"}]
+        });
+        collect_layouts(&mut inner, 1, "p", &reply.to_string());
+        assert!(inner.layouts.contains_key("layout-mine"));
+        assert!(!inner.layouts.contains_key("layout-theirs"));
+        // First declaration wins.
+        collect_layouts(
+            &mut inner,
+            2,
+            "q",
+            &serde_json::json!({"layout-mine": [{"id": "x", "kind": "post-content"}]}).to_string(),
+        );
+        assert_eq!(inner.layouts["layout-mine"][0].id, "body");
+    }
+
+    #[test]
+    fn a_reply_that_is_not_a_layout_map_is_ignored() {
+        let mut inner = Inner::default();
+        collect_layouts(&mut inner, 1, "p", "");
+        collect_layouts(&mut inner, 1, "p", "[1,2]");
+        collect_layouts(&mut inner, 1, "p", "{\"layout-mine\": \"nope\"}");
+        assert!(inner.layouts.is_empty());
+    }
+
+    #[test]
+    fn a_route_may_declare_extra_headers_within_the_grammar() {
+        let mut inner = Inner::default();
+        collect_routes(
+            &mut inner,
+            1,
+            "p",
+            &serde_json::json!([
+                {"method": "POST", "path": "hook", "headers": ["x-hub-signature-256", "X-GitHub-Event", "cookie", "authorization", "Set-Cookie", "x-", "not-x-prefixed", "x-ok_but-underscore"]}
+            ])
+            .to_string(),
+        );
+        assert_eq!(
+            inner.routes[0].headers,
+            vec!["x-hub-signature-256", "x-github-event"]
+        );
+    }
+
+    #[test]
+    fn the_secret_field_type_is_accepted_and_has_no_default() {
+        let mut inner = Inner::default();
+        collect_admin(
+            &mut inner,
+            1,
+            "p",
+            &serde_json::json!({"fields": [
+                {"key": "token", "label": "Token", "type": "secret", "default": "leak"},
+                {"key": "n", "label": "N", "type": "number"}]}),
+        );
+        let form = &inner.admin[0];
+        assert_eq!(form.fields[0].kind, "secret");
+        assert_eq!(
+            form.fields[0].default,
+            serde_json::Value::Null,
+            "a secret cannot ship a default"
+        );
+    }
+
+    #[test]
+    fn a_task_may_ask_for_the_extended_budget() {
+        let mut inner = Inner::default();
+        collect_tasks(
+            &mut inner,
+            1,
+            "p",
+            &serde_json::json!([
+                {"name": "sync", "every-seconds": 60, "budget": "extended"},
+                {"name": "tally", "every-seconds": 3600},
+                {"name": "odd", "every-seconds": 3600, "budget": "unlimited"}
+            ]),
+        );
+        assert!(inner.tasks[0].extended);
+        assert!(!inner.tasks[1].extended);
+        assert!(
+            !inner.tasks[2].extended,
+            "an unknown budget is the ordinary one"
+        );
+    }
+
+    // plugin_surface.rs
+    #[test]
+    fn a_post_type_declares_its_fields_with_the_kinds_administrators_have() {
+        let mut inner = Inner::default();
+        collect_post_types(
+            &mut inner,
+            1,
+            "p",
+            &serde_json::json!([{
+            "slug": "fielded-decl", "fields": [
+                {"key": "section_label", "label": "Section label", "kind": "text", "help": "h"},
+                {"key": "hide", "label": "Hide", "kind": "boolean"},
+                {"key": "BAD KEY", "label": "x", "kind": "text"},
+                {"key": "weird", "label": "x", "kind": "hologram"}
+            ]}]),
+            Collect::Boot,
+        )
+        .expect("collected");
+        let f = &inner.post_types["fielded-decl"].fields;
+        assert_eq!(
+            f.iter().map(|d| d.key.as_str()).collect::<Vec<_>>(),
+            ["section_label", "hide"]
+        );
+        assert_eq!(f[0].help, "h");
+        assert_eq!(f[1].kind, "boolean");
     }
 }

@@ -108,3 +108,12 @@ Both admin editors read and write this format directly — the canvas
 (`admin/src/components/editor/canvas/`) through a ProseMirror document it
 serialises on every change, the classic form editor through per-kind fields.
 Kinds the canvas does not model natively travel through it untouched.
+
+## Plugin blocks (0.3)
+
+A block whose `kind` is `namespace/name` is a plugin's. It may have
+`children`, which the plugin places in the slots of its own markup
+(`[[vy-child-N]]`), and an `attrs.markdown` string that the Markdown mirror
+and `llms.txt` use in place of the children. Editors draw a form for its
+attributes from the plugin's `attrs-schema`, and a block the plugin declares
+a `container` for is edited as panes. See [plugin-api.md](plugin-api.md).

@@ -160,6 +160,17 @@ properties; because those inherit, a card inside a dark band is dark
 without anyone reasoning about the cascade. Contrast is checked inside a
 scope exactly as it is at the root.
 
+### The footer credit
+
+Unless the site turns it off (`footer_credit` option, Settings > Advanced),
+the page ends its `<footer>` with
+`<p class="vy-credit">Made with <a href="https://vyasa.site" rel="noopener">Vyasa</a></p>`.
+The engine adds it to the finished page, after whatever the footer holds, so
+a theme gets it without doing anything, including one with its own base
+template. A theme styles it through `.vy-credit`, which by default is small,
+muted and inherits the theme's tokens. A theme must keep a `<footer>`
+element, or there is nowhere to put it.
+
 ### A page that composes itself
 
 A page may carry its own section tree in `posts.layout`, in which case it
@@ -329,6 +340,21 @@ The theme vocabulary lists each source's fields (`source_fields`) and the
 per-type templates (`type_templates`), so the studio and the assistants
 can compose with them. Text and textarea values are indexed for search and
 listed in an entry's Markdown mirror and in `llms.txt`.
+
+## Typed layouts (0.3)
+
+`layout.json` may carry a `types` key: a map from a custom post-type slug to a
+section tree, validated like any other (an empty tree or a bad slug is an
+error). A single entry of that type renders through the tree, the same path a
+page that composes itself uses. Resolution order for an entry of a custom
+type: its own tree, else the theme's `types.<slug>`, else the default a plugin
+supplies for its own type (`register-layouts`), else the theme's `single`
+template as before. A child theme replaces a type's tree wholesale. A theme
+that has a `single-<type>.html` template is saying it handles the type
+itself and keeps its template; any other `single.html` that never prints
+`sections` is replaced, for composed entries only, by the bundled
+`composed.html`, so the tree always shows. The theme studio does not edit
+typed trees, and an operation on a template leaves them untouched.
 
 ## Plugin sections (phase 54)
 

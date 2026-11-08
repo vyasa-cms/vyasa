@@ -596,8 +596,11 @@ pub fn registry_schema_for(registry: &crate::dynblocks::DynBlockRegistry) -> Val
             serde_json::json!({ "kind": kind, "description": description })
         })
         .collect();
+    // `composed.html` is the engine's own fallback for entries that
+    // compose themselves; it is not offered for editing.
     let template_files: Vec<Value> = builtin_sources()
         .iter()
+        .filter(|(name, _)| *name != "composed.html")
         .map(|(name, src)| serde_json::json!({ "name": name, "builtin_source": src }))
         .collect();
     serde_json::json!({
@@ -679,6 +682,30 @@ mod tests {
         )
         .unwrap();
         assert!(applied.warnings.iter().any(|w| w.path() == "colors.text"));
+    }
+
+    #[test]
+    fn typed_layouts_survive_a_set_layout_on_a_template() {
+        let mut state = blog();
+        let doc = vec![Section {
+            id: "body".into(),
+            kind: "post-content".into(),
+            settings: crate::layout::MapSettings::default(),
+            children: Vec::new(),
+            scope: None,
+            hide_on: None,
+            width: None,
+        }];
+        state.layout.types.insert("doc".into(), doc.clone());
+        let applied = apply(
+            &state,
+            &[StudioOp::SetLayout {
+                template: TemplateType::Single,
+                sections: doc.clone(),
+            }],
+        )
+        .unwrap();
+        assert_eq!(applied.state.layout.types.get("doc"), Some(&doc));
     }
 
     #[test]

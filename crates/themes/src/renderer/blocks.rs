@@ -458,11 +458,23 @@ fn render_block_in(block: &Block, ctx: &DocContext) -> Result<String, RenderErro
         BlockKind::Plugin => {
             let name = block.plugin_kind.as_deref().unwrap_or("?");
             match attrs.get(RESOLVED_ATTR).and_then(serde_json::Value::as_str) {
-                Some(html) => format!(
-                    "<div class=\"vy-plugin-block\" data-block=\"{}\">{}</div>",
-                    esc(name),
-                    crate::renderer::sanitize_plugin_html(html)
-                ),
+                Some(html) => {
+                    // Sanitise first, then fill: the children are already
+                    // safe core output and must not be re-sanitised with
+                    // the plugin allowlist.
+                    let mut children = Vec::with_capacity(block.children.len());
+                    for child in &block.children {
+                        children.push(render_block_in(child, ctx)?);
+                    }
+                    let filled = crate::renderer::fill_child_slots(
+                        &crate::renderer::sanitize_plugin_html(html),
+                        &children,
+                    );
+                    format!(
+                        "<div class=\"vy-plugin-block\" data-block=\"{}\">{filled}</div>",
+                        esc(name)
+                    )
+                }
                 None => format!("<!-- vyasa: unresolved plugin block {} -->", esc(name)),
             }
         }

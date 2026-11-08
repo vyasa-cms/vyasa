@@ -2,7 +2,9 @@ import * as React from "react";
 import { EditorContent, useEditor } from "@tiptap/react";
 import type { Editor } from "@tiptap/core";
 import { NodeSelection } from "@tiptap/pm/state";
-import { buildExtensions } from "./extensions";
+import { useQuery } from "@tanstack/react-query";
+import { getPluginSurface } from "@/api/plugins";
+import { buildExtensions, isPluginContainer, registerPluginContainers } from "./extensions";
 import { cleanPastedHtml } from "../paste";
 import { looksLikeMarkdown, markdownToHtml } from "../markdownPaste";
 import {
@@ -38,7 +40,34 @@ export const CanvasEditor = React.forwardRef<
     value: Block[];
     onChange: (blocks: Block[]) => void;
   }
->(function CanvasEditor({ value, onChange }, ref) {
+>(function CanvasEditor(props, ref) {
+  // Plugin blocks that declare a `container` become editable regions, and
+  // that has to be known before the document is parsed. A failed surface
+  // query registers nothing: those blocks stay opaque cards, as before.
+  const surface = useQuery({
+    queryKey: ["plugin-surface"],
+    queryFn: getPluginSurface,
+    staleTime: 5 * 60 * 1000,
+    retry: false,
+  });
+  if (surface.isPending) {
+    return <div className="min-h-[50vh] animate-pulse rounded-lg bg-muted/40" />;
+  }
+  registerPluginContainers(
+    (surface.data?.blocks ?? [])
+      .filter((b) => b.container !== undefined && b.container !== null)
+      .map((b) => b.kind),
+  );
+  return <CanvasEditorInner ref={ref} {...props} />;
+});
+
+const CanvasEditorInner = React.forwardRef<
+  CanvasHandle,
+  {
+    value: Block[];
+    onChange: (blocks: Block[]) => void;
+  }
+>(function CanvasEditorInner({ value, onChange }, ref) {
   const wrapRef = React.useRef<HTMLDivElement>(null);
   const editorRef = React.useRef<Editor | null>(null);
   const [slash, setSlash] = React.useState<SlashState | null>(null);
@@ -101,11 +130,20 @@ export const CanvasEditor = React.forwardRef<
     },
     onSelectionUpdate: ({ editor: e }) => {
       const { selection } = e.state;
-      setSelectedOpaque(
-        selection instanceof NodeSelection && selection.node.type.name === "rpBlock"
-          ? selection.from
-          : null,
-      );
+      if (selection instanceof NodeSelection && selection.node.type.name === "rpBlock") {
+        setSelectedOpaque(selection.from);
+        return;
+      }
+      // A caret inside a plugin container region selects the region, so its
+      // panes and attributes can be edited.
+      for (let d = selection.$from.depth; d >= 1; d -= 1) {
+        const node = selection.$from.node(d);
+        if (node.type.name === "rpContainer" && isPluginContainer(String(node.attrs["kind"] ?? ""))) {
+          setSelectedOpaque(selection.$from.before(d));
+          return;
+        }
+      }
+      setSelectedOpaque(null);
     },
   });
   editorRef.current = editor;

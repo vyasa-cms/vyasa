@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Chip, Field } from "@/components/ui/primitives";
 import { cn } from "@/lib/utils";
+import { isWithin, rows } from "@/lib/tree";
 import { MediaPicker } from "./MediaPicker";
 import { mediaUrl } from "./blocks";
 
@@ -29,6 +30,8 @@ export interface ChromeValue {
   translations: { id: string; lang: string; title: string; status: string }[];
   scheduled_for: string;
   parent_id: string;
+  /** Hierarchical types: position among siblings; empty appends. */
+  position: string;
   term_ids: string[];
   /** The post's lead picture: cards, social previews and the theme use it. */
   featured_media_id: string;
@@ -130,11 +133,76 @@ function Section({
   );
 }
 
+/** The type's tree, for choosing a parent and showing the resulting path. */
+function useTypeTree(type: string, enabled: boolean) {
+  return useQuery({
+    queryKey: ["post-tree", type],
+    queryFn: () => api.getPostTree(type, true),
+    enabled,
+  });
+}
+
+/** Parent and Position for an entry of a hierarchical type. */
+function TreePlacement({
+  value,
+  onChange,
+  postId,
+}: {
+  value: ChromeValue;
+  onChange: (patch: Partial<ChromeValue>) => void;
+  postId?: string;
+}) {
+  const tree = useTypeTree(value.type, true);
+  const nodes = (tree.data?.nodes ?? []).map((n) => ({ ...n, parent_id: n.parent_id ?? null }));
+  const options = rows(nodes).filter(({ node }) => postId === undefined || !isWithin(nodes, postId, node.id));
+  return (
+    <>
+      <Field label="Parent" htmlFor="post-parent-entry" hint="Nests this entry under another. Leave empty for the top level.">
+        <select
+          id="post-parent-entry"
+          value={value.parent_id}
+          onChange={(e) => onChange({ parent_id: e.target.value })}
+          className="h-9 w-full rounded-md border border-input bg-background px-3 text-sm focus-visible:outline-hidden focus-visible:ring-1 focus-visible:ring-ring"
+        >
+          <option value="">None (top level)</option>
+          {options.map(({ node, depth }) => (
+            <option key={node.id} value={node.id}>
+              {`${"— ".repeat(depth - 1)}${node.title || node.slug}`}
+            </option>
+          ))}
+        </select>
+      </Field>
+      <Field label="Position" htmlFor="post-position" hint="Order among its siblings. Empty puts it last.">
+        <Input
+          id="post-position"
+          type="number"
+          value={value.position}
+          onChange={(e) => onChange({ position: e.target.value })}
+          placeholder="last"
+        />
+      </Field>
+    </>
+  );
+}
+
+/** The path an entry of a hierarchical type will have: its parent's path and its slug. */
+function TreePath({ value }: { value: ChromeValue }) {
+  const tree = useTypeTree(value.type, value.parent_id !== "");
+  const parentPath = value.parent_id === "" ? "" : tree.data?.nodes.find((n) => n.id === value.parent_id)?.path;
+  const path = [parentPath, value.slug === "" ? "…" : value.slug].filter((p) => p !== undefined && p !== "").join("/");
+  return (
+    <p className="font-mono text-xs text-muted-foreground" data-testid="tree-path">
+      Path: {path}
+    </p>
+  );
+}
+
 export function PostChromeSidebar({
   value,
   onChange,
   document,
   postId,
+  hierarchical = false,
 }: {
   value: ChromeValue;
   onChange: (patch: Partial<ChromeValue>) => void;
@@ -142,6 +210,8 @@ export function PostChromeSidebar({
   document?: unknown;
   /** The saved post's id, for the read-aloud tools. */
   postId?: string;
+  /** Whether the entry's type nests: shows Parent and Position. */
+  hierarchical?: boolean;
 }) {
   const siteOptions = useQuery({ queryKey: ["options"], queryFn: () => api.getOptions() });
   const timezone = typeof siteOptions.data?.timezone === "string" ? siteOptions.data.timezone : "UTC";
@@ -300,6 +370,7 @@ export function PostChromeSidebar({
             className="font-mono text-xs"
           />
         </Field>
+        {hierarchical ? <TreePath value={value} /> : null}
 
         <Field
           label="Type"
@@ -322,6 +393,8 @@ export function PostChromeSidebar({
             {value.type !== "post" && value.type !== "page" ? <option value={value.type}>{value.type}</option> : null}
           </select>
         </Field>
+
+        {hierarchical ? <TreePlacement value={value} onChange={onChange} postId={postId} /> : null}
 
         {value.type === "page" ? (
           <Field

@@ -476,6 +476,376 @@ pub async fn update_post(ctx: &Ctx<'_>, id: u64, patch: PostPatch) -> Result<(),
     Ok(())
 }
 
+/// An entry a plugin keeps in step with an outside source.
+pub struct EntryInput {
+    /// A custom post type a plugin registered.
+    pub post_type: String,
+    /// Stable identity within this plugin.
+    pub key: String,
+    /// Key of another entry of this plugin that becomes the parent.
+    pub parent_key: Option<String>,
+    /// Empty to derive one from the title.
+    pub slug: String,
+    /// Title.
+    pub title: String,
+    /// Excerpt.
+    pub excerpt: String,
+    /// A JSON array of blocks.
+    pub blocks_json: String,
+    /// Order among siblings.
+    pub position: i32,
+    /// `draft` or `published`.
+    pub status: String,
+    /// `taxonomy:term-slug`, created when missing.
+    pub terms: Vec<String>,
+    /// A JSON object of field values.
+    pub fields_json: String,
+    /// A JSON object: `canonical-path`, `noindex`, `title`, `description`.
+    pub seo_json: String,
+    /// Opaque; an entry whose stored hash equals this is not written.
+    pub source_hash: String,
+    /// Where editors change it; empty for nowhere.
+    pub edit_url: String,
+}
+
+/// What [`put_entry`] did.
+#[derive(Debug, Clone)]
+pub struct PutResult {
+    /// The entry.
+    pub id: u64,
+    /// `created`, `updated`, `unchanged` or `detached`.
+    pub outcome: String,
+}
+
+/// One entry a plugin manages.
+#[derive(Debug, Clone)]
+pub struct ManagedEntry {
+    /// The plugin's key.
+    pub key: String,
+    /// The entry.
+    pub id: u64,
+    /// What the plugin last wrote.
+    pub source_hash: String,
+}
+
+fn json_object(
+    raw: &str,
+    what: &str,
+) -> Result<serde_json::Map<String, serde_json::Value>, String> {
+    if raw.trim().is_empty() {
+        return Ok(serde_json::Map::new());
+    }
+    match serde_json::from_str::<serde_json::Value>(raw) {
+        Ok(serde_json::Value::Object(map)) => Ok(map),
+        _ => Err(format!("{what} must be a JSON object")),
+    }
+}
+
+/// Resolves `taxonomy:slug` terms to ids, creating the missing ones.
+async fn term_ids_for(pool: &PgPool, terms: &[String]) -> Result<Vec<i64>, String> {
+    let repo = vyasa_db::repo::TermsRepo::new(pool.clone());
+    let mut ids = Vec::new();
+    for raw in terms {
+        let (tax, slug) = raw
+            .split_once(':')
+            .filter(|(t, s)| !t.is_empty() && !s.is_empty())
+            .ok_or_else(|| format!("term {raw:?} must be taxonomy:slug"))?;
+        let taxonomy = vyasa_db::content_models::Taxonomy::parse(tax).map_err(|e| e.to_string())?;
+        if vyasa_common::slugify(slug) != slug {
+            return Err(format!("term slug {slug:?} is not a slug"));
+        }
+        let id = match repo.get_by_slug(taxonomy, slug).await {
+            Ok(row) => row.id,
+            Err(vyasa_common::AppError::NotFound { .. }) => {
+                repo.insert(&vyasa_db::repo::terms::NewTerm {
+                    id: vyasa_common::next_id_i64(),
+                    taxonomy,
+                    name: slug,
+                    slug,
+                    parent_id: None,
+                    meta: serde_json::json!({}),
+                })
+                .await
+                .map_err(|e| e.to_string())?
+                .id
+            }
+            Err(e) => return Err(e.to_string()),
+        };
+        if !ids.contains(&id) {
+            ids.push(id);
+        }
+    }
+    Ok(ids)
+}
+
+/// Applies the `seo-json` keys to a meta object.
+fn apply_seo(
+    meta: &mut serde_json::Map<String, serde_json::Value>,
+    seo: &serde_json::Map<String, serde_json::Value>,
+) {
+    for (from, to) in [
+        ("canonical-path", "seo_canonical_path"),
+        ("noindex", "seo_noindex"),
+        ("title", "seo_title"),
+        ("description", "seo_description"),
+    ] {
+        if let Some(v) = seo.get(from) {
+            meta.insert(to.to_owned(), v.clone());
+        }
+    }
+}
+
+/// Creates or updates the entry with this key, owned by the plugin.
+///
+/// Validated whole before anything is written; idempotent on `source_hash`;
+/// parent-first (a child's `parent_key` must already exist); an entry an
+/// author detached is never touched; a trashed entry stays out of the way
+/// until its source changes.
+///
+/// # Errors
+/// `capability-denied` without `entries:sync` (or without
+/// `db:publish:posts` when publishing), a validation message, or a storage
+/// message.
+#[allow(clippy::too_many_lines)]
+pub async fn put_entry(ctx: &Ctx<'_>, input: EntryInput) -> Result<PutResult, String> {
+    use vyasa_core::post::{CreatePost, PostService, UpdatePost};
+    use vyasa_db::content_models::{PostStatus, PostType};
+
+    ctx.allow(&Capability::EntriesSync).await?;
+    let status = match check_status(&input.status)? {
+        "published" => {
+            ctx.allow(&Capability::DbPublishPosts).await?;
+            PostStatus::Published
+        }
+        _ => PostStatus::Draft,
+    };
+    let title = input.title.trim().to_owned();
+    if title.is_empty() || title.chars().count() > TITLE_MAX {
+        return Err(format!("title must be 1..={TITLE_MAX} characters"));
+    }
+    if input.key.is_empty() || input.key.len() > 512 {
+        return Err(String::from("key must be 1..=512 bytes"));
+    }
+    let Ok(post_type @ PostType::Custom(_)) = PostType::parse(&input.post_type) else {
+        return Err(format!(
+            "post-type must be a custom type a plugin registered (got {:?})",
+            input.post_type
+        ));
+    };
+
+    let blocks: serde_json::Value = serde_json::from_str(&input.blocks_json)
+        .map_err(|_| String::from("blocks-json must be a JSON array of blocks"))?;
+    if !blocks.is_array() {
+        return Err(String::from("blocks-json must be a JSON array of blocks"));
+    }
+    let doc = vyasa_core::BlockDocument::from_json(
+        serde_json::json!({"schema_version": 1, "blocks": blocks}),
+    )
+    .map_err(|e| e.to_string())?;
+    let fields = json_object(&input.fields_json, "fields-json")?;
+    let seo = json_object(&input.seo_json, "seo-json")?;
+    let term_ids = term_ids_for(ctx.pool, &input.terms).await?;
+
+    let managed = vyasa_db::repo::ManagedRepo::new(ctx.pool.clone());
+    let existing = managed
+        .find(ctx.plugin_id, &input.key)
+        .await
+        .map_err(|_| db_err("put-entry"))?;
+    if let Some(row) = &existing {
+        let id = u64::try_from(row.post_id).map_err(|_| db_err("put-entry"))?;
+        if row.detached {
+            return Ok(PutResult {
+                id,
+                outcome: String::from("detached"),
+            });
+        }
+        if row.source_hash == input.source_hash {
+            return Ok(PutResult {
+                id,
+                outcome: String::from("unchanged"),
+            });
+        }
+    }
+    let parent_id = match &input.parent_key {
+        None => None,
+        Some(parent_key) => Some(
+            managed
+                .find(ctx.plugin_id, parent_key)
+                .await
+                .map_err(|_| db_err("put-entry"))?
+                .ok_or_else(|| format!("parent {parent_key:?} has not been written yet"))?
+                .post_id,
+        ),
+    };
+    ctx.allow_write(
+        &Capability::EntriesSync,
+        &format!("put-entry {}", input.key),
+    )
+    .await?;
+
+    let svc = PostService::new(vyasa_db::repo::PostsRepo::new(ctx.pool.clone()));
+    let excerpt = (!input.excerpt.trim().is_empty()).then(|| input.excerpt.clone());
+    let slug = (!input.slug.trim().is_empty()).then(|| input.slug.clone());
+    let hierarchical = post_type.is_hierarchical();
+    let fields_value = serde_json::Value::Object(fields.clone());
+    let (id, outcome) = if let Some(row) = existing {
+        let current = svc.get(row.post_id).await.map_err(|e| e.to_string())?;
+        if current.status == PostStatus::Trash {
+            // The only way out of the trash is through a draft.
+            svc.update(
+                row.post_id,
+                UpdatePost {
+                    status: Some(PostStatus::Draft),
+                    ..UpdatePost::default()
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+        let mut meta = current.meta.as_object().cloned().unwrap_or_default();
+        apply_seo(&mut meta, &seo);
+        svc.update(
+            row.post_id,
+            UpdatePost {
+                status: Some(status),
+                title: Some(title),
+                slug,
+                content: Some(doc),
+                excerpt: Some(excerpt.unwrap_or_default()),
+                term_ids: Some(term_ids),
+                fields: Some(fields_value),
+                meta: Some(serde_json::Value::Object(meta)),
+                parent_id: hierarchical.then_some(parent_id),
+                position: hierarchical.then_some(input.position),
+                ..UpdatePost::default()
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+        (row.post_id, "updated")
+    } else {
+        let author_id = attribution_author(ctx.pool).await?;
+        let created = svc
+            .create_with_fields(
+                CreatePost {
+                    post_type,
+                    status,
+                    title,
+                    slug,
+                    content: doc,
+                    excerpt,
+                    author_id,
+                    parent_id,
+                    scheduled_for: None,
+                    password: None,
+                    term_ids: Some(term_ids),
+                    layout: None,
+                    position: hierarchical.then_some(input.position),
+                },
+                (!fields.is_empty()).then_some(fields_value),
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        sqlx::query(
+            "INSERT INTO plugin_posts (post_id, plugin_id) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+        )
+        .bind(created.id)
+        .bind(ctx.plugin_id)
+        .execute(ctx.pool)
+        .await
+        .map_err(|_| db_err("put-entry"))?;
+        if !seo.is_empty() {
+            let mut meta = created.meta.as_object().cloned().unwrap_or_default();
+            apply_seo(&mut meta, &seo);
+            svc.update(
+                created.id,
+                UpdatePost {
+                    meta: Some(serde_json::Value::Object(meta)),
+                    ..UpdatePost::default()
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
+        }
+        (created.id, "created")
+    };
+    managed
+        .upsert_row(
+            id,
+            ctx.plugin_id,
+            &input.key,
+            &input.source_hash,
+            &input.edit_url,
+        )
+        .await
+        .map_err(|_| db_err("put-entry"))?;
+    Ok(PutResult {
+        id: u64::try_from(id).map_err(|_| db_err("put-entry"))?,
+        outcome: outcome.to_owned(),
+    })
+}
+
+/// Every entry of `post_type` this plugin manages (and has not lost to an
+/// author), with the hash it last wrote.
+///
+/// # Errors
+/// `capability-denied` without `entries:sync`, or a storage message.
+pub async fn list_managed(ctx: &Ctx<'_>, post_type: String) -> Result<Vec<ManagedEntry>, String> {
+    ctx.allow(&Capability::EntriesSync).await?;
+    let rows = vyasa_db::repo::ManagedRepo::new(ctx.pool.clone())
+        .list(ctx.plugin_id, &post_type)
+        .await
+        .map_err(|_| db_err("list-managed"))?;
+    Ok(rows
+        .into_iter()
+        .filter_map(|r| {
+            Some(ManagedEntry {
+                id: u64::try_from(r.post_id).ok()?,
+                key: r.ext_key,
+                source_hash: r.source_hash,
+            })
+        })
+        .collect())
+}
+
+/// Moves a managed entry to the trash. A key the plugin never wrote, or
+/// one an author detached, is left alone.
+///
+/// # Errors
+/// `capability-denied` without `entries:sync`, or a storage message.
+pub async fn delete_entry(ctx: &Ctx<'_>, key: String) -> Result<(), String> {
+    use vyasa_core::post::{PostService, UpdatePost};
+    use vyasa_db::content_models::PostStatus;
+
+    ctx.allow(&Capability::EntriesSync).await?;
+    let Some(row) = vyasa_db::repo::ManagedRepo::new(ctx.pool.clone())
+        .find(ctx.plugin_id, &key)
+        .await
+        .map_err(|_| db_err("delete-entry"))?
+    else {
+        return Ok(());
+    };
+    if row.detached {
+        return Ok(());
+    }
+    ctx.allow_write(&Capability::EntriesSync, &format!("delete-entry {key}"))
+        .await?;
+    let svc = PostService::new(vyasa_db::repo::PostsRepo::new(ctx.pool.clone()));
+    let current = svc.get(row.post_id).await.map_err(|e| e.to_string())?;
+    if current.status != PostStatus::Trash {
+        svc.update(
+            row.post_id,
+            UpdatePost {
+                status: Some(PostStatus::Trash),
+                ..UpdatePost::default()
+            },
+        )
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 /// Longest meta key and value a plugin may set on a post.
 const META_MAX_KEY: usize = 64;
 /// Longest meta value.

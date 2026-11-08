@@ -7,6 +7,7 @@ import {
   type Block,
   type BlockKind,
 } from "@/components/editor/blocks";
+import { registerPluginContainers } from "@/components/editor/canvas/extensions";
 import {
   blocksToDoc,
   docToBlocks,
@@ -44,5 +45,21 @@ describe("plugin blocks in the editor", () => {
     expect(isNative(original.kind)).toBe(false);
     const doc = blocksToDoc([original]);
     expect(docToBlocks(doc)).toEqual([original]);
+  });
+
+  it("round-trips a container plugin kind with both of its panes", () => {
+    registerPluginContainers(["docs/tabs"]);
+    const group = (text: string): Block => ({
+      kind: "group" as BlockKind,
+      attrs: {},
+      children: [{ kind: "paragraph" as BlockKind, attrs: { text }, children: [] }],
+    });
+    const block: Block = {
+      kind: "docs/tabs" as BlockKind,
+      attrs: { labels: ["a", "b"] },
+      children: [group("one"), group("two")],
+    };
+    expect(isNative("docs/tabs" as BlockKind)).toBe(true);
+    expect(docToBlocks(blocksToDoc([block]))).toEqual([block]);
   });
 });

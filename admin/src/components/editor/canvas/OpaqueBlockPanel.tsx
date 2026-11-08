@@ -8,7 +8,12 @@ import { BLOCK_KINDS, isPluginKind, mediaUrl, type Block } from "../blocks";
 import { MediaPicker } from "../MediaPicker";
 import { api } from "@/api/client";
 import { notify } from "@/components/ui/toast";
-import { blockToNode } from "./serialize";
+import { blockToNode, nodeToBlock, type PMNode } from "./serialize";
+import { PluginAttrsForm } from "./PluginAttrsForm";
+import { ContainerControls } from "./ContainerControls";
+import { containerOf, type Attrs } from "@/lib/pluginSchema";
+import { getPluginSurface } from "@/api/plugins";
+import { useConfirm } from "@/components/ui/dialog";
 import { useQuery } from "@tanstack/react-query";
 
 interface FieldSpec {
@@ -149,8 +154,21 @@ export function OpaqueBlockPanel({
   const node = editor.state.doc.nodeAt(pos);
   const kind = String(node?.attrs["kind"] ?? "");
   const attrs = (node?.attrs["attrs"] ?? {}) as Record<string, unknown>;
-  const children = (Array.isArray(node?.attrs["children"]) ? node?.attrs["children"] : []) as Block[];
+  // An opaque block carries its children as data; a container region holds
+  // them as editable content, read back through the serializer.
+  const isRegion = node?.type.name === "rpContainer";
+  const children = (
+    isRegion && node !== undefined && node !== null
+      ? (nodeToBlock(node.toJSON() as PMNode)?.children ?? [])
+      : Array.isArray(node?.attrs["children"])
+        ? node?.attrs["children"]
+        : []
+  ) as Block[];
   const meta = BLOCK_KINDS.find((k) => k.kind === kind);
+  const confirm = useConfirm();
+  const surface = useQuery({ queryKey: ["plugin-surface"], queryFn: getPluginSurface, staleTime: 5 * 60 * 1000, retry: false });
+  const descriptor = isPluginKind(kind) ? surface.data?.blocks.find((b) => b.kind === kind) : undefined;
+  const container = containerOf(descriptor);
   const fields = FIELDS[kind];
   const [mediaFor, setMediaFor] = React.useState<string | null>(null);
 
@@ -168,6 +186,21 @@ export function OpaqueBlockPanel({
   const set = (key: string, value: unknown) =>
     write({ attrs: { ...attrs, [key]: value } });
   const setChildren = (next: Block[]) => write({ children: next });
+  // A region's panes are real content: replace them in place.
+  const replaceRegionChildren = (next: Block[]) => {
+    editor
+      .chain()
+      .command(({ tr, state }) => {
+        const current = tr.doc.nodeAt(pos);
+        if (current === null) return false;
+        const nodes = (next.length > 0 ? next.map(blockToNode) : [{ type: "paragraph" } as PMNode]).map((n) =>
+          state.schema.nodeFromJSON(n),
+        );
+        tr.replaceWith(pos + 1, pos + current.nodeSize - 1, nodes);
+        return true;
+      })
+      .run();
+  };
 
   const remove = () => {
     const current = editor.state.doc.nodeAt(pos);
@@ -188,7 +221,7 @@ export function OpaqueBlockPanel({
         >
           {meta?.icon ?? "?"}
         </span>
-        <h3 className="text-sm font-medium">{meta?.label ?? kind} settings</h3>
+        <h3 className="text-sm font-medium">{meta?.label ?? descriptor?.title ?? kind} settings</h3>
         <Button
           variant="ghost"
           size="sm"
@@ -202,11 +235,41 @@ export function OpaqueBlockPanel({
 
       <div className="space-y-4 p-4">
         {fields === undefined && isPluginKind(kind) ? (
-          <PluginAttrs
-            kind={kind}
-            attrs={attrs}
-            onChange={(next) => write({ attrs: next })}
-          />
+          <>
+            {descriptor?.attrsSchema !== undefined && descriptor.attrsSchema !== null ? (
+              <PluginAttrsForm
+                schema={descriptor.attrsSchema}
+                attrs={attrs as Attrs}
+                onChange={(next) => write({ attrs: next })}
+              />
+            ) : null}
+            {container !== undefined ? (
+              <ContainerControls
+                spec={container}
+                attrs={attrs as Attrs}
+                panes={children as unknown as Parameters<typeof ContainerControls>[0]["panes"]}
+                onChange={(nextAttrs, nextPanes) => {
+                  if (nextPanes === (children as unknown)) {
+                    write({ attrs: nextAttrs });
+                  } else if (isRegion) {
+                    write({ attrs: nextAttrs });
+                    replaceRegionChildren(nextPanes as unknown as Block[]);
+                  } else {
+                    write({ attrs: nextAttrs, children: nextPanes });
+                  }
+                }}
+                confirm={(message) => confirm({ title: message, destructive: true })}
+              />
+            ) : null}
+            <details>
+              <summary className="cursor-pointer text-xs text-muted-foreground">Advanced</summary>
+              <PluginAttrs
+                kind={kind}
+                attrs={attrs}
+                onChange={(next) => write({ attrs: next })}
+              />
+            </details>
+          </>
         ) : fields === undefined ? (
           <p className="text-sm text-muted-foreground">
             This block has no editable settings here yet. Switch to the classic

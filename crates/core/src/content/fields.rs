@@ -681,6 +681,19 @@ pub struct ContentFieldsService {
 }
 
 /// A type that may carry fields: `post`, `page` or a live custom type.
+/// Refuses to change a field a plugin's post type declared: its
+/// definition belongs to the plugin, which rewrites it on every enable.
+fn refuse_foreign(field: &ContentFieldRow) -> Result<(), AppError> {
+    if field.owner == "admin" {
+        Ok(())
+    } else {
+        Err(AppError::conflict(format!(
+            "field {:?} belongs to the plugin {}; it cannot be changed here",
+            field.key, field.owner
+        )))
+    }
+}
+
 fn fieldable(type_slug: &str) -> Result<(), AppError> {
     match type_slug {
         "post" | "page" => Ok(()),
@@ -824,6 +837,7 @@ impl ContentFieldsService {
         changes: FieldChanges,
     ) -> Result<ContentFieldRow, AppError> {
         let current = self.fields.get(type_slug, key).await?;
+        refuse_foreign(&current)?;
         let current_kind = FieldKind::parse(&current.kind)?;
         let kind = changes.kind.unwrap_or(current_kind);
         let kind_changes = kind != current_kind;
@@ -867,6 +881,9 @@ impl ContentFieldsService {
     ///
     /// Returns [`AppError::NotFound`] when missing.
     pub async fn delete(&self, type_slug: &str, key: &str) -> Result<(), AppError> {
+        if let Ok(current) = self.fields.get(type_slug, key).await {
+            refuse_foreign(&current)?;
+        }
         if self.fields.delete(type_slug, key).await? {
             Ok(())
         } else {

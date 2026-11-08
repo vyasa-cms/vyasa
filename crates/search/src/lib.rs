@@ -6,4 +6,4 @@ pub mod pipeline;
 pub mod query;
 
 pub use index::{IndexManager, SearchDoc};
-pub use query::{escape_query, SearchHit};
+pub use query::{escape_query, Scope, SearchHit};

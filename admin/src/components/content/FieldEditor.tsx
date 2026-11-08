@@ -1,7 +1,7 @@
 import * as React from "react";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDown, ArrowLeft, ArrowUp, ListPlus, Plus } from "lucide-react";
+import { ArrowDown, ArrowLeft, ArrowUp, ListPlus, Lock, Plus } from "lucide-react";
 import { api, type ContentField, type FieldKind, type FieldOptions } from "@/api/client";
 import { Button } from "@/components/ui/button";
 import { Modal, useConfirm } from "@/components/ui/dialog";
@@ -132,8 +132,21 @@ export function FieldEditor({ slug }: { slug: string }) {
                 <Button variant="ghost" size="sm" className="h-7 w-7 p-0" aria-label={`Move ${f.label} down`} disabled={i === list.length - 1 || reorder.isPending} onClick={() => move(i, 1)}>
                   <ArrowDown className="h-3.5 w-3.5" aria-hidden="true" />
                 </Button>
-                <button type="button" onClick={() => setEditing(f)} className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground">Edit</button>
-                <button type="button" onClick={() => void askRemove(f)} className="rounded-md px-2 py-1 text-xs font-medium text-destructive hover:bg-destructive-subtle">Delete</button>
+                {f.owner !== "admin" ? (
+                  <span
+                    className="inline-flex items-center gap-1 px-2 text-xs text-muted-foreground"
+                    title={`Defined by the plugin ${f.owner}; it cannot be changed here`}
+                    data-testid="field-locked"
+                  >
+                    <Lock className="h-3 w-3" aria-hidden="true" />
+                    {f.owner}
+                  </span>
+                ) : (
+                  <>
+                    <button type="button" onClick={() => setEditing(f)} className="rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-accent hover:text-foreground">Edit</button>
+                    <button type="button" onClick={() => void askRemove(f)} className="rounded-md px-2 py-1 text-xs font-medium text-destructive hover:bg-destructive-subtle">Delete</button>
+                  </>
+                )}
               </span>
             </li>
           ))}

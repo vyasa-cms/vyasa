@@ -198,8 +198,8 @@ function TypeForm({
   // what it edits before the first keystroke lands.
   const [v, setV] = React.useState(() =>
     editing === null
-      ? { slug: "", singular: "", plural: "", description: "", public: true, has_archive: true }
-      : { slug: editing.slug, singular: editing.singular, plural: editing.plural, description: editing.description, public: editing.public, has_archive: editing.has_archive },
+      ? { slug: "", singular: "", plural: "", description: "", public: true, has_archive: true, hierarchical: false }
+      : { slug: editing.slug, singular: editing.singular, plural: editing.plural, description: editing.description, public: editing.public, has_archive: editing.has_archive, hierarchical: editing.hierarchical },
   );
 
   const slug = v.slug.trim();
@@ -220,7 +220,7 @@ function TypeForm({
 
   const save = useMutation({
     mutationFn: () => {
-      const labels = { singular, plural, description: v.description.trim(), public: v.public, has_archive: v.has_archive };
+      const labels = { singular, plural, description: v.description.trim(), public: v.public, has_archive: v.has_archive, hierarchical: v.hierarchical };
       return editing === null ? api.createContentType({ slug, ...labels }) : api.updateContentType(editing.slug, labels);
     },
     onSuccess: () => {
@@ -280,6 +280,10 @@ function TypeForm({
         <label className="flex items-start gap-2 text-sm">
           <input type="checkbox" checked={v.has_archive} onChange={(e) => setV({ ...v, has_archive: e.target.checked })} className="mt-0.5 h-3.5 w-3.5 accent-primary" />
           <span>Archive — /{slug === "" ? "slug" : slug} lists the published entries</span>
+        </label>
+        <label className="flex items-start gap-2 text-sm">
+          <input type="checkbox" checked={v.hierarchical} onChange={(e) => setV({ ...v, hierarchical: e.target.checked })} className="mt-0.5 h-3.5 w-3.5 accent-primary" />
+          <span>Hierarchical — entries nest under one another and are ordered by hand, like documentation (turning it off needs every entry unnested first)</span>
         </label>
       </div>
     </Modal>

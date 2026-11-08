@@ -11,12 +11,69 @@
 
 use std::time::Duration;
 
-use vyasa_plugins::host::FetchBackend;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
+use vyasa_plugins::host::{FetchBackend, FetchReply};
 
 /// Longest a plugin may wait for a response.
 const TIMEOUT: Duration = Duration::from_secs(5);
 /// Largest response body handed back to a plugin.
 const MAX_BYTES: usize = 1024 * 1024;
+
+/// Request headers a plugin may send.
+pub const REQUEST_HEADERS: &[&str] = &[
+    "authorization",
+    "accept",
+    "if-none-match",
+    "x-github-api-version",
+];
+
+/// Response headers a plugin may see.
+pub const RESPONSE_HEADERS: &[&str] = &[
+    "etag",
+    "content-type",
+    "retry-after",
+    "x-ratelimit-remaining",
+    "x-ratelimit-reset",
+];
+
+/// Longest header value a plugin may send.
+const MAX_HEADER_BYTES: usize = 4096;
+
+/// Checks a plugin's request headers against the allowlist.
+fn request_headers(headers: &[(String, String)]) -> Result<HeaderMap, String> {
+    let mut map = HeaderMap::new();
+    for (name, value) in headers {
+        let lower = name.to_ascii_lowercase();
+        if !REQUEST_HEADERS.contains(&lower.as_str()) {
+            return Err(format!("header {lower:?} is not allowed"));
+        }
+        if value.len() > MAX_HEADER_BYTES {
+            return Err(String::from("header value refused"));
+        }
+        let mut v =
+            HeaderValue::from_str(value).map_err(|_| String::from("header value refused"))?;
+        if lower == "authorization" {
+            v.set_sensitive(true);
+        }
+        let n = HeaderName::from_bytes(lower.as_bytes())
+            .map_err(|_| String::from("header name refused"))?;
+        map.insert(n, v);
+    }
+    Ok(map)
+}
+
+/// The response headers a plugin may see, lower-cased, in the list's order.
+fn response_headers(headers: &HeaderMap) -> Vec<(String, String)> {
+    RESPONSE_HEADERS
+        .iter()
+        .filter_map(|name| {
+            headers
+                .get(*name)
+                .and_then(|v| v.to_str().ok())
+                .map(|v| ((*name).to_owned(), v.to_owned()))
+        })
+        .collect()
+}
 
 /// Performs plugin fetches with a shared client.
 pub struct PluginFetch {
@@ -75,6 +132,50 @@ impl FetchBackend for PluginFetch {
                     }
                 })?;
             String::from_utf8(bytes).map_err(|_| String::from("response is not UTF-8"))
+        })
+    }
+
+    fn get_with<'a>(
+        &'a self,
+        url: &'a str,
+        headers: Vec<(String, String)>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<FetchReply, String>> + Send + 'a>>
+    {
+        Box::pin(async move { self.get_with_impl(url, &headers).await })
+    }
+}
+
+impl PluginFetch {
+    async fn get_with_impl(
+        &self,
+        url: &str,
+        headers: &[(String, String)],
+    ) -> Result<FetchReply, String> {
+        let target = vyasa_plugins::broker::parse_fetch_url(url)
+            .ok_or_else(|| String::from("url refused"))?;
+        let map = request_headers(headers)?;
+        let response = self
+            .client
+            .get(target)
+            .headers(map)
+            .send()
+            .await
+            .map_err(|e| format!("request failed: {}", transport_reason(&e)))?;
+        let status = response.status().as_u16();
+        let reply_headers = response_headers(response.headers());
+        let bytes = crate::net_guard::read_capped(response, MAX_BYTES)
+            .await
+            .map_err(|e| match e {
+                crate::net_guard::BodyError::TooLarge => String::from("response too large"),
+                crate::net_guard::BodyError::Transport(e) => {
+                    format!("read failed: {}", transport_reason(&e))
+                }
+            })?;
+        let body = String::from_utf8(bytes).map_err(|_| String::from("response is not UTF-8"))?;
+        Ok(FetchReply {
+            status,
+            headers: reply_headers,
+            body,
         })
     }
 }
@@ -139,5 +240,68 @@ mod tests {
         // A redirect would let a `net:fetch:a.example.com` grant reach
         // any other host, so the policy must be `none`.
         let _ = PluginFetch::new();
+    }
+
+    #[test]
+    fn only_the_allowed_request_headers_are_sent() {
+        let ok = request_headers(&[
+            ("Authorization".into(), "Bearer abc".into()),
+            ("accept".into(), "application/vnd.github+json".into()),
+            ("If-None-Match".into(), "\"abc\"".into()),
+            ("x-github-api-version".into(), "2022-11-28".into()),
+        ])
+        .expect("allowed");
+        assert_eq!(ok.len(), 4);
+        assert!(
+            ok.get("authorization")
+                .is_some_and(reqwest::header::HeaderValue::is_sensitive),
+            "kept out of logs"
+        );
+        for bad in [
+            "cookie",
+            "host",
+            "x-forwarded-for",
+            "user-agent",
+            "content-length",
+            "proxy-authorization",
+        ] {
+            let err = request_headers(&[(bad.into(), "x".into())]).unwrap_err();
+            assert!(err.contains("not allowed"), "{bad}: {err}");
+        }
+        assert!(
+            request_headers(&[("accept".into(), "a\r\nb: c".into())]).is_err(),
+            "no header injection"
+        );
+        assert!(
+            request_headers(&[("authorization".into(), "x".repeat(5000))]).is_err(),
+            "bounded"
+        );
+    }
+
+    #[test]
+    fn only_the_listed_response_headers_come_back() {
+        let mut h = HeaderMap::new();
+        h.insert("etag", HeaderValue::from_static("\"v1\""));
+        h.insert("set-cookie", HeaderValue::from_static("a=b"));
+        h.insert("x-ratelimit-remaining", HeaderValue::from_static("59"));
+        h.insert("server", HeaderValue::from_static("github"));
+        let out = response_headers(&h);
+        assert_eq!(
+            out,
+            vec![
+                ("etag".to_owned(), "\"v1\"".to_owned()),
+                ("x-ratelimit-remaining".to_owned(), "59".to_owned())
+            ]
+        );
+    }
+
+    #[tokio::test]
+    async fn a_userinfo_url_is_refused_before_any_request_by_get_with_too() {
+        let backend = PluginFetch::new();
+        let err = backend
+            .get_with("https://api.good.com@evil.com/x", vec![])
+            .await
+            .unwrap_err();
+        assert_eq!(err, "url refused");
     }
 }

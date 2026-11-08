@@ -736,15 +736,21 @@ mod plugin_block_tests {
     }
 
     #[test]
-    fn plugin_blocks_cannot_have_children() {
-        let err = validate(&[Block {
-            kind: BlockKind::Plugin,
-            plugin_kind: Some(String::from("acme/chart")),
-            attrs: serde_json::Value::Null,
-            children: vec![Block::new(BlockKind::Separator, serde_json::Value::Null)],
-        }])
-        .unwrap_err()
-        .to_string();
-        assert!(err.contains("cannot have children"), "{err}");
+    fn plugin_blocks_may_have_children_which_are_validated_like_any_other() {
+        let with = |child: Block| {
+            validate(&[Block {
+                kind: BlockKind::Plugin,
+                plugin_kind: Some(String::from("acme/steps")),
+                attrs: serde_json::Value::Null,
+                children: vec![child],
+            }])
+        };
+        assert!(with(Block::new(BlockKind::Separator, serde_json::Value::Null)).is_ok());
+        // A child is checked as a child: a heading with no text is refused.
+        assert!(with(Block::new(
+            BlockKind::Heading,
+            serde_json::json!({"level": 9})
+        ))
+        .is_err());
     }
 }

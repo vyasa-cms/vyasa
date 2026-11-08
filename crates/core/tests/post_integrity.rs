@@ -83,6 +83,7 @@ fn new_post(author: i64, title: &str, slug: Option<String>) -> CreatePost {
         password: None,
         term_ids: None,
         layout: None,
+        position: None,
     }
 }
 

@@ -147,6 +147,7 @@ mod ai_complete {
             fetch: None,
             viewer: None,
             ai_window: window,
+            call_deadline: None,
         }
     }
 

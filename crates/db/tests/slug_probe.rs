@@ -115,6 +115,8 @@ async fn exhausted_suffixes_fall_back_to_the_post_id() {
                 scheduled_for: None,
                 password_hash: None,
                 layout: None,
+                path_prefix: None,
+                position: 0,
             },
             None,
         )

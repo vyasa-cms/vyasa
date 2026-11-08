@@ -28,3 +28,4 @@ build "$EX/hello/source" debug "$EX/hello/hello-component.wasm"
 for name in bookshelf forum-lite storefront; do
     build "$EX/$name" release "$EX/$name/$name-component.wasm"
 done
+"$ROOT/plugins/docs/build.sh"

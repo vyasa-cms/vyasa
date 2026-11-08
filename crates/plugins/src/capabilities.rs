@@ -2,7 +2,7 @@
 //! `db:read:comments`, `db:write:posts`, `db:publish:posts`,
 //! `db:write:meta`, `kv:read`, `kv:write`, `viewer:read`, `mail:send`,
 //! `net:fetch:{pattern}`, `log:write`, `event:emit`, `ai:text`,
-//! `html:page`, `assets:script`.
+//! `html:page`, `assets:script`, `entries:sync`, `tasks:extended`.
 //!
 //! Patterns use shell-style host wildcards (`*.example.com` matches
 //! `a.example.com` and `a.b.example.com` but never `example.com` itself
@@ -59,6 +59,14 @@ pub enum Capability {
     /// Stylesheets stay ungated: CSS cannot run code. A script can, so
     /// declaring one is not enough — the operator has to have granted it.
     AssetsScript,
+    /// Create, update and remove entries the plugin owns, with structure
+    /// (parents, order, terms, field values).
+    ///
+    /// Publishing still needs [`Capability::DbPublishPosts`], and neither
+    /// implies the other.
+    EntriesSync,
+    /// Run background tasks with the extended (one minute) budget.
+    TasksExtended,
 }
 
 impl fmt::Display for Capability {
@@ -80,6 +88,8 @@ impl fmt::Display for Capability {
             Self::AiText => write!(f, "ai:text"),
             Self::HtmlPage => write!(f, "html:page"),
             Self::AssetsScript => write!(f, "assets:script"),
+            Self::EntriesSync => write!(f, "entries:sync"),
+            Self::TasksExtended => write!(f, "tasks:extended"),
         }
     }
 }
@@ -106,6 +116,8 @@ impl Capability {
             "ai:text" => Ok(Self::AiText),
             "html:page" => Ok(Self::HtmlPage),
             "assets:script" => Ok(Self::AssetsScript),
+            "entries:sync" => Ok(Self::EntriesSync),
+            "tasks:extended" => Ok(Self::TasksExtended),
             other => {
                 if let Some(pattern) = other.strip_prefix("net:fetch:") {
                     if pattern.is_empty() || pattern.contains('/') {
@@ -253,5 +265,19 @@ mod tests {
     fn wildcard_never_matches_lookalike() {
         let net = Capability::NetFetch(String::from("*.example.com"));
         assert!(!net.implies(&Capability::NetFetch(String::from("evil-example.com"))));
+    }
+
+    #[test]
+    fn the_new_capabilities_round_trip_and_do_not_imply_each_other() {
+        for raw in ["entries:sync", "tasks:extended"] {
+            let cap = Capability::parse(raw).expect("parses");
+            assert_eq!(cap.to_string(), raw);
+        }
+        let sync = Capability::EntriesSync;
+        assert!(sync.implies(&Capability::EntriesSync));
+        assert!(!sync.implies(&Capability::DbWritePosts));
+        assert!(!sync.implies(&Capability::DbPublishPosts));
+        assert!(!Capability::DbWritePosts.implies(&Capability::EntriesSync));
+        assert!(!Capability::TasksExtended.implies(&Capability::KvWrite));
     }
 }

@@ -75,6 +75,17 @@ body.vy {
   font-size: 0.9em;
 }
 
+.vy-credit {
+  width: 100%;
+  max-width: var(--vy-content-width);
+  margin: calc(var(--vy-space-unit) * 2) auto 0;
+  padding-inline: calc(var(--vy-space-unit) * 5);
+  font-size: 0.8em;
+  color: var(--vy-color-text-muted);
+}
+.vy-credit a { color: inherit; text-decoration: underline; text-underline-offset: 0.15em; }
+.vy-credit a:hover { color: var(--vy-color-text); }
+
 .vy-sidebar, .vy-sidebar-left, .vy-sidebar-right {
   width: var(--vy-sidebar-width);
   flex: none;

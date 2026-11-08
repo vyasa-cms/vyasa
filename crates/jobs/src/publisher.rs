@@ -108,6 +108,7 @@ mod tests {
                 password: None,
                 term_ids: None,
                 layout: None,
+                position: None,
             })
             .await
             .expect("create scheduled");
@@ -137,6 +138,7 @@ mod tests {
                 password: None,
                 term_ids: None,
                 layout: None,
+                position: None,
             })
             .await
             .expect("create");

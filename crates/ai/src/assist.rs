@@ -244,11 +244,34 @@ fn text_schema() -> serde_json::Value {
 /// headings only, truncated to `budget` characters with ellipsis.
 #[must_use]
 pub fn extract_text(blocks: &[Block], budget: usize) -> String {
+    // Paragraph and heading text is inline HTML (`<code>`, links, `&amp;`):
+    // keep the words, drop the markup.
+    fn push_plain(html: &str, out: &mut String) {
+        let mut in_tag = false;
+        let mut words = String::with_capacity(html.len());
+        for c in html.chars() {
+            match c {
+                '<' => in_tag = true,
+                '>' => in_tag = false,
+                _ if !in_tag => words.push(c),
+                _ => {}
+            }
+        }
+        out.push_str(
+            &words
+                .replace("&lt;", "<")
+                .replace("&gt;", ">")
+                .replace("&quot;", "\"")
+                .replace("&#39;", "'")
+                .replace("&nbsp;", " ")
+                .replace("&amp;", "&"),
+        );
+    }
     fn walk<'a>(blocks: &'a [Block], out: &'a mut String) -> &'a mut String {
         for b in blocks {
             if b.kind.as_str() == "paragraph" || b.kind.as_str() == "heading" {
                 if let Some(text) = b.attrs.get("text").and_then(serde_json::Value::as_str) {
-                    out.push_str(text);
+                    push_plain(text, out);
                     out.push('\n');
                 }
             }
@@ -295,6 +318,15 @@ pub fn enough_passage(text: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extracted_text_is_what_a_reader_sees_not_inline_markup() {
+        let blocks: Vec<Block> = serde_json::from_value(serde_json::json!([
+            {"kind": "paragraph", "attrs": {"text": "Run <code>a &amp; b</code> <a href=\"/x\">now</a>"}, "children": []}
+        ]))
+        .unwrap();
+        assert_eq!(extract_text(&blocks, 1000), "Run a & b now");
+    }
 
     #[test]
     fn every_kind_parses_from_its_url_segment_and_back() {

@@ -1,0 +1,24 @@
+{
+  "title": "Vyasa",
+  "pages": [
+    "index",
+    "ARCHITECTURE",
+    "TECH-STACK",
+    "FEATURE-MATRIX",
+    "DEPLOYMENT",
+    "OPERATIONS",
+    "PERFORMANCE",
+    "SECURITY",
+    "THEMES",
+    "BLOCKS",
+    "plugin-api",
+    "DOCS-SITES",
+    "MARKETPLACE",
+    "PUBLISHING",
+    "AI-MODELS",
+    "MCP",
+    "VERSIONING",
+    "RELEASE-CHECKLIST",
+    "ROUTE-ACCESS"
+  ]
+}

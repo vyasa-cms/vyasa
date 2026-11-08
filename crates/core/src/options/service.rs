@@ -58,6 +58,8 @@ pub const SITE_OPTION_KEYS: &[&str] = &[
     // the role a self-made account starts with.
     "registration_enabled",
     "registration_default_role",
+    // The small "Made with Vyasa" line under the footer; on unless set false.
+    "footer_credit",
 ];
 
 /// Option rows the media-storage settings own (`/api/v1/media/storage`).
@@ -187,7 +189,13 @@ impl PermalinkPattern {
         use vyasa_db::content_models::PostType;
         match post.post_type {
             PostType::Page => format!("/{}", post.slug),
-            PostType::Custom(t) => format!("/{t}/{}", post.slug),
+            // A custom type lives under its base; a hierarchical entry's
+            // address is its path, the slugs from the root.
+            PostType::Custom(_) => format!(
+                "/{}/{}",
+                post.post_type.base(),
+                post.path.as_deref().unwrap_or(&post.slug)
+            ),
             _ => {
                 let at = post.published_at.unwrap_or(post.created_at);
                 self.url_for(
@@ -567,6 +575,9 @@ impl OptionsService {
                 ));
             }
             k if k.starts_with("registration_") => return registration_option(k, value),
+            "footer_credit" if !value.is_boolean() => {
+                return Err(AppError::validation("footer_credit must be true or false"));
+            }
             "newsletter_enabled" if !value.is_boolean() => {
                 return Err(AppError::validation(
                     "newsletter_enabled must be true or false",
@@ -699,6 +710,12 @@ impl OptionsService {
             tagline: self.string_of("site_tagline").await?,
             logo_media_id: self.id_of("site_logo_media_id").await,
             favicon_media_id: self.id_of("site_favicon_media_id").await,
+            // Unset means on: the credit is the default, switching it off is a choice.
+            footer_credit: self
+                .raw("footer_credit")
+                .await?
+                .and_then(|v| v.as_bool())
+                .unwrap_or(true),
         })
     }
 
@@ -821,7 +838,7 @@ impl OptionsService {
 }
 
 /// Site identity values as consumed by themes and feeds.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SiteIdentity {
     /// Site title.
     pub title: String,
@@ -831,6 +848,20 @@ pub struct SiteIdentity {
     pub logo_media_id: Option<i64>,
     /// Favicon media id.
     pub favicon_media_id: Option<i64>,
+    /// Whether the footer carries the "Made with Vyasa" line (default on).
+    pub footer_credit: bool,
+}
+
+impl Default for SiteIdentity {
+    fn default() -> Self {
+        Self {
+            title: String::new(),
+            tagline: String::new(),
+            logo_media_id: None,
+            favicon_media_id: None,
+            footer_credit: true,
+        }
+    }
 }
 
 /// The shape of the two registration options. A custom role's slug
@@ -864,4 +895,53 @@ fn default_role_refused(name: &str) -> AppError {
         "\"{name}\" cannot be the role new registrations get: it can manage users, \
          options, plugins, themes or categories, edit others' content or moderate comments"
     ))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vyasa_db::content_models::{PostRow, PostStatus, PostType};
+
+    fn sample_row(post_type: PostType, slug: &str) -> PostRow {
+        let now = chrono::Utc::now();
+        PostRow {
+            id: 1,
+            sticky: false,
+            lang: String::new(),
+            translation_group: None,
+            post_type,
+            status: PostStatus::Published,
+            slug: slug.to_owned(),
+            title: slug.to_owned(),
+            content: serde_json::json!([]),
+            layout: None,
+            excerpt: None,
+            author_id: 1,
+            parent_id: None,
+            meta: serde_json::json!({}),
+            published_at: Some(now),
+            scheduled_for: None,
+            password_hash: None,
+            created_at: now,
+            updated_at: now,
+            path: None,
+            position: 0,
+        }
+    }
+
+    #[test]
+    fn custom_entries_use_their_types_base_and_path() {
+        let t = PostType::register("doc-permalink").expect("registers");
+        PostType::set_traits("doc-permalink", true, Some("docs-permalink")).expect("traits");
+        let pattern = PermalinkPattern(PermalinkPattern::DEFAULT.into());
+        let mut row = sample_row(t, "install");
+        row.path = Some("guides/install".into());
+        assert_eq!(pattern.path_for(&row), "/docs-permalink/guides/install");
+        // A flat custom type keeps /{slug}/{entry}; a base is honoured when declared.
+        let flat = PostType::register("flat-permalink").expect("registers");
+        let row = sample_row(flat, "one");
+        assert_eq!(pattern.path_for(&row), "/flat-permalink/one");
+        PostType::set_traits("flat-permalink", false, Some("flats")).expect("traits");
+        assert_eq!(pattern.path_for(&row), "/flats/one");
+    }
 }

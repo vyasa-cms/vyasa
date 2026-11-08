@@ -152,4 +152,34 @@ describe("plugin surface", () => {
     expect(formatInterval(86_400)).toBe("24 hours");
     expect(formatInterval(90)).toBe("90 seconds");
   });
+
+  it("renders a secret field as a password input that never shows the stored value", async () => {
+    const user = userEvent.setup();
+    mocked.getPluginSurface.mockResolvedValue({
+      ...surface,
+      forms: [
+        {
+          pluginId: "1",
+          pluginName: "bookshelf",
+          title: "Bookshelf",
+          description: null,
+          fields: [
+            { key: "token", label: "Token", kind: "secret", help: null, options: [], default: null },
+            { key: "branch", label: "Branch", kind: "text", help: null, options: [], default: "main" },
+          ],
+        },
+      ],
+    });
+    mocked.getPluginSettings.mockResolvedValue({ branch: "main", __secrets: { token: true } });
+    render(makeApp());
+    const token = await screen.findByLabelText("Token");
+    expect(token).toHaveAttribute("type", "password");
+    expect(token).toHaveValue("");
+    await waitFor(() => expect(token).toHaveAttribute("placeholder", "Set (leave blank to keep)"));
+    // Touching only the branch never sends the secret.
+    await user.type(screen.getByLabelText("Branch"), "x");
+    await user.click(screen.getByTestId("plugin-form-save-bookshelf"));
+    await waitFor(() => expect(mocked.putPluginSetting).toHaveBeenCalledWith("1", "branch", "mainx"));
+    expect(mocked.putPluginSetting).not.toHaveBeenCalledWith("1", "token", expect.anything());
+  });
 });

@@ -23,6 +23,39 @@ pub struct BlockDecl {
     pub plugin_id: i64,
     /// Plugin name, for the editor and for error messages.
     pub plugin_name: String,
+    /// A JSON-Schema subset describing the block's attributes, so the
+    /// editor can draw a form for them (kept only when it is an object of
+    /// `"type": "object"` and at most 16 KiB).
+    pub attrs_schema: Option<serde_json::Value>,
+    /// Marks a block whose children are editable regions
+    /// (`{"child": "group", "labels": "<attribute>"}`).
+    pub container: Option<serde_json::Value>,
+}
+
+/// Largest attribute schema a declaration may carry.
+const MAX_SCHEMA_BYTES: usize = 16 * 1024;
+
+/// The schema, when well formed: an object of `"type": "object"` small
+/// enough to ship to every editor.
+fn read_schema(item: &serde_json::Value) -> Option<serde_json::Value> {
+    let schema = item
+        .get("attrs-schema")
+        .or_else(|| item.get("attrs_schema"))?;
+    let ok = schema.get("type").and_then(serde_json::Value::as_str) == Some("object")
+        && schema.to_string().len() <= MAX_SCHEMA_BYTES;
+    ok.then(|| schema.clone())
+}
+
+/// The container spec, when well formed: an object whose `child` is a
+/// short string and whose optional `labels` is a string.
+fn read_container(item: &serde_json::Value) -> Option<serde_json::Value> {
+    let spec = item.get("container")?;
+    let child_ok = spec
+        .get("child")
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|c| !c.is_empty() && c.len() <= 40);
+    let labels_ok = spec.get("labels").is_none_or(serde_json::Value::is_string);
+    (spec.is_object() && child_ok && labels_ok).then(|| spec.clone())
 }
 
 /// Registry of plugin-contributed block kinds.
@@ -96,6 +129,8 @@ impl PluginBlockRegistry {
                         .map(str::to_owned),
                     plugin_id,
                     plugin_name: plugin_name.to_owned(),
+                    attrs_schema: read_schema(item),
+                    container: read_container(item),
                 },
             );
             accepted.push(kind.to_owned());
@@ -160,5 +195,33 @@ mod tests {
 
         reg.forget(1).await;
         assert!(reg.all().await.is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_declaration_may_carry_a_schema_and_a_container_spec() {
+        let reg = PluginBlockRegistry::new();
+        let json = r#"[
+          {"kind": "acme/tabs", "title": "Tabs", "container": {"child": "group", "labels": "labels"},
+           "attrs-schema": {"type": "object", "properties": {"labels": {"type": "array", "items": {"type": "string"}}}}},
+          {"kind": "acme/big", "title": "Big", "attrs-schema": {"type": "object", "properties": {"x": {"type": "string", "description": "AAAA"}}, "pad": "PADDING"}},
+          {"kind": "acme/bad", "title": "Bad", "container": "nope", "attrs-schema": 5}
+        ]"#;
+        let accepted = reg.register_from_json(7, "acme", json).await;
+        assert_eq!(accepted, ["acme/tabs", "acme/big", "acme/bad"]);
+        let tabs = reg.get("acme/tabs").await.unwrap();
+        assert_eq!(tabs.container.as_ref().unwrap()["child"], "group");
+        assert!(tabs.attrs_schema.as_ref().unwrap()["properties"]["labels"].is_object());
+        let bad = reg.get("acme/bad").await.unwrap();
+        assert!(
+            bad.container.is_none() && bad.attrs_schema.is_none(),
+            "a malformed spec is dropped, the block stays"
+        );
+        // A schema over 16 KiB is dropped (the block stays).
+        let huge = format!(
+            r#"[{{"kind": "acme/huge", "attrs-schema": {{"type": "object", "properties": {{}}, "d": "{}"}}}}]"#,
+            "x".repeat(17 * 1024)
+        );
+        reg.register_from_json(7, "acme", &huge).await;
+        assert!(reg.get("acme/huge").await.unwrap().attrs_schema.is_none());
     }
 }

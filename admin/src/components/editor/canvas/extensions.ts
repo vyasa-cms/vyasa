@@ -135,7 +135,7 @@ function galleryStrip(children: unknown): HTMLElement | null {
  * regions rather than opaque cards, so a two-column layout can be written
  * into directly instead of being a placeholder you cannot open.
  */
-export const CONTAINER_KINDS = [
+export const CONTAINER_KINDS: string[] = [
   "group",
   "row",
   "columns",
@@ -145,6 +145,26 @@ export const CONTAINER_KINDS = [
   "callout",
   "timed",
 ];
+
+/** Plugin kinds registered as containers (a subset of [`CONTAINER_KINDS`]). */
+const PLUGIN_CONTAINERS = new Set<string>();
+
+/**
+ * Makes the plugin block kinds whose descriptor declares a `container`
+ * native regions of the canvas: their children are written into directly.
+ * Idempotent; call before the document is parsed.
+ */
+export function registerPluginContainers(kinds: string[]): void {
+  for (const kind of kinds) {
+    if (!CONTAINER_KINDS.includes(kind)) CONTAINER_KINDS.push(kind);
+    PLUGIN_CONTAINERS.add(kind);
+  }
+}
+
+/** Whether `kind` is a plugin block registered as a container. */
+export function isPluginContainer(kind: string): boolean {
+  return PLUGIN_CONTAINERS.has(kind);
+}
 
 /** What a container's label says beyond its kind: the tone, the window. */
 function containerHint(kind: string, attrs: unknown): string {

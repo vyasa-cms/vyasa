@@ -34,6 +34,26 @@ impl ContentQueries for FakeQueries {
         Box::pin(ready(Ok(items)))
     }
 
+    fn entries_page<'a>(
+        &'a self,
+        _source: &'a str,
+        _sort: vyasa_themes::EntrySort,
+        limit: u32,
+        offset: u32,
+        _term: Option<&'a str>,
+    ) -> std::pin::Pin<
+        Box<dyn std::future::Future<Output = Result<Vec<PostCardData>, String>> + Send + 'a>,
+    > {
+        let items: Vec<PostCardData> = self
+            .posts
+            .iter()
+            .skip(offset as usize)
+            .take(limit as usize)
+            .cloned()
+            .collect();
+        Box::pin(ready(Ok(items)))
+    }
+
     fn categories<'a>(
         &'a self,
         show_counts: bool,
@@ -348,4 +368,64 @@ fn a_card_thumbnail_carries_its_focal_point_and_nothing_else() {
     let unsafe_html = vyasa_themes::card_html_for_test(&card(Some("30% 70%\" onload=\"x")));
     assert!(!unsafe_html.contains("onload"), "{unsafe_html}");
     assert!(!vyasa_themes::card_html_for_test(&card(None)).contains("object-position"));
+}
+
+#[test]
+fn latest_posts_paginates_only_when_asked() {
+    // Two posts in the fake, one per page.
+    let q = fake();
+    let spec = builtin_registry().get("latest-posts").expect("registered");
+    let render = |page: u32, paginate: bool| {
+        let mut ctx = ResolveContext::new(&q, None);
+        ctx.page = page;
+        let s = settings(&[
+            ("count", serde_json::json!(1)),
+            ("paginate", serde_json::json!(paginate)),
+        ]);
+        payload_html(futures::executor::block_on(spec.resolve(&ctx, &s)))
+    };
+
+    let first = render(1, true);
+    assert!(
+        first.contains("Hello &amp; welcome") && !first.contains("Second"),
+        "{first}"
+    );
+    assert!(first.contains(r#"href="?page=2" rel="next""#), "{first}");
+    assert!(!first.contains(r#"rel="prev""#), "{first}");
+
+    let second = render(2, true);
+    assert!(
+        second.contains("Second") && !second.contains("Hello"),
+        "{second}"
+    );
+    assert!(second.contains(r#"href="?page=1" rel="prev""#), "{second}");
+    assert!(!second.contains(r#"rel="next""#), "{second}");
+
+    // Without `paginate` a `?page=` is ignored and no links appear.
+    let plain = render(2, false);
+    assert!(
+        plain.contains("Hello") && !plain.contains("vy-pagination"),
+        "{plain}"
+    );
+}
+
+#[test]
+fn a_card_without_an_author_has_no_stray_separator() {
+    let mut q = fake();
+    for p in &mut q.posts {
+        p.author = String::new();
+    }
+    let ctx = ResolveContext::new(&q, None);
+    let spec = builtin_registry().get("latest-posts").expect("registered");
+    let html = payload_html(futures::executor::block_on(
+        spec.resolve(&ctx, &settings(&[("count", serde_json::json!(1))])),
+    ));
+    assert!(
+        html.contains(r#"<span class="vy-post-card__meta">"#),
+        "{html}"
+    );
+    assert!(
+        !html.contains(r#"meta"> ·"#) && !html.contains("· </span>"),
+        "{html}"
+    );
 }

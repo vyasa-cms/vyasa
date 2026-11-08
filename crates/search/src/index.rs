@@ -19,6 +19,9 @@ pub struct SearchDoc {
     pub title: String,
     /// Body text extracted from blocks.
     pub body: String,
+    /// Terms the post is filed under, as `taxonomy:slug`
+    /// (`category:news`, `doc-version:v2`). Search can be scoped to one.
+    pub terms: Vec<String>,
 }
 
 /// Removes an index directory's contents, leaving the directory itself.
@@ -51,6 +54,7 @@ pub struct IndexManager {
     f_slug: Field,
     f_title: Field,
     f_body: Field,
+    f_terms: Field,
 }
 
 impl IndexManager {
@@ -75,6 +79,8 @@ impl IndexManager {
         // does not work without it.
         let f_title = schema.add_text_field("title", TEXT | STORED);
         let f_body = schema.add_text_field("body", TEXT | STORED);
+        // Exact `taxonomy:slug` tokens, one per term: a filter, never ranked.
+        let f_terms = schema.add_text_field("terms", STRING);
         let schema = schema.build();
 
         // An index written with an older schema cannot answer with the new
@@ -115,6 +121,7 @@ impl IndexManager {
             f_slug,
             f_title,
             f_body,
+            f_terms,
         })
     }
 
@@ -125,6 +132,9 @@ impl IndexManager {
         doc.add_text(self.f_slug, &d.slug);
         doc.add_text(self.f_title, &d.title);
         doc.add_text(self.f_body, &d.body);
+        for term in &d.terms {
+            doc.add_text(self.f_terms, term);
+        }
         doc
     }
 
@@ -197,7 +207,7 @@ impl IndexManager {
     pub(crate) fn fields_body(&self) -> Field {
         self.f_body
     }
-    pub(crate) fn fields_type(&self) -> Field {
-        self.f_type
+    pub(crate) fn fields_terms(&self) -> Field {
+        self.f_terms
     }
 }

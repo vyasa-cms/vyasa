@@ -24,6 +24,7 @@ fn doc(id: u64, title: &str, body: &str) -> SearchDoc {
         slug: format!("post-{id}"),
         title: title.to_owned(),
         body: body.to_owned(),
+        terms: Vec::new(),
     }
 }
 

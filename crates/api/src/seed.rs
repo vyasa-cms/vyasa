@@ -105,6 +105,7 @@ pub async fn run(
             password: None,
             term_ids: None,
             layout: None,
+            position: None,
         };
         match state.posts.create(input).await {
             Ok(_) => made += 1,

@@ -7,6 +7,7 @@ use vyasa_db::repo::{NewPost, PostFilter, PostUpdate, PostsRepo};
 use crate::block::BlockDocument;
 use crate::content::ContentFieldsService;
 use crate::events;
+use crate::post::hierarchy;
 use crate::post::status as post_status;
 use crate::post::token;
 
@@ -51,6 +52,8 @@ pub struct CreatePost {
     /// the theme crate, so the caller validates the tree before handing it
     /// over. Stored verbatim.
     pub layout: Option<serde_json::Value>,
+    /// Order among siblings of a hierarchical type; `None` appends.
+    pub position: Option<i32>,
 }
 
 /// Input for updating a post; `None` fields keep current values.
@@ -86,6 +89,10 @@ pub struct UpdatePost {
     /// clears it so the entry renders through its theme template again.
     /// Opaque and caller-validated, as on [`CreatePost`].
     pub layout: Option<serde_json::Value>,
+    /// New parent: `None` keeps, `Some(None)` moves to the root.
+    pub parent_id: Option<Option<i64>>,
+    /// New position among siblings (hierarchical types only).
+    pub position: Option<i32>,
 }
 
 impl PostService {
@@ -126,6 +133,7 @@ impl PostService {
     ///
     /// As [`PostService::create`], and [`AppError::Validation`] naming
     /// each field (`fields.<key>: …`) whose value is refused or missing.
+    #[allow(clippy::too_many_lines)]
     pub async fn create_with_fields(
         &self,
         input: CreatePost,
@@ -191,6 +199,13 @@ impl PostService {
             serde_json::json!({ "fields": values })
         };
 
+        let (path_prefix, position) = if input.post_type.is_hierarchical() {
+            self.placement(input.post_type, input.parent_id, &base_slug, input.position)
+                .await?
+        } else {
+            (None, 0)
+        };
+
         let published_at = (input.status == PostStatus::Published).then(chrono::Utc::now);
         let content = input.content.to_json();
         // The repo probes for a free slug and inserts in one transaction,
@@ -220,6 +235,8 @@ impl PostService {
                         scheduled_for: input.scheduled_for,
                         password_hash: password_hash.clone(),
                         layout: input.layout.clone(),
+                        position,
+                        path_prefix: path_prefix.clone(),
                     },
                     term_ids.as_deref(),
                 )
@@ -248,6 +265,78 @@ impl PostService {
         Ok(deduped)
     }
 
+    /// The live entries of a hierarchical type as the rules' nodes.
+    async fn hierarchy_nodes(&self, post_type: PostType) -> Result<Vec<hierarchy::Node>, AppError> {
+        Ok(self
+            .posts
+            .tree_rows(post_type)
+            .await?
+            .into_iter()
+            .map(|r| hierarchy::Node {
+                id: r.id,
+                parent_id: r.parent_id,
+                position: r.position,
+                slug: r.slug,
+            })
+            .collect())
+    }
+
+    /// Where a new entry of a hierarchical type goes: the path prefix
+    /// (the parent's path and `/`, empty at the root) and the position.
+    async fn placement(
+        &self,
+        post_type: PostType,
+        parent_id: Option<i64>,
+        slug: &str,
+        position: Option<i32>,
+    ) -> Result<(Option<String>, i32), AppError> {
+        let nodes = self.hierarchy_nodes(post_type).await?;
+        let prefix = match parent_id {
+            None => {
+                if hierarchy::RESERVED_ROOT_SLUGS.contains(&slug) {
+                    return Err(AppError::validation(format!(
+                        "the slug {slug:?} is reserved at the top level of this type"
+                    )));
+                }
+                String::new()
+            }
+            Some(pid) => {
+                let parent = match self.posts.get(pid).await {
+                    Ok(p) => p,
+                    Err(AppError::NotFound { .. }) => {
+                        return Err(AppError::validation(
+                            "parent must be a live entry of the same type",
+                        ));
+                    }
+                    Err(e) => return Err(e),
+                };
+                if parent.post_type != post_type || parent.status == PostStatus::Trash {
+                    return Err(AppError::validation(
+                        "parent must be a live entry of the same type",
+                    ));
+                }
+                let depth = hierarchy::depth_of(&nodes, pid).unwrap_or(1);
+                if depth + 1 > hierarchy::MAX_DEPTH {
+                    return Err(AppError::validation(format!(
+                        "an entry would sit {} levels deep; the limit is {}",
+                        depth + 1,
+                        hierarchy::MAX_DEPTH
+                    )));
+                }
+                format!("{}/", parent.path.as_deref().unwrap_or(&parent.slug))
+            }
+        };
+        let position = position.unwrap_or_else(|| {
+            nodes
+                .iter()
+                .filter(|n| n.parent_id == parent_id)
+                .map(|n| n.position)
+                .max()
+                .map_or(10, |max| max.saturating_add(10))
+        });
+        Ok((Some(prefix), position))
+    }
+
     /// Fetches a post by id.
     ///
     /// # Errors
@@ -264,6 +353,16 @@ impl PostService {
     /// Returns [`AppError::NotFound`] when missing or trashed.
     pub async fn get_by_slug(&self, post_type: PostType, slug: &str) -> Result<PostRow, AppError> {
         self.posts.get_by_slug(post_type, slug).await
+    }
+
+    /// Fetches the live entry of a hierarchical type at `path`.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::NotFound`] when there is none (a trashed entry
+    /// has no address).
+    pub async fn get_by_path(&self, post_type: PostType, path: &str) -> Result<PostRow, AppError> {
+        self.posts.get_by_path(post_type, path).await
     }
 
     /// Lists posts by filter, newest first.
@@ -325,8 +424,13 @@ impl PostService {
         // index). The index would refuse it too; checking first names it.
         let leaving_trash = current.status == PostStatus::Trash
             && input.status.is_some_and(|s| s != PostStatus::Trash);
+        let hier = current.post_type.is_hierarchical();
+        if !hier && input.position.is_some() {
+            return Err(AppError::validation("this type is not hierarchical"));
+        }
         let wanted_slug = slug.as_deref().unwrap_or(&current.slug);
-        if (slug.is_some() || leaving_trash)
+        if !hier
+            && (slug.is_some() || leaving_trash)
             && self
                 .posts
                 .slug_taken(current.post_type, wanted_slug, Some(id))
@@ -400,6 +504,22 @@ impl PostService {
                 .as_ref()
                 .is_some_and(|l| current.layout.as_ref() != Some(l));
 
+        // A hierarchical entry that changes slug, parent or position (or
+        // comes back from the trash) gets its subtree's paths rewritten.
+        let tree_changes = if hier
+            && (slug.is_some()
+                || leaving_trash
+                || input.parent_id.is_some()
+                || input.position.is_some())
+        {
+            Some(
+                self.subtree_changes(&current, slug.as_deref(), input.parent_id, input.position)
+                    .await?,
+            )
+        } else {
+            None
+        };
+
         // Everything that can be refused is checked before the write.
         let password_hash = match input.password {
             None => None,
@@ -419,6 +539,9 @@ impl PostService {
         // One transaction for the fields, password and terms; written only
         // while the status is still the one the transition was checked
         // against (the publisher may have moved it since).
+        if let Some(changes) = &tree_changes {
+            self.posts.apply_tree(current.post_type, changes).await?;
+        }
         let updated = self
             .posts
             .update(&PostUpdate {
@@ -428,7 +551,8 @@ impl PostService {
                 title: input.title,
                 content: input.content.map(|c| c.to_json()),
                 excerpt: input.excerpt,
-                parent_id: None,
+                parent_id: if hier { None } else { input.parent_id },
+                position: None,
                 meta: input.meta,
                 fields: new_fields.map(serde_json::Value::Object),
                 scheduled_for: input.scheduled_for,
@@ -479,6 +603,8 @@ impl PostService {
                     password: None,
                     term_ids: None,
                     layout: None,
+                    parent_id: None,
+                    position: None,
                 },
             )
             .await?;
@@ -519,6 +645,8 @@ impl PostService {
                     password: None,
                     term_ids: None,
                     layout: None,
+                    parent_id: None,
+                    position: None,
                 },
             )
             .await?;
@@ -612,6 +740,162 @@ const fn publishes(status: PostStatus) -> bool {
 /// How many times a create re-probes for a free slug after a writer
 /// outside the per-base lock took the one it chose.
 const SLUG_ATTEMPTS: u32 = 5;
+
+/// What a batch of moves did.
+#[derive(Debug, Clone)]
+pub struct MoveOutcome {
+    /// Entries whose address changed: `(id, old path, new path)`.
+    pub changed_paths: Vec<(i64, String, String)>,
+    /// Every entry whose parent, position or path changed.
+    pub touched: Vec<i64>,
+}
+
+impl PostService {
+    /// The live entries of a hierarchical type in reading order.
+    ///
+    /// # Errors
+    /// [`AppError::Validation`] for a type that is not hierarchical.
+    pub async fn tree(
+        &self,
+        post_type: PostType,
+    ) -> Result<Vec<vyasa_db::repo::posts::TreeRow>, AppError> {
+        if !post_type.is_hierarchical() {
+            return Err(AppError::validation(format!(
+                "{} is not a hierarchical type",
+                post_type.as_str()
+            )));
+        }
+        self.posts.tree_rows(post_type).await
+    }
+
+    /// Applies `moves` as a whole.
+    ///
+    /// # Errors
+    /// [`AppError::Validation`] naming the rule the final tree breaks;
+    /// [`AppError::Conflict`] if a path is taken by an entry outside the tree view.
+    pub async fn move_entries(
+        &self,
+        post_type: PostType,
+        moves: &[hierarchy::Move],
+    ) -> Result<MoveOutcome, AppError> {
+        if !post_type.is_hierarchical() {
+            return Err(AppError::validation(format!(
+                "{} is not a hierarchical type",
+                post_type.as_str()
+            )));
+        }
+        let before = self.hierarchy_nodes(post_type).await?;
+        let after = hierarchy::apply_moves(&before, moves).map_err(AppError::validation)?;
+        let changed_paths = hierarchy::changed_paths(&before, &after);
+        let mut touched: std::collections::BTreeSet<i64> =
+            changed_paths.iter().map(|(id, _, _)| *id).collect();
+        for node in &after {
+            let was = before.iter().find(|b| b.id == node.id);
+            if was.is_some_and(|b| b.parent_id != node.parent_id || b.position != node.position) {
+                touched.insert(node.id);
+            }
+        }
+        let mut changes = Vec::with_capacity(touched.len());
+        for node in after.iter().filter(|n| touched.contains(&n.id)) {
+            let path = hierarchy::path_of(&after, node.id)
+                .ok_or_else(|| AppError::internal_msg("a validated tree has no path"))?;
+            changes.push(vyasa_db::repo::TreeChange {
+                id: node.id,
+                parent_id: node.parent_id,
+                position: node.position,
+                path,
+            });
+        }
+        if !changes.is_empty() {
+            self.posts.apply_tree(post_type, &changes).await?;
+        }
+        let touched: Vec<i64> = touched.into_iter().collect();
+        for id in &touched {
+            events::emit_updated(*id);
+        }
+        Ok(MoveOutcome {
+            changed_paths,
+            touched,
+        })
+    }
+
+    /// Recomputes every path of a hierarchical type from its parent links and
+    /// slugs, returning how many entries it wrote. For an import, which
+    /// inserts entries under throwaway paths and links the parents afterwards.
+    ///
+    /// # Errors
+    /// [`AppError::Validation`] when the links break a rule (a loop, too deep).
+    pub async fn rebuild_paths(&self, post_type: PostType) -> Result<usize, AppError> {
+        let nodes = self.hierarchy_nodes(post_type).await?;
+        hierarchy::validate_tree(&nodes).map_err(AppError::validation)?;
+        let mut changes = Vec::with_capacity(nodes.len());
+        for node in &nodes {
+            let path = hierarchy::path_of(&nodes, node.id)
+                .ok_or_else(|| AppError::internal_msg("a validated tree has no path"))?;
+            changes.push(vyasa_db::repo::TreeChange {
+                id: node.id,
+                parent_id: node.parent_id,
+                position: node.position,
+                path,
+            });
+        }
+        if !changes.is_empty() {
+            self.posts.apply_tree(post_type, &changes).await?;
+        }
+        Ok(changes.len())
+    }
+
+    /// The writes that give `current` a new slug, parent or position (or
+    /// bring it back from the trash) and its subtree the paths that follow,
+    /// after checking the resulting tree as a whole.
+    #[allow(clippy::option_option)]
+    async fn subtree_changes(
+        &self,
+        current: &PostRow,
+        new_slug: Option<&str>,
+        new_parent: Option<Option<i64>>,
+        new_position: Option<i32>,
+    ) -> Result<Vec<vyasa_db::repo::TreeChange>, AppError> {
+        let mut nodes = self.hierarchy_nodes(current.post_type).await?;
+        if !nodes.iter().any(|n| n.id == current.id) {
+            nodes.push(hierarchy::Node {
+                id: current.id,
+                parent_id: current.parent_id,
+                position: current.position,
+                slug: current.slug.clone(),
+            });
+        }
+        for node in &mut nodes {
+            if node.id == current.id {
+                if let Some(slug) = new_slug {
+                    slug.clone_into(&mut node.slug);
+                }
+                if let Some(parent) = new_parent {
+                    node.parent_id = parent;
+                }
+                if let Some(position) = new_position {
+                    node.position = position;
+                }
+            }
+        }
+        hierarchy::validate_tree(&nodes).map_err(AppError::validation)?;
+        let mut changes = Vec::new();
+        for id in hierarchy::subtree_ids(&nodes, current.id) {
+            let Some(node) = nodes.iter().find(|n| n.id == id) else {
+                continue;
+            };
+            let path = hierarchy::path_of(&nodes, id)
+                .ok_or_else(|| AppError::internal_msg("a validated tree has no path"))?;
+            changes.push(vyasa_db::repo::TreeChange {
+                id,
+                parent_id: node.parent_id,
+                position: node.position,
+                path,
+            });
+        }
+        Ok(changes)
+    }
+}
 
 #[cfg(test)]
 mod tests {

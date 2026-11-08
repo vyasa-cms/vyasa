@@ -8,10 +8,12 @@ pub mod blocks;
 pub mod embed;
 pub mod highlight;
 pub mod markdown;
+mod plugin_html;
 
 pub use blocks::{
     render_block, render_blocks, timed_boundary_within, toc_from_blocks, RenderError,
 };
+pub use plugin_html::{fill_child_slots, sanitize_plugin_html};
 
 /// Plain-text projection of a JSON value (strings kept, others blanked);
 /// used for TOC labels.
@@ -113,78 +115,6 @@ pub(crate) fn sanitize_inline_html(html: &str) -> String {
 }
 
 /// Ammonia allowlist for the raw-HTML block escape hatch.
-/// Sanitizes HTML produced by a plugin block.
-///
-/// Same allowlist as [`sanitize_raw_html`] plus `class`, which plugin
-/// blocks need in order to be styled by the CSS the plugin ships. `class`
-/// carries no behaviour, so widening to it costs nothing; every attribute
-/// that does carry behaviour (`on*`, `style`, `srcset`) stays out, as do
-/// `script`, `iframe` and `form`.
-#[must_use]
-pub fn sanitize_plugin_html(html: &str) -> String {
-    ammonia::Builder::default()
-        .tags(set([
-            "a",
-            "p",
-            "h1",
-            "h2",
-            "h3",
-            "h4",
-            "h5",
-            "h6",
-            "ul",
-            "ol",
-            "li",
-            "blockquote",
-            "pre",
-            "code",
-            "strong",
-            "em",
-            "b",
-            "i",
-            "u",
-            "s",
-            "br",
-            "hr",
-            "span",
-            "div",
-            "img",
-            "figure",
-            "figcaption",
-            "table",
-            "thead",
-            "tbody",
-            "tr",
-            "th",
-            "td",
-            "dl",
-            "dt",
-            "dd",
-            "small",
-            "time",
-        ]))
-        .tag_attributes(HashMap::from([
-            ("a", set(["href", "title", "class"])),
-            (
-                "img",
-                set(["src", "alt", "title", "width", "height", "class", "loading"]),
-            ),
-            ("div", set(["class"])),
-            ("span", set(["class"])),
-            ("p", set(["class"])),
-            ("ul", set(["class"])),
-            ("ol", set(["class"])),
-            ("li", set(["class"])),
-            ("table", set(["class"])),
-            ("figure", set(["class"])),
-            ("time", set(["class", "datetime"])),
-        ]))
-        .url_relative(ammonia::UrlRelative::PassThrough)
-        .link_rel(Some("noopener noreferrer"))
-        .clean(html)
-        .to_string()
-}
-
 pub(crate) fn sanitize_raw_html(html: &str) -> String {
     ammonia::Builder::default()
         .tags(set([

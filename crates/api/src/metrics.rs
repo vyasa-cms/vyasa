@@ -547,7 +547,14 @@ mod tests {
             labels.iter().all(|l| !l.contains("zz")),
             "a requested path became a label: {labels:?}"
         );
-        assert!(labels.iter().any(|l| l == "unmatched"), "{labels:?}");
+        // Deep made-up paths now fall into the post-type entry route
+        // (`/{type}/{*rest}`), which is a template, not a requested path.
+        assert!(
+            labels
+                .iter()
+                .any(|l| l == "unmatched" || l == "/{type}/{*rest}"),
+            "{labels:?}"
+        );
     }
 
     #[test]

@@ -347,3 +347,49 @@ async fn only_pages_compose() {
     );
     assert_eq!(ok.status(), 201);
 }
+
+#[tokio::test]
+async fn a_paginated_post_list_on_a_page_reaches_older_posts() {
+    let db = TestDb::new().await;
+    seed(db.pool()).await;
+    let server = TestServer::start(common::BIN, &db);
+    let base = server.base();
+    let cookie = login(base);
+    for title in ["Oldest entry", "Middle entry", "Newest entry"] {
+        let r = http(
+            ureq::post(format!("{base}/api/v1/posts").as_str())
+                .set("Cookie", &cookie)
+                .send_json(json!({
+                    "status": "published",
+                    "title": title,
+                    "content": {"schema_version": 1, "blocks": []},
+                })),
+        );
+        assert_eq!(r.status(), 201, "create {title}");
+    }
+    let created = create_page(
+        base,
+        &cookie,
+        &json!([{ "id": "list", "kind": "latest-posts", "settings": { "count": 2, "paginate": true } }]),
+    );
+    assert!(
+        created["id"].is_string() || created["id"].is_number(),
+        "{created}"
+    );
+
+    let first = read(http(ureq::get(format!("{base}/launch").as_str()).call()));
+    assert!(
+        first.contains("Newest entry") && first.contains("Middle entry"),
+        "{first}"
+    );
+    assert!(!first.contains("Oldest entry"), "{first}");
+    assert!(first.contains(r#"href="?page=2" rel="next""#), "{first}");
+
+    // Rendered fresh, not served from the first page's cache.
+    let second = read(http(
+        ureq::get(format!("{base}/launch?page=2").as_str()).call(),
+    ));
+    assert!(second.contains("Oldest entry"), "{second}");
+    assert!(!second.contains("Newest entry"), "{second}");
+    assert!(second.contains(r#"href="?page=1" rel="prev""#), "{second}");
+}

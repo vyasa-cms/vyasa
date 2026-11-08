@@ -113,6 +113,7 @@ describe("post password changes", () => {
   translations: [],
   scheduled_for: "",
   parent_id: "",
+  position: "",
   term_ids: [],
   featured_media_id: "",
   featured_media_url: "",

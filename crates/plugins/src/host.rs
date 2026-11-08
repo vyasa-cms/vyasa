@@ -57,6 +57,30 @@ pub struct HostLimits {
     pub epoch_deadline_ticks: u64,
 }
 
+/// How much a call may take. Everything except a declared extended task is
+/// `Ordinary`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum TaskBudget {
+    /// The configured per-call limits.
+    #[default]
+    Ordinary,
+    /// A longer call (one minute, more fuel) for a declared task of a plugin
+    /// holding `tasks:extended`.
+    Extended,
+}
+
+impl HostLimits {
+    /// `(fuel, epoch ticks)` for a call under `budget`.
+    #[must_use]
+    pub fn for_budget(&self, budget: TaskBudget) -> (u64, u64) {
+        match budget {
+            TaskBudget::Ordinary => (self.fuel_per_call, self.epoch_deadline_ticks),
+            // 1200 ticks x 50 ms = one minute of wall clock.
+            TaskBudget::Extended => (20_000_000_000, 1200),
+        }
+    }
+}
+
 impl Default for HostLimits {
     fn default() -> Self {
         Self {
@@ -97,6 +121,29 @@ pub trait FetchBackend: Send + Sync {
         &'a self,
         url: &'a str,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<String, String>> + Send + 'a>>;
+
+    /// GETs `url` with request headers, returning any status as data.
+    /// The default refuses, so existing backends keep compiling.
+    fn get_with<'a>(
+        &'a self,
+        url: &'a str,
+        headers: Vec<(String, String)>,
+    ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<FetchReply, String>> + Send + 'a>>
+    {
+        let _ = (url, headers);
+        Box::pin(async { Err(String::from("fetch-with is not supported by this backend")) })
+    }
+}
+
+/// An answer to a plugin's GET: any status is data.
+#[derive(Debug, Clone)]
+pub struct FetchReply {
+    /// HTTP status.
+    pub status: u16,
+    /// Only the headers a plugin may see, lower-cased.
+    pub headers: Vec<(String, String)>,
+    /// The body as text.
+    pub body: String,
 }
 
 /// Longest `user` prompt a plugin may send, in characters.
@@ -172,7 +219,12 @@ pub struct HostCtx {
     pub viewer: Option<Viewer>,
     /// How long `ai-complete` may run for this call.
     pub ai_window: AiWindow,
+    /// When the host will stop this call, for `call-budget-ms`.
+    pub call_deadline: Option<std::time::Instant>,
 }
+
+/// How long one epoch tick lasts.
+const EPOCH_TICK_MILLIS: u64 = 50;
 
 /// Broker + pool accessor bundle shared across host calls.
 pub struct HostEnv {
@@ -188,6 +240,8 @@ pub struct HostEnv {
     /// next. Only [`HostEnv::for_viewer`] sets it, and only the plugin
     /// route calls that.
     pub viewer: Option<Viewer>,
+    /// How long the call may run.
+    pub budget: TaskBudget,
 }
 
 impl HostEnv {
@@ -199,7 +253,15 @@ impl HostEnv {
             broker,
             dest,
             viewer: None,
+            budget: TaskBudget::Ordinary,
         }
+    }
+
+    /// The same environment under the extended budget.
+    #[must_use]
+    pub fn extended(mut self) -> Self {
+        self.budget = TaskBudget::Extended;
+        self
     }
 
     /// The same environment, serving `viewer`.
@@ -520,6 +582,95 @@ impl host::Host for HostCtx {
             .await
     }
 
+    async fn fetch_with(&mut self, req: host::FetchRequest) -> Result<host::FetchResponse, String> {
+        if !req.url.starts_with("https://") {
+            return Err(String::from("only https:// URLs may be fetched"));
+        }
+        if self.broker.check_fetch(self.plugin_id, &req.url).await
+            != crate::broker::Decision::Allowed
+        {
+            return Err(String::from("capability-denied"));
+        }
+        let Some(fetch) = self.fetch.clone() else {
+            return Err(String::from(
+                "outbound fetch is not configured on this site",
+            ));
+        };
+        let reply = fetch.get_with(&req.url, req.headers).await?;
+        if !self
+            .broker
+            .record_bytes(self.plugin_id, reply.body.len() as u64)
+            .await
+        {
+            return Err(String::from("byte quota exceeded"));
+        }
+        Ok(host::FetchResponse {
+            status: reply.status,
+            headers: reply.headers,
+            body: reply.body,
+        })
+    }
+
+    async fn put_entry(&mut self, input: host::EntryInput) -> Result<host::PutResult, String> {
+        let out = crate::hostdata::put_entry(
+            &self.data_ctx(),
+            crate::hostdata::EntryInput {
+                post_type: input.post_type,
+                key: input.key,
+                parent_key: input.parent_key,
+                slug: input.slug,
+                title: input.title,
+                excerpt: input.excerpt,
+                blocks_json: input.blocks_json,
+                position: input.position,
+                status: input.status,
+                terms: input.terms,
+                fields_json: input.fields_json,
+                seo_json: input.seo_json,
+                source_hash: input.source_hash,
+                edit_url: input.edit_url,
+            },
+        )
+        .await?;
+        Ok(host::PutResult {
+            id: out.id,
+            outcome: out.outcome,
+        })
+    }
+
+    async fn list_managed(&mut self, post_type: String) -> Result<Vec<host::ManagedEntry>, String> {
+        Ok(crate::hostdata::list_managed(&self.data_ctx(), post_type)
+            .await?
+            .into_iter()
+            .map(|e| host::ManagedEntry {
+                key: e.key,
+                id: e.id,
+                source_hash: e.source_hash,
+            })
+            .collect())
+    }
+
+    async fn delete_entry(&mut self, key: String) -> Result<(), String> {
+        crate::hostdata::delete_entry(&self.data_ctx(), key).await
+    }
+
+    async fn now_ms(&mut self) -> u64 {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| u64::try_from(d.as_millis()).unwrap_or(u64::MAX))
+    }
+
+    async fn call_budget_ms(&mut self) -> u32 {
+        self.call_deadline.map_or(0, |deadline| {
+            u32::try_from(
+                deadline
+                    .saturating_duration_since(std::time::Instant::now())
+                    .as_millis(),
+            )
+            .unwrap_or(u32::MAX)
+        })
+    }
+
     async fn send_mail(&mut self, to: String, subject: String, body: String) -> Result<(), String> {
         crate::hostdata::send_mail(&self.data_ctx(), &self.plugin_name, to, subject, body).await
     }
@@ -629,7 +780,8 @@ impl WasmtimeHost {
         // Advance epochs every 50 ms so deadline checks fire promptly.
         let ticker = engine.clone();
         tokio::spawn(async move {
-            let mut tick = tokio::time::interval(std::time::Duration::from_millis(50));
+            let mut tick =
+                tokio::time::interval(std::time::Duration::from_millis(EPOCH_TICK_MILLIS));
             loop {
                 tick.tick().await;
                 ticker.increment_epoch();
@@ -770,6 +922,7 @@ impl WasmtimeHost {
                 .memory_size(self.limits.max_memory_bytes)
                 .build(),
         );
+        let (fuel, ticks) = self.limits.for_budget(env.budget);
         let mut store = WasmStore::new(
             &self.engine,
             HostCtx {
@@ -784,17 +937,21 @@ impl WasmtimeHost {
                 fetch: self.fetch.read().ok().and_then(|g| g.clone()),
                 viewer: env.viewer.clone(),
                 ai_window: AiWindow::Unbounded,
+                call_deadline: Some(
+                    std::time::Instant::now()
+                        + std::time::Duration::from_millis(EPOCH_TICK_MILLIS.saturating_mul(ticks)),
+                ),
             },
         );
         // Both budgets are best-effort: a store that refuses them still
         // runs, just unbounded, which the epoch ticker still interrupts.
-        let _ = store.set_fuel(self.limits.fuel_per_call);
+        let _ = store.set_fuel(fuel);
         store.limiter(|ctx: &mut HostCtx| {
             ctx.limits
                 .as_mut()
                 .unwrap_or_else(|| unreachable!("limits set at instantiation"))
         });
-        store.set_epoch_deadline(self.limits.epoch_deadline_ticks);
+        store.set_epoch_deadline(ticks);
         store
     }
 
@@ -1157,6 +1314,37 @@ impl WasmtimeHost {
 
     /// Runs one declared scheduled task.
     pub async fn call_run_task(&self, plugin_id: i64, name: &str, env: &HostEnv) -> V2Outcome<()> {
+        self.call_run_task_with(plugin_id, name, env, false).await
+    }
+
+    /// [`Self::call_run_task`], under the extended budget when `extended`
+    /// is asked for **and** the plugin holds `tasks:extended`; otherwise
+    /// an ordinary run. The larger quotas apply for the call's duration.
+    pub async fn call_run_task_with(
+        &self,
+        plugin_id: i64,
+        name: &str,
+        env: &HostEnv,
+        extended: bool,
+    ) -> V2Outcome<()> {
+        let granted = extended
+            && env
+                .broker
+                .check_capability(plugin_id, &crate::capabilities::Capability::TasksExtended)
+                .await
+                == crate::broker::Decision::Allowed;
+        let extended_env;
+        let (env, _scope) = if granted {
+            extended_env = HostEnv {
+                broker: env.broker.clone(),
+                dest: env.dest.clone(),
+                viewer: env.viewer.clone(),
+                budget: TaskBudget::Extended,
+            };
+            (&extended_env, Some(env.broker.extended_scope(plugin_id)))
+        } else {
+            (env, None)
+        };
         let (bindings, mut store) = match self.begin_call_v2(plugin_id, env).await {
             Ok(Some(pair)) => pair,
             Ok(None) => return V2Outcome::Unsupported,

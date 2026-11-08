@@ -108,6 +108,10 @@ fn block_md(block: &Block, depth: usize) -> String {
             }
             out.trim_end().to_owned()
         }
+        BlockKind::Plugin => match attrs.get("markdown").and_then(serde_json::Value::as_str) {
+            Some(md) if !md.trim().is_empty() => md.trim().to_owned(),
+            _ => children_md(block, depth),
+        },
         // Containers and anything future: the children carry the meaning.
         _ => children_md(block, depth),
     }

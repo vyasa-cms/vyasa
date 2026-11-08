@@ -121,9 +121,10 @@ export const CAPABILITIES: Record<string, CapabilityInfo> = {
       "AI writing assist, SEO tools and link checks",
       "locking a post while editing it, and its revision history",
       "patterns (reusable content blocks) and the list of content types",
+      "reordering the entries of a hierarchical content type (the tree)",
       "browsing the media library to insert something (not uploading)",
     ],
-    areas: ["ai", "content-types", "embeds", "media", "patterns", "posts"],
+    areas: ["ai", "content-types", "embeds", "media", "patterns", "post-types", "posts"],
   },
   publish_posts: {
     label: "Publish their own work",

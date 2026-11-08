@@ -62,6 +62,23 @@ fn resolve_list<'a>(
     })
 }
 
+/// The attributes a plugin renders from: the stored ones, plus
+/// `__children` (how many child blocks fill its slots) when the block has
+/// any. The stored attributes are untouched.
+fn attrs_for_render(block: &Block) -> String {
+    if block.children.is_empty() {
+        return block.attrs.to_string();
+    }
+    let mut attrs = block.attrs.clone();
+    if let Some(map) = attrs.as_object_mut() {
+        map.insert(
+            String::from("__children"),
+            serde_json::Value::from(block.children.len()),
+        );
+    }
+    attrs.to_string()
+}
+
 async fn resolve_one(state: &AppState, block: &mut Block) {
     let Some(kind) = block.plugin_kind.clone() else {
         return;
@@ -72,7 +89,7 @@ async fn resolve_one(state: &AppState, block: &mut Block) {
         // re-enabling the plugin brings the block back.
         return;
     };
-    let attrs = block.attrs.to_string();
+    let attrs = attrs_for_render(block);
     let env = HostEnv::background(std::sync::Arc::clone(&state.broker), state.pool.clone());
     let html = match state
         .plugin_host
@@ -120,5 +137,23 @@ mod tests {
             children: Vec::new(),
         }];
         assert!(has_plugin_blocks(&[group]));
+    }
+
+    #[test]
+    fn children_are_counted_for_the_plugin_and_the_stored_attrs_stay_as_they_were() {
+        let child = || Block::new(BlockKind::Paragraph, json!({"text": "x"}));
+        let mut with = Block {
+            kind: BlockKind::Plugin,
+            plugin_kind: Some(String::from("acme/steps")),
+            attrs: json!({"a": 1}),
+            children: vec![child(), child()],
+        };
+        let sent: serde_json::Value = serde_json::from_str(&attrs_for_render(&with)).unwrap();
+        assert_eq!(sent["__children"], 2);
+        assert_eq!(sent["a"], 1);
+        assert!(with.attrs.get("__children").is_none());
+        with.children.clear();
+        let sent: serde_json::Value = serde_json::from_str(&attrs_for_render(&with)).unwrap();
+        assert!(sent.get("__children").is_none());
     }
 }

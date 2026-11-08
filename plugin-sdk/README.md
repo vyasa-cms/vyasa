@@ -110,7 +110,7 @@ by the broker on every call.
 | `db:write:posts` | `create-post`, `update-post` — **drafts, and only rows this plugin created** |
 | `db:publish:posts` | on top of the above, may set `published` |
 | `kv:read` / `kv:write` | `kv-get`/`kv-list`, `kv-set`/`kv-delete` in the plugin's own namespace (write implies read) |
-| `net:fetch:<host>` | `fetch`, HTTPS GET to matching hosts (`*.example.com` matches one label) |
+| `net:fetch:<host>` | `fetch` and `fetch-with` (request headers, any status as data): HTTPS GET to matching hosts (`*.example.com` matches one label) |
 | `db:write:meta` | `set-post-meta`, in the plugin's own namespace on any post |
 | `viewer:read` | `current-viewer` — id, name and role of whoever is signed in |
 | `mail:send` | `send-mail`, to a registered user or the `site-admin` token |
@@ -118,6 +118,8 @@ by the broker on every call.
 | `ai:text` | `ai-complete` through the site's default text model (20 calls/minute; refused inside `page-html`) |
 | `html:page` | being called at the `page-html` filter stage — rewriting every public page |
 | `assets:script` | having the `js` from `register-assets` linked from every public page (CSS needs nothing) |
+| `entries:sync` | `put-entry`, `list-managed`, `delete-entry`: entries the plugin owns and keeps in step with an outside source (publishing also needs `db:publish:posts`) |
+| `tasks:extended` | a one-minute budget for tasks declared `"budget": "extended"` |
 
 Reads are quota'd per minute, as are fetches, fetched bytes, writes and
 `ai-complete` calls. `html:page` and `assets:script` are new: a plugin

@@ -14,6 +14,10 @@ phase doc, not that the feature is unfinished in a vague way.
 | Scheduling | done | Queue worker publishes when due |
 | Taxonomy | done | Categories and tags, with merge |
 | Content types & custom fields | done | Admin-created types (public URL, optional archive, per-type templates) and typed fields on any type — text, textarea, number, boolean, date, choice, url, media, entry; validated on every write, `required` on publish/schedule; served by REST/GraphQL, themes (`entry.fields`), bindings, search, export/import; `manage_options` to manage |
+| Hierarchical content types | done | A parent and an order per entry (up to 8 levels), `/<base>/<path>` addresses, a tree view with drag and drop, `GET`/`PUT /post-types/{type}/tree`, GraphQL `parent`/`children`/`postTree`, redirects when an entry moves |
+| Typed layouts | done | A section tree per post type in `layout.json` (`types`), plugin default trees, a `composed.html` fallback |
+| Search scopes | done | `type` and `term` on REST, GraphQL and `/search`, applied inside the query |
+| Managed entries | done | `put-entry` for plugins that sync an outside source: idempotent, read-only in the editor until detached |
 | Comments | done | Threading and moderation |
 | Media | done | Local storage, derivatives, blurhash |
 | WordPress import | done | Users, posts, terms, comments |

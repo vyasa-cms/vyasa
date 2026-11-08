@@ -20,7 +20,12 @@ pub fn init(level: &str, format: LogFormat) {
     }
     let filter = EnvFilter::try_new(level).unwrap_or_else(|_| EnvFilter::new("info"));
     let result = match format {
-        LogFormat::Pretty => tracing_subscriber::fmt().with_env_filter(filter).try_init(),
+        // Colour only when a terminal reads it: under systemd the codes
+        // end up as `ESC[32m` noise in the journal and every log viewer.
+        LogFormat::Pretty => tracing_subscriber::fmt()
+            .with_ansi(std::io::IsTerminal::is_terminal(&std::io::stdout()))
+            .with_env_filter(filter)
+            .try_init(),
         LogFormat::Json => tracing_subscriber::fmt()
             .json()
             .with_env_filter(filter)

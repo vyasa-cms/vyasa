@@ -106,6 +106,12 @@ export function targetOwnsUndo(target: EventTarget | null): boolean {
   );
 }
 
+/** A hierarchical entry's position as the server takes it (empty: leave it). */
+function positionForSave(chrome: ChromeValue): { position?: number } {
+  const n = chrome.position.trim() === "" ? Number.NaN : Number(chrome.position);
+  return Number.isFinite(n) ? { position: Math.trunc(n) } : {};
+}
+
 const EMPTY_CHROME: ChromeValue = {
   slug: "",
   excerpt: "",
@@ -120,6 +126,7 @@ const EMPTY_CHROME: ChromeValue = {
   translations: [],
   scheduled_for: "",
   parent_id: "",
+  position: "",
   term_ids: [],
   featured_media_id: "",
   featured_media_url: "",
@@ -527,7 +534,20 @@ export function PostEditor({ mode }: { mode: Mode }) {
     enabled: chrome.type !== "post" && chrome.type !== "page",
   });
   const typeName = customTypes.data?.find((t) => t.slug === chrome.type)?.singular.toLowerCase();
+  const hierarchical = customTypes.data?.find((t) => t.slug === chrome.type)?.hierarchical === true;
   const canEdit = can("edit_posts") && (isNew || createdRef.current === postId || can("edit_others") || (postQuery.data !== undefined && String(postQuery.data.author_id) === String(me.data?.id)));
+  // An entry a plugin keeps in step with an outside source is read-only
+  // here until someone detaches it.
+  const managed = isNew ? undefined : postQuery.data?.managed;
+  const managedLock = managed !== undefined && managed !== null && !managed.detached;
+  const detach = useMutation({
+    mutationFn: () => api.detachPost(postId as string),
+    onSuccess: () => {
+      void postQuery.refetch();
+      notify.success("Detached. You can edit this entry here now.");
+    },
+    onError: (e) => notify.error("Couldn't detach", e),
+  });
   const lock = usePostLock(canEdit ? postId : undefined);
   const publicPath = postPath(chrome.type, chrome.slug || "…", postQuery.data?.published_at ?? postQuery.data?.created_at ?? new Date().toISOString(), typeof siteOptions.data?.permalink_pattern === "string" ? siteOptions.data.permalink_pattern : undefined);
 
@@ -616,6 +636,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
       layout: unknown;
       scheduled_for: string | null;
       parent_id: string | number | null;
+      position?: number;
     };
     const nextBlocks = normalizeBlocks((p.content as { blocks?: unknown })?.blocks);
     const meta = (p as unknown as { meta?: Record<string, unknown> }).meta ?? {};
@@ -630,6 +651,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
       type: p.type ?? "post",
       scheduled_for: p.scheduled_for ?? "",
       parent_id: p.parent_id === null || p.parent_id === undefined ? "" : String(p.parent_id),
+      position: typeof p.position === "number" ? String(p.position) : "",
       featured_media_id: typeof meta["featured_media_id"] === "string" || typeof meta["featured_media_id"] === "number" ? String(meta["featured_media_id"]) : "",
       featured_media_url: typeof meta["featured_media_url"] === "string" ? meta["featured_media_url"] : "",
       featured_blurhash: typeof meta["featured_blurhash"] === "string" ? meta["featured_blurhash"] : "",
@@ -896,6 +918,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
         term_ids: chrome.term_ids.length ? chrome.term_ids : null,
         scheduled_for: chrome.scheduled_for || null,
         parent_id: chrome.parent_id === "" ? null : chrome.parent_id,
+        ...(hierarchical ? positionForSave(chrome) : {}),
         layout: chrome.type === "page" ? layout : undefined,
         ...(Object.keys(definedOnly(fields)).length > 0 ? { fields: definedOnly(fields) } : {}),
       }),
@@ -943,6 +966,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
         ...(chrome.translation_of ? { translation_of: chrome.translation_of } : {}),
         term_ids: termsKnown ? chrome.term_ids : undefined,
         scheduled_for: chrome.scheduled_for || undefined,
+        ...(hierarchical ? { parent_id: chrome.parent_id === "" ? null : chrome.parent_id, ...positionForSave(chrome) } : {}),
         // Sent only for pages, and always in full: an empty array is how an
         // author clears the composition and goes back to the theme template.
         layout: chrome.type === "page" ? layout : undefined,
@@ -1008,6 +1032,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
         ...(chrome.translation_of ? { translation_of: chrome.translation_of } : {}),
         term_ids: termsKnown ? chrome.term_ids : undefined,
         scheduled_for: chrome.scheduled_for || undefined,
+        ...(hierarchical ? { parent_id: chrome.parent_id === "" ? null : chrome.parent_id, ...positionForSave(chrome) } : {}),
         layout: chrome.type === "page" ? layout : undefined,
         expected_updated_at: expectedUpdatedAt(),
       }),
@@ -1138,7 +1163,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
 
   // Debounced autosave once there is a post to save into.
   React.useEffect(() => {
-    if (isNew || !contentDirty || !canEdit) return;
+    if (isNew || !contentDirty || !canEdit || managedLock) return;
     // Stopped after repeated failures: a fresh edit tries again. Stopped
     // because the session ended: only a manual save (after signing in).
     if (autosaveStopped !== null) {
@@ -1222,7 +1247,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
 
   // Save never publishes; Publish/Update is the only thing that does.
   const save = React.useCallback(() => {
-    if (!canEdit) return;
+    if (!canEdit || managedLock) return;
     const vars = saveVarsRef.current("draft");
     if (isNew) saveNew.mutate(vars);
     else if (isLive) saveWorking.mutate(vars);
@@ -1230,7 +1255,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
   }, [canEdit, isNew, isLive, saveNew, saveWorking, saveDraft]);
 
   const publish = React.useCallback(() => {
-    if (!canEdit || !can("publish_posts")) return;
+    if (!canEdit || managedLock || !can("publish_posts")) return;
     // The server refuses to publish or schedule without the required
     // fields; say which here rather than send a request bound to fail.
     if (target === "published" || target === "scheduled") {
@@ -1483,6 +1508,21 @@ export function PostEditor({ mode }: { mode: Mode }) {
       data-testid="post-editor"
       data-focus-mode={focus ? "true" : undefined}
     >
+      {managedLock && managed ? (
+        <div role="status" data-testid="managed-banner" className="mb-4 flex flex-wrap items-center gap-2 rounded-lg border bg-muted/60 px-4 py-3 text-sm">
+          <span>
+            Synced from {managed.plugin}. Edit it at the source.
+          </span>
+          {managed.edit_url !== "" ? (
+            <a href={managed.edit_url} target="_blank" rel="noreferrer" className="font-medium underline">
+              Edit source
+            </a>
+          ) : null}
+          <Button variant="outline" size="sm" className="ml-auto" onClick={() => detach.mutate()} disabled={detach.isPending}>
+            Detach
+          </Button>
+        </div>
+      ) : null}
       {focus ? (
         <div className="mx-auto mb-6 flex max-w-(--vy-canvas-measure,70ch) items-center gap-3 text-xs text-muted-foreground">
           <Button variant="outline" size="sm" onClick={() => setFocus(false)}>
@@ -1667,10 +1707,10 @@ export function PostEditor({ mode }: { mode: Mode }) {
                 <PanelRightOpen className="h-4 w-4" aria-hidden="true" />
               )}
             </Button>
-            <Button variant="outline" size="sm" onClick={save} disabled={saving} data-testid="save-post">
+            <Button variant="outline" size="sm" onClick={save} disabled={saving || managedLock} data-testid="save-post">
               {saveLabel}
             </Button>
-            <Button size="sm" onClick={publish} disabled={saving || !canPublish || !can("publish_posts")} data-testid="publish-post">
+            <Button size="sm" onClick={publish} disabled={saving || managedLock || !canPublish || !can("publish_posts")} data-testid="publish-post">
               {saving ? "Saving…" : primaryLabel}
             </Button>
             {!isNew ? (
@@ -1795,7 +1835,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
               onChange={setField}
               errors={fieldErrors}
               missing={fieldsMissing}
-              disabled={!canEdit}
+              disabled={!canEdit || managedLock}
             />
           ) : null}
         </div>
@@ -1834,6 +1874,7 @@ export function PostEditor({ mode }: { mode: Mode }) {
               onChange={(p) => setChrome((c) => ({ ...c, ...p }))}
               document={docForSave}
               postId={postId}
+              hierarchical={hierarchical}
             />
 
             {outline.length >= 2 ? (

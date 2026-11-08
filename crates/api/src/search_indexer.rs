@@ -28,7 +28,13 @@ use crate::state::AppState;
 /// Only published posts belong in the index — search must not leak drafts,
 /// scheduled posts or private ones.
 fn is_publicly_searchable(row: &PostRow) -> bool {
-    row.status == PostStatus::Published && row.password_hash.is_none()
+    row.status == PostStatus::Published && row.password_hash.is_none() && !asks_noindex(&row.meta)
+}
+
+/// An entry that asks search engines to skip it (`seo_noindex`) is kept out
+/// of the site's own search too: a hidden documentation page, for one.
+fn asks_noindex(meta: &serde_json::Value) -> bool {
+    meta.get("seo_noindex").and_then(serde_json::Value::as_bool) == Some(true)
 }
 
 /// Whether entries of this type belong in public search at all.
@@ -60,6 +66,7 @@ fn doc_for(
     row: &PostRow,
     served_custom: &std::collections::HashSet<String>,
     fields: &[(String, String)],
+    terms: Vec<String>,
 ) -> Option<SearchDoc> {
     if !is_publicly_searchable(row) || !type_is_searchable(row.post_type, served_custom) {
         return None;
@@ -84,7 +91,22 @@ fn doc_for(
             }
             body
         },
+        terms,
     })
+}
+
+/// The terms an entry is filed under, as `taxonomy:slug` (what a scoped
+/// search matches exactly). One small query per entry, on the indexing
+/// path only.
+pub async fn terms_for(pool: &sqlx::PgPool, post_id: i64) -> Vec<String> {
+    sqlx::query_scalar(
+        "SELECT t.taxonomy || ':' || t.slug FROM term_relationships r
+         JOIN terms t ON t.id = r.term_id WHERE r.post_id = $1 ORDER BY 1",
+    )
+    .bind(post_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default()
 }
 
 /// How many entries the index should hold right now: published, not
@@ -152,7 +174,8 @@ pub async fn reindex_all(state: &AppState) -> Result<usize, vyasa_common::AppErr
                 defs.of(&state.pool, row.post_type).await,
                 &row.meta,
             );
-            match doc_for(row, &served, &fields) {
+            let terms = terms_for(&state.pool, row.id).await;
+            match doc_for(row, &served, &fields, terms) {
                 Some(doc) => {
                     manager.upsert(&doc)?;
                     indexed += 1;
@@ -206,9 +229,10 @@ pub async fn reindex_type(
                 defs.of(&state.pool, row.post_type).await,
                 &row.meta,
             );
+            let terms = terms_for(&state.pool, row.id).await;
             docs.push((
                 u64::try_from(row.id).unwrap_or_default(),
-                doc_for(row, &served, &fields),
+                doc_for(row, &served, &fields, terms),
             ));
         }
         let manager = Arc::clone(&manager);
@@ -293,7 +317,8 @@ async fn apply(
             let mut defs = crate::entry_fields::Definitions::default();
             let fields =
                 crate::entry_fields::text_values(defs.of(pool, row.post_type).await, &row.meta);
-            doc_for(row, &served, &fields)
+            let terms = terms_for(pool, row.id).await;
+            doc_for(row, &served, &fields, terms)
         }
         None => None,
     };
@@ -363,6 +388,13 @@ pub fn converge_on_boot(state: &AppState) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_entry_marked_noindex_stays_out_of_search() {
+        assert!(asks_noindex(&serde_json::json!({"seo_noindex": true})));
+        assert!(!asks_noindex(&serde_json::json!({"seo_noindex": false})));
+        assert!(!asks_noindex(&serde_json::json!({})));
+    }
 
     #[test]
     fn only_publicly_served_types_are_searchable() {

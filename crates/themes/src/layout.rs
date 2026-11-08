@@ -7,6 +7,8 @@
 //! [`crate::dynblocks`]. Themes stay pure data — nothing here touches a
 //! database or HTTP.
 
+use std::collections::BTreeMap;
+
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
@@ -253,9 +255,34 @@ pub struct Layout {
     pub search: Vec<Section>,
     /// 404 page.
     pub not_found: Vec<Section>,
+    /// Section trees for custom post types, keyed by type slug. A single
+    /// entry of such a type renders this tree (the same mechanism a page
+    /// that composes itself uses) instead of the `single` template's body.
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub types: BTreeMap<String, Vec<Section>>,
+}
+
+/// Whether `s` is a custom post type slug (`^[a-z][a-z0-9-]{1,31}$`, no trailing `-`).
+#[must_use]
+pub fn is_type_slug(s: &str) -> bool {
+    let b = s.as_bytes();
+    (2..=32).contains(&b.len())
+        && b[0].is_ascii_lowercase()
+        && !s.ends_with('-')
+        && b.iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
 }
 
 impl Layout {
+    /// The tree for entries of the custom type `slug`, when the theme has one.
+    #[must_use]
+    pub fn type_sections(&self, slug: &str) -> Option<&[Section]> {
+        self.types
+            .get(slug)
+            .map(Vec::as_slice)
+            .filter(|s| !s.is_empty())
+    }
+
     /// The sections for a template type.
     #[must_use]
     pub fn for_template(&self, t: TemplateType) -> &[Section] {
@@ -340,6 +367,22 @@ pub fn validate_layout_with_tokens(
             continue;
         }
         out.extend(validate_sections(sections, registry, tokens, t.as_str()));
+    }
+    for (slug, sections) in &layout.types {
+        let path = format!("types.{slug}");
+        if !is_type_slug(slug) {
+            out.push(TokenDiagnostic::Error {
+                path,
+                message: format!("\"{slug}\" is not a post type slug"),
+            });
+        } else if sections.is_empty() {
+            out.push(TokenDiagnostic::Error {
+                path,
+                message: "type layout has no sections; remove the key instead".to_owned(),
+            });
+        } else {
+            out.extend(validate_sections(sections, registry, tokens, &path));
+        }
     }
     out
 }
@@ -529,6 +572,13 @@ pub fn merge_layouts(parent: &Layout, child: &Layout) -> Layout {
             }
         }
     }
+    // A type's tree is replaced wholesale: positional merging of two
+    // unrelated trees would be guesswork.
+    for (slug, tree) in &child.types {
+        if !tree.is_empty() {
+            out.types.insert(slug.clone(), tree.clone());
+        }
+    }
     out
 }
 
@@ -555,6 +605,11 @@ pub fn canonical_layout_json(layout: &Layout) -> String {
     let mut copy = layout.clone();
     for t in TemplateType::ALL {
         for section in copy.for_template_mut(t) {
+            canonicalize(section);
+        }
+    }
+    for sections in copy.types.values_mut() {
+        for section in sections {
             canonicalize(section);
         }
     }

@@ -242,6 +242,8 @@ pub async fn run<S: wp::WpSource>(
                 published_at: published.then_some(chrono::Utc::now()),
                 scheduled_for: None,
                 password_hash: None,
+                position: 0,
+                path_prefix: None,
             })
             .await
         {

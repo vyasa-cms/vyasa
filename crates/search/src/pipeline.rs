@@ -51,6 +51,7 @@ mod tests {
             slug: format!("p{id}"),
             title: format!("Title {id}"),
             body: "searchable body text".into(),
+            terms: Vec::new(),
         }
     }
 

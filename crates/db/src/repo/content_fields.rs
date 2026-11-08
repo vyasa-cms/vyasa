@@ -7,7 +7,7 @@ use sqlx::PgPool;
 use vyasa_common::AppError;
 
 const FIELD_COLUMNS: &str = "type_slug, key, label, help, kind, required, options, position, \
-                             created_at, updated_at";
+                             owner, created_at, updated_at";
 
 /// What counts as no value at all: absent, `null`, `""` or `[]`.
 const EMPTY_VALUES: &str = "('null'::jsonb, '\"\"'::jsonb, '[]'::jsonb)";
@@ -31,6 +31,9 @@ pub struct ContentFieldRow {
     pub options: serde_json::Value,
     /// Order within the type, lowest first.
     pub position: i32,
+    /// Who defined it: `admin`, or the name of the plugin whose post type
+    /// declared it (such a field is locked to administrators).
+    pub owner: String,
     /// Creation time.
     pub created_at: DateTime<Utc>,
     /// Last change.
@@ -174,6 +177,58 @@ impl ContentFieldsRepo {
                 field.type_slug, field.key
             )),
             err => AppError::db(format!("content field insert failed: {err}")),
+        })
+    }
+
+    /// Inserts or rewrites a field a plugin's post type declares.
+    ///
+    /// A new field goes after the type's last one. One `owner` already
+    /// owns is rewritten in place (label, help, kind, required, options;
+    /// its position stays). A field owned by anyone else, an administrator
+    /// included, is never taken over.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Conflict`] for a field someone else owns,
+    /// [`AppError::Db`] on database failure.
+    #[allow(clippy::too_many_arguments)] // one per column of the definition
+    pub async fn upsert_owned(
+        &self,
+        owner: &str,
+        type_slug: &str,
+        key: &str,
+        label: &str,
+        help: &str,
+        kind: &str,
+        required: bool,
+        options: &serde_json::Value,
+    ) -> Result<ContentFieldRow, AppError> {
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "INSERT INTO content_fields (type_slug, key, label, help, kind, required, options, position, owner)
+             VALUES ($1, $2, $3, $4, $5, $6, $7,
+                     (SELECT COALESCE(MAX(position) + 1, 0) FROM content_fields WHERE type_slug = $1),
+                     $8)
+             ON CONFLICT (type_slug, key) DO UPDATE SET
+                label = EXCLUDED.label, help = EXCLUDED.help, kind = EXCLUDED.kind,
+                required = EXCLUDED.required, options = EXCLUDED.options, updated_at = now()
+             WHERE content_fields.owner = $8
+             RETURNING {FIELD_COLUMNS}"
+        )))
+        .bind(type_slug)
+        .bind(key)
+        .bind(label)
+        .bind(help)
+        .bind(kind)
+        .bind(required)
+        .bind(options)
+        .bind(owner)
+        .fetch_optional(&self.pool)
+        .await
+        .map_err(|err| AppError::db(format!("content field upsert failed: {err}")))?
+        .ok_or_else(|| {
+            AppError::conflict(format!(
+                "the field {key:?} of {type_slug:?} belongs to someone else"
+            ))
         })
     }
 

@@ -437,6 +437,7 @@ async fn sample_content(state: &AppState, author_id: i64) -> Result<(), AppError
                 password: None,
                 term_ids: None,
                 layout: None,
+                position: None,
             })
             .await?;
     }

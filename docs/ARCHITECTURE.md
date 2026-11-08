@@ -103,6 +103,16 @@ custom roles, resolved in one place (`vyasa_core::user::effective_caps`).
 - `posts` — type (post, page, block, or a custom type), status
   (draft/scheduled/published/private/trash), slug, **content as JSONB
   blocks** (`BlockDocument v1`, see [BLOCKS.md](BLOCKS.md)), typed meta.
+- `posts.parent_id`, `posts.position` and `posts.path` — hierarchy for the
+  types that declare it (0.3): `path` is the slash-joined slugs from the root,
+  kept by the application; it is NULL for every entry of a type that is not
+  hierarchical, and the slug index is narrowed to such rows, so cousins may
+  share a slug while siblings may not. Rules (depth, loops, reserved slugs,
+  sibling uniqueness) are pure functions in `vyasa-core`; moves are applied
+  as a whole in one transaction.
+- `managed_entries` — entries a plugin keeps in step with an outside source:
+  the plugin's key, the hash last written, an edit URL, and a `detached`
+  tombstone (0.3).
 - `content_types` / `content_fields` — administrator-defined post types and
   typed fields (text, number, date, choice, url, media, entry …); values live
   in `posts.meta.fields` and are validated on every write. Plugins can

@@ -227,6 +227,7 @@ async fn a_visitor_can_read_and_comment() {
     byline_terms_and_head(&entry);
     let comment_id = commenting_works(base, post_id);
     moderation_is_honoured(base, &cookie, comment_id);
+    footer_credit_follows_the_option(base, &cookie);
     listings_and_feeds(base);
 }
 
@@ -421,6 +422,33 @@ fn moderation_is_honoured(base: &str, cookie: &str, _comment_id: i64) {
         page.contains("Published at once"),
         "auto-approved comment missing: {page}"
     );
+}
+
+/// The footer credit is on until an operator saves `footer_credit: false`,
+/// takes effect on the next page (the cache is dropped on the write), and
+/// a non-boolean value is refused.
+fn footer_credit_follows_the_option(base: &str, cookie: &str) {
+    let credit = "<a href=\"https://vyasa.site\" rel=\"noopener\">Vyasa</a>";
+    let put = |value: serde_json::Value| {
+        http(
+            ureq::put(format!("{base}/api/v1/options").as_str())
+                .set("Cookie", cookie)
+                .send_json(serde_json::json!({ "footer_credit": value })),
+        )
+        .status()
+    };
+    assert!(get(base, "/").contains(credit), "credit on by default");
+    assert_eq!(put(serde_json::json!("no")), 400, "must be a boolean");
+    assert_eq!(put(serde_json::json!(false)), 204);
+    assert!(
+        !get(base, "/").contains("vy-credit\""),
+        "credit switched off"
+    );
+    let stored = get_auth(base, cookie, "/api/v1/options");
+    let stored: serde_json::Value = serde_json::from_str(&stored).expect("options json");
+    assert_eq!(stored["footer_credit"], false, "round trip");
+    assert_eq!(put(serde_json::json!(true)), 204);
+    assert!(get(base, "/").contains(credit), "credit back on");
 }
 
 /// Listings, pagination, the search route and the feeds.
