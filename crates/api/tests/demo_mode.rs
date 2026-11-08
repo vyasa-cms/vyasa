@@ -70,6 +70,9 @@ async fn a_demo_refuses_what_would_harm_the_site_or_the_next_visitor() {
     let refused: Vec<(&str, String, Option<Value>)> = vec![
         // Full-administrator actions.
         ("POST", "/updates/apply".into(), Some(json!({}))),
+        ("PUT", "/media/storage".into(), Some(json!({}))),
+        ("POST", "/media/storage/test".into(), Some(json!({}))),
+        ("POST", "/media/storage/migrate".into(), Some(json!({}))),
         (
             "PUT",
             "/ai/providers/openai".into(),
