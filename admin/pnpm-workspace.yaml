@@ -11,3 +11,7 @@ overrides:
   zod: ">=4.6.6"
   brace-expansion@2: "^2.1.7"
   brace-expansion@5: "^5.0.12"
+  # GHSA-g3hv-75wg-m249 (minimatch denial of service via globparts amplification)
+  minimatch@10: ">=11.0.1"
+  # seroval advisories patched in 1.6.10 and 1.6.11 (build-time, via @tanstack/router-generator)
+  seroval: ">=1.6.11"
