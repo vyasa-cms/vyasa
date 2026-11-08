@@ -10,12 +10,15 @@
   if (stored === 'light' || stored === 'dark') root.setAttribute('data-theme', stored);
   const current = () => root.getAttribute('data-theme')
     || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  const sync = () => document.querySelectorAll('[data-vy-theme-toggle]')
+    .forEach((b) => b.setAttribute('aria-pressed', String(current() === 'dark')));
+  document.addEventListener('DOMContentLoaded', sync);
   document.addEventListener('click', (event) => {
     const button = event.target instanceof Element && event.target.closest('[data-vy-theme-toggle]');
     if (!button) return;
     const next = current() === 'dark' ? 'light' : 'dark';
     root.setAttribute('data-theme', next);
     write(next);
-    button.setAttribute('aria-pressed', String(next === 'dark'));
+    sync();
   });
 })();

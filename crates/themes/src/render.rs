@@ -419,19 +419,34 @@ fn add_footer_credit(mut html: String) -> String {
     html
 }
 
-/// The tag that loads the colour-scheme toggle.
-pub const THEME_TOGGLE_TAG: &str = "<script src=\"/theme-assets/theme-toggle.js\"></script>";
+/// The tag that loads the colour-scheme toggle. The URL carries a hash of
+/// the script, so the response can be cached for good and a changed script
+/// still reaches visitors.
+#[must_use]
+pub fn theme_toggle_tag() -> String {
+    use std::sync::OnceLock;
+    static VERSION: OnceLock<u64> = OnceLock::new();
+    // FNV-1a: fixed by definition, so the URL (and the page snapshots) do
+    // not move with the Rust toolchain.
+    let version = VERSION.get_or_init(|| {
+        crate::sections::THEME_TOGGLE_JS
+            .bytes()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+                (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+            })
+    });
+    format!("<script src=\"/theme-assets/theme-toggle.js?v={version:x}\"></script>")
+}
 
 /// Links the toggle script at the end of `<head>`. It is blocking on
 /// purpose: it applies a stored choice before first paint, so a returning
 /// visitor sees no flash. A page with no `</head>` gets none, and a page
 /// that already links it is left alone.
 fn add_theme_toggle(mut html: String) -> String {
-    if html.contains("theme-toggle.js") {
-        return html;
-    }
     if let Some(at) = html.find("</head>") {
-        html.insert_str(at, THEME_TOGGLE_TAG);
+        if !html[..at].contains("/theme-assets/theme-toggle.js") {
+            html.insert_str(at, &theme_toggle_tag());
+        }
     }
     html
 }

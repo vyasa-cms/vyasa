@@ -998,7 +998,7 @@ fn the_default_colour_scheme_sets_data_theme_on_html() {
     assert!(render("light").contains("<html data-theme=\"light\" lang="));
     // The toggle script loads once, in <head>, before the body paints.
     let page = render("system");
-    assert_eq!(page.matches("/theme-assets/theme-toggle.js").count(), 1);
+    assert_eq!(page.matches("/theme-assets/theme-toggle.js?v=").count(), 1);
     assert!(page.find("theme-toggle.js").unwrap() < page.find("</head>").unwrap());
     assert!(page.find("</head>").unwrap() < page.find("<body").unwrap());
 }

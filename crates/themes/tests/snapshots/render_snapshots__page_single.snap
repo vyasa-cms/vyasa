@@ -777,7 +777,7 @@ mark {
 <link rel="stylesheet" href="/custom.css">
 
 <script src="/theme-assets/components.js" defer></script>
-<script src="/theme-assets/theme-toggle.js"></script></head>
+<script src="/theme-assets/theme-toggle.js?v=f154c1a81836131f"></script></head>
 <body class="vy" data-template="single">
 <div class="vy-masthead"><header class="vy-header"><a class="vy-site-name" href="/"><img class="vy-logo-mark" src="/brand/mark.svg" alt="" width="64" height="64">Vyasa</a></header></div>
 <main class="vy-main">
