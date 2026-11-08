@@ -141,24 +141,34 @@ pub async fn submissions_csv(
         .audience
         .submissions_for(&form.slug, 10_000, q.held)
         .await?;
-    let mut out = String::new();
-    out.push_str("received,page,");
-    out.push_str(
-        &fields
-            .iter()
-            .map(|f| cell(&f.label))
-            .collect::<Vec<_>>()
-            .join(","),
-    );
+    // One column per field; a consent field also gets the time the box was ticked.
+    let columns: Vec<(String, String)> = fields
+        .iter()
+        .flat_map(|f| {
+            let mut c = vec![(f.label.clone(), f.key.clone())];
+            if f.kind == "consent" {
+                c.push((
+                    format!("{} (given at)", f.label),
+                    format!("{}_consent_at", f.key),
+                ));
+            }
+            c
+        })
+        .collect();
+    let mut out = String::from("received,page");
+    for (header, _) in &columns {
+        out.push(',');
+        out.push_str(&cell(header));
+    }
     out.push('\n');
     for r in rows {
         out.push_str(&cell(&r.created_at.to_rfc3339()));
         out.push(',');
         out.push_str(&cell(&r.path));
-        for f in &fields {
+        for (_, key) in &columns {
             out.push(',');
             out.push_str(&cell(
-                r.data.get(&f.key).and_then(|v| v.as_str()).unwrap_or(""),
+                r.data.get(key).and_then(|v| v.as_str()).unwrap_or(""),
             ));
         }
         out.push('\n');

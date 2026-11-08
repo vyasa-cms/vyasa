@@ -389,3 +389,88 @@ async fn a_consent_field_must_be_given_and_is_stored_with_its_time() {
         "{data}"
     );
 }
+
+/// The early-access form of the website theme (design/website-theme-spec.md, gap 10): company, role
+/// (select), use case, consent with a privacy link, "talk to the team", double opt-in and a CSV.
+#[tokio::test]
+#[allow(clippy::too_many_lines)]
+async fn the_early_access_form_collects_confirms_and_exports() {
+    let db = TestDb::new().await;
+    sqlx::query("INSERT INTO options (key, value) VALUES ('site_url', to_jsonb($1::text))")
+        .bind("http://example.test")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let server = TestServer::builder(common::BIN, &db)
+        .env("VYASA_SETUP_TOKEN", TOKEN)
+        .start();
+    let base = server.base();
+    let claimed = http(
+        ureq::post(format!("{base}/api/v1/setup/claim").as_str())
+            .send_json(json!({"token": TOKEN})),
+    );
+    let setup_cookie = cookie_of(&claimed, "vy_setup").unwrap();
+    let created = http(
+        ureq::post(format!("{base}/api/v1/setup/account").as_str())
+            .set("cookie", &setup_cookie)
+            .send_json(json!({"email": "x@example.com", "password": "twelve-char-password"})),
+    );
+    let session = cookie_of(&created, "vy_session").unwrap();
+    let made: Value = serde_json::from_str(&body(http(
+        ureq::post(format!("{base}/api/v1/forms").as_str())
+            .set("cookie", &session)
+            .send_json(json!({
+                "name": "Early access", "confirm": true, "notify_email": "owner@example.com",
+                "fields": [
+                    {"key": "name", "label": "Name", "required": true},
+                    {"key": "email", "label": "Work email", "kind": "email", "required": true},
+                    {"key": "company", "label": "Company", "required": true},
+                    {"key": "role", "label": "Role", "kind": "select", "required": true,
+                     "options": ["Data engineer", "Platform engineer", "Analyst", "Other"]},
+                    {"key": "use_case", "label": "Use case", "kind": "textarea"},
+                    {"key": "wants_contact", "label": "Talk to the team", "kind": "checkbox"},
+                    {"key": "consent", "label": "I agree to be contacted", "kind": "consent",
+                     "required": true, "options": ["/privacy"]}
+                ]
+            })),
+    )))
+    .unwrap();
+    let fid = made["id"].as_i64().unwrap();
+
+    // A role that is not offered is refused; a complete entry is held, then confirmed.
+    let refused = body(http(ureq::post(format!("{base}/form").as_str()).send_string(
+        "form=early-access&name=Ada&email=ada%40corp.example&company=Corp&role=Wizard&consent=yes&path=%2Fplatform",
+    )));
+    assert!(refused.contains("one of the offered choices"), "{refused}");
+    let sent = body(http(ureq::post(format!("{base}/form").as_str()).send_string(
+        "form=early-access&name=Ada&email=ada%40corp.example&company=Corp&role=Analyst&use_case=Fast+SQL&wants_contact=yes&consent=yes&path=%2Fplatform",
+    )));
+    assert!(sent.contains("Check your inbox"), "{sent}");
+    let token: String = sqlx::query_scalar("SELECT token FROM form_submissions")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    http(
+        ureq::post(format!("{base}/form/confirm").as_str()).send_string(&format!("token={token}")),
+    );
+
+    // The CSV has one column per field plus when the consent was given.
+    let csv = body(http(
+        ureq::get(format!("{base}/api/v1/forms/{fid}/submissions.csv").as_str())
+            .set("cookie", &session)
+            .call(),
+    ));
+    let mut lines = csv.lines();
+    assert_eq!(
+        lines.next().unwrap(),
+        r#"received,page,"Name","Work email","Company","Role","Use case","Talk to the team","I agree to be contacted","I agree to be contacted (given at)""#
+    );
+    let row = lines.next().unwrap();
+    assert!(
+        row.contains(
+            r#","/platform","Ada","ada@corp.example","Corp","Analyst","Fast SQL","yes","yes","20"#
+        ),
+        "{row}"
+    );
+    assert!(lines.next().is_none(), "one confirmed entry: {csv}");
+}
