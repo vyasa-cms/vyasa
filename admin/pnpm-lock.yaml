@@ -11,6 +11,8 @@ overrides:
   zod: '>=4.6.6'
   brace-expansion@2: ^2.1.7
   brace-expansion@5: ^5.0.12
+  minimatch@10: '>=11.0.1'
+  seroval: '>=1.6.11'
 
 importers:
 
@@ -540,6 +542,9 @@ packages:
   '@humanwhocodes/retry@0.4.3':
     resolution: {integrity: sha512-bV0Tgo9K4hfPCek+aMAn81RppFKv2ySDQeMoSZuvTASywNTnVJCArCZE2FWqpvIatKu7VMRLWlR1EazvVhDyhQ==}
     engines: {node: '>=18.18'}
+
+  '@isaacs/nonrecursive-glob-match@1.1.0':
+    resolution: {integrity: sha512-GPm/Dbvk5RLmhRnxXIa7nTpK0xtl4E0wj0MslsuNiJ1FIROU+2+9lgUC/dgF7Ey4QCWhfEsgxilMRMCdHPfDfw==}
 
   '@jridgewell/gen-mapping@0.3.13':
     resolution: {integrity: sha512-2kkt/7niJ6MgEPxF0bYdQ6etZaA+fQvDcLKckhy1yIQOzaoKjBBjSj63/aLVjYE3qhRt5dvM+uUyfCg6UKCBbA==}
@@ -1960,9 +1965,9 @@ packages:
     resolution: {integrity: sha512-I9jwMn07Sy/IwOj3zVkVik2JTvgpaykDZEigL6Rx6N9LbMywwUSMtxET+7lVoDLLd3O3IXwJwvuuns8UB/HeAg==}
     engines: {node: '>=4'}
 
-  minimatch@10.2.6:
-    resolution: {integrity: sha512-vpLQEs+VLCr1nU0BXS07maYoFwlDAH0gngQuuttxIwutDFEMHq2blX+8vpgxDdK3J1PwjCJiep77OitTZ4Ll1A==}
-    engines: {node: 18 || 20 || >=22}
+  minimatch@11.0.5:
+    resolution: {integrity: sha512-snPlVppFcYWfLLFQGhDxUyBcHNtMlWmn3jtj7pEaO+DP8pqL0IvAzXhMYmn1z9ASNtgmwLBdFxSf4tMUB0OTKA==}
+    engines: {node: 20 || >=22}
 
   minimatch@5.1.9:
     resolution: {integrity: sha512-7o1wEA2RyMP7Iu7GNba9vc0RWWGACJOCZBJX2GJWip0ikV+wcOsgVuY9uE8CPiyQhkGFSlhuSkZPavN7u1c2Fw==}
@@ -2170,11 +2175,11 @@ packages:
     resolution: {integrity: sha512-N7mWAMydj89EnYTHtRpS3LBrAz3J9O6oVrqpuXuvlAHfAUG8WEKqtbAd7SBiJNY5NfCAFhSdyAh7wI4Shjqy4g==}
     engines: {node: '>=10'}
     peerDependencies:
-      seroval: ^1.0
+      seroval: '>=1.6.11'
 
-  seroval@1.6.8:
-    resolution: {integrity: sha512-HlSgSAkTk4EqHcje1ptJjfZi1YDv5KbhVJ/d3P7T/nAXua2VmDu+AKDX5VTdFfZf48nDkWB2TKYt0DrCSa+3wg==}
-    engines: {node: '>=10'}
+  seroval@1.7.10:
+    resolution: {integrity: sha512-6Ya73+E5T7ToU9AJQSAvEt+WsLYfc7jM9C93KVcUGM14REPU9/eLn6Ho6fqBb+QkpjSQMPewWBzxI80WiNl7Mg==}
+    engines: {node: '>=20'}
 
   shebang-command@2.0.0:
     resolution: {integrity: sha512-kHxr2zZpYtdmrN1qDjrrX/Z1rR1kG8Dx+gkpK1G4eXmvXswmcE1hTWBWYUzlraYw1/yZp6YuDY77YtvbN0dmDA==}
@@ -2738,7 +2743,7 @@ snapshots:
     dependencies:
       '@eslint/object-schema': 3.0.5
       debug: 4.4.3(supports-color@10.2.2)
-      minimatch: 10.2.6
+      minimatch: 11.0.5
     transitivePeerDependencies:
       - supports-color
 
@@ -2794,6 +2799,8 @@ snapshots:
   '@humanwhocodes/module-importer@1.0.1': {}
 
   '@humanwhocodes/retry@0.4.3': {}
+
+  '@isaacs/nonrecursive-glob-match@1.1.0': {}
 
   '@jridgewell/gen-mapping@0.3.13':
     dependencies:
@@ -3088,8 +3095,8 @@ snapshots:
     dependencies:
       '@tanstack/history': 1.162.5
       cookie-es: 3.1.1
-      seroval: 1.6.8
-      seroval-plugins: 1.6.8(seroval@1.6.8)
+      seroval: 1.7.10
+      seroval-plugins: 1.6.8(seroval@1.7.10)
 
   '@tanstack/router-generator@1.167.45(supports-color@10.2.2)':
     dependencies:
@@ -3499,7 +3506,7 @@ snapshots:
       '@typescript-eslint/types': 8.72.0
       '@typescript-eslint/visitor-keys': 8.72.0
       debug: 4.4.3(supports-color@10.2.2)
-      minimatch: 10.2.6
+      minimatch: 11.0.5
       semver: 7.8.5
       tinyglobby: 0.2.17
       ts-api-utils: 2.5.0(typescript@6.0.3)
@@ -3773,7 +3780,7 @@ snapshots:
       imurmurhash: 0.1.4
       is-glob: 4.0.3
       json-stable-stringify-without-jsonify: 1.0.1
-      minimatch: 10.2.6
+      minimatch: 11.0.5
       natural-compare: 1.4.0
       optionator: 0.9.4
     optionalDependencies:
@@ -4082,8 +4089,9 @@ snapshots:
 
   min-indent@1.0.1: {}
 
-  minimatch@10.2.6:
+  minimatch@11.0.5:
     dependencies:
+      '@isaacs/nonrecursive-glob-match': 1.1.0
       brace-expansion: 5.0.12
 
   minimatch@5.1.9:
@@ -4350,11 +4358,11 @@ snapshots:
 
   semver@7.8.5: {}
 
-  seroval-plugins@1.6.8(seroval@1.6.8):
+  seroval-plugins@1.6.8(seroval@1.7.10):
     dependencies:
-      seroval: 1.6.8
+      seroval: 1.7.10
 
-  seroval@1.6.8: {}
+  seroval@1.7.10: {}
 
   shebang-command@2.0.0:
     dependencies:
