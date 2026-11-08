@@ -30,3 +30,11 @@ The owner can list the held entries with `GET /api/v1/forms/{id}/submissions?hel
 
 The address check on every form and on newsletter sign-up refuses lists and angle brackets
 (`a@x.co,b@y.co`, `Name <a@x.co>`), so one sign-up cannot address several recipients.
+
+## Example: an early-access form
+
+Fields: `name` and `email` (required), `company` (required), `role` (a select: Data engineer, Platform engineer,
+Analyst, Other; required), `use_case` (long text), `wants_contact` (a checkbox, "Talk to the team") and
+`consent` (a consent field, required, with `/privacy` as its link), with **Hold each entry until its sender
+confirms by email** on. The CSV (`GET /api/v1/forms/{id}/submissions.csv`) has one column per field and, for the
+consent field, a second column with the time it was given. Only confirmed entries are in it.
