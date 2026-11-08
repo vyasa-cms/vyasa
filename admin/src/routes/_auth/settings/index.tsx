@@ -406,6 +406,7 @@ const SECTIONS: Section[] = [
     title: "Advanced",
     description: "Styles applied on top of your theme.",
     keys: [
+      { key: "discourage_indexing", label: "Ask search engines not to index this site", hint: "For staging sites: serves robots.txt Disallow: / and an X-Robots-Tag: noindex header on every response. Off by default.", kind: "toggle" },
       { key: "footer_credit", label: "Show 'Made with Vyasa' in the footer", hint: "A small link under the copyright line on every page. On by default; turn it off any time.", kind: "toggle", defaultOn: true },
       { key: "custom_css", label: "Custom CSS", hint: "Scoped to your site's content, so it can't affect this admin.", kind: "css" },
     ],

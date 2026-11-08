@@ -426,3 +426,17 @@ async fn the_discourage_indexing_option_closes_the_site_to_search_engines() {
     assert!(robots.starts_with("User-agent: *\nDisallow: /"), "{robots}");
     assert!(!robots.contains("Allow: /"), "{robots}");
 }
+
+#[tokio::test]
+async fn indexing_stays_open_unless_the_option_is_on() {
+    let db = TestDb::new().await;
+    common::seed_user(db.pool(), Role::Admin).await;
+    let server = TestServer::start(common::BIN, &db);
+    let base = server.base();
+    let home = http(ureq::get(&format!("{base}/")).call());
+    assert_eq!(home.header("x-robots-tag"), None);
+    let robots = http(ureq::get(&format!("{base}/robots.txt")).call())
+        .into_string()
+        .unwrap();
+    assert!(robots.contains("Allow: /"), "{robots}");
+}
