@@ -32,6 +32,10 @@ pub const POST_TYPE: &str = "doc";
 pub const BASE: &str = "docs";
 /// The version taxonomy.
 pub const VERSION_TAXONOMY: &str = "doc-version";
+/// The section taxonomy.
+pub const SECTION_TAXONOMY: &str = "doc-section";
+/// A section's pseudo-version starts with this; the rest is its slug.
+const SECTION_PREFIX: &str = "section/";
 
 /// What an operator configured.
 #[derive(Debug, Clone)]
@@ -52,6 +56,8 @@ pub struct Config {
     pub version_refs: BTreeMap<String, String>,
     /// Versions that document unreleased code: their pages stay out of search engines.
     pub unreleased: Vec<String>,
+    /// Doc sections: own folder (and ref), served below `/docs/<slug>`.
+    pub sections: Vec<crate::settings::SectionDef>,
 }
 
 /// An HTTP answer, reduced to what the importer reads.
@@ -276,7 +282,12 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
     // 1. Which commits? One conditional request per branch or tag in use
     // (the main one, plus any a version is read from): unchanged costs nothing.
     let mut refs: Vec<String> = vec![cx.cfg.branch.clone()];
-    for r in cx.cfg.version_refs.values() {
+    for r in cx
+        .cfg
+        .version_refs
+        .values()
+        .chain(cx.cfg.sections.iter().filter_map(|s| s.git_ref.as_ref()))
+    {
         if !refs.contains(r) {
             refs.push(r.clone());
         }
@@ -370,6 +381,16 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
             tag: format!("v:{label}"),
             git_ref: git_ref.clone(),
             commit: commit_of(&git_ref),
+        });
+    }
+    for sec in &cx.cfg.sections {
+        let git_ref = sec.git_ref.clone().unwrap_or_else(|| cx.cfg.branch.clone());
+        trees.push(TreeSpec {
+            label: sec.slug.clone(),
+            folder: sec.folder.clone(),
+            tag: format!("s:{}", sec.slug),
+            commit: commit_of(&git_ref),
+            git_ref,
         });
     }
     let mut files: Vec<SrcFile> = Vec::new();
@@ -629,6 +650,7 @@ struct PlannedEntry {
     source: Source,
     version: String,
     kind_version_root: bool,
+    kind_section_root: bool,
 }
 
 struct FullPlan {
@@ -639,6 +661,9 @@ struct FullPlan {
 }
 
 fn effective_version(cfg: &Config, f: &SrcFile, scan: &Scan) -> String {
+    if let Some(slug) = f.tree.tag.strip_prefix("s:") {
+        return format!("{SECTION_PREFIX}{slug}");
+    }
     scan.version.clone().unwrap_or_else(|| {
         if f.tree.tag == "main" {
             cfg.latest_version.clone()
@@ -684,25 +709,40 @@ fn make_plan(
         let Some(pages) = by_version.get(&version) else {
             continue;
         };
-        let is_latest = version == cfg.latest_version;
-        let root_key = format!("@version/{version}");
+        let section = version.strip_prefix(SECTION_PREFIX);
+        let is_latest = section.is_none() && version == cfg.latest_version;
+        let (shown, seg) = match section {
+            Some(slug) => (
+                cfg.sections
+                    .iter()
+                    .find(|d| d.slug == slug)
+                    .map_or_else(|| slug.to_owned(), |d| d.title.clone()),
+                slug.to_owned(),
+            ),
+            None => (version.clone(), plan::slugify(&version)),
+        };
+        let root_key = match section {
+            Some(slug) => format!("@section/{slug}"),
+            None => format!("@version/{version}"),
+        };
         if !is_latest {
             roots_made += 1;
             entries.push(PlannedEntry {
                 planned: Planned {
                     key: root_key.clone(),
                     parent_key: None,
-                    slug: plan::slugify(&version),
-                    title: version.clone(),
+                    slug: seg.clone(),
+                    title: shown.clone(),
                     position: 1000 + roots_made * 10,
                     hide: true,
                     section: None,
                     kind: Kind::Group,
-                    site_path: format!("/{BASE}/{}", plan::slugify(&version)),
+                    site_path: format!("/{BASE}/{seg}"),
                 },
                 source: Source::Generated,
                 version: version.clone(),
-                kind_version_root: true,
+                kind_version_root: section.is_none(),
+                kind_section_root: section.is_some(),
             });
         }
         let infos_for: Vec<PageInfo> = pages
@@ -742,7 +782,7 @@ fn make_plan(
             prefix: if is_latest {
                 Vec::new()
             } else {
-                vec![plan::slugify(&version)]
+                vec![seg.clone()]
             },
             parent_key: if is_latest {
                 None
@@ -752,7 +792,7 @@ fn make_plan(
             tree: if is_latest {
                 "main".to_owned()
             } else {
-                plan::slugify(&version)
+                seg.clone()
             },
         };
         let (planned, w) = plan::plan_tree(&infos_for, &vmetas, &root);
@@ -770,6 +810,7 @@ fn make_plan(
                 source,
                 version: version.clone(),
                 kind_version_root: false,
+                kind_section_root: false,
             });
         }
     }
@@ -865,7 +906,9 @@ fn doc_fields(
 }
 
 fn terms_for(version: &str) -> Vec<String> {
-    if version.is_empty() {
+    if let Some(slug) = version.strip_prefix(SECTION_PREFIX) {
+        vec![format!("{SECTION_TAXONOMY}:{slug}")]
+    } else if version.is_empty() {
         Vec::new()
     } else {
         vec![format!("{VERSION_TAXONOMY}:{}", plan::slugify(version))]
@@ -913,7 +956,7 @@ fn build_page_entry(
         &join_repo_path(&f.tree.folder, &f.path),
     );
     // An older version's page points search engines at its counterpart.
-    let canonical = (pe.version != cfg.latest_version)
+    let canonical = (pe.version != cfg.latest_version && !pe.version.starts_with(SECTION_PREFIX))
         .then(|| {
             let rel = pe.planned.site_path.splitn(4, '/').nth(3).unwrap_or("");
             let latest = format!("/{BASE}/{rel}");
@@ -990,7 +1033,20 @@ fn build_generated_entry(pe: &PlannedEntry, p: &FullPlan, hash: &str) -> Entry {
         blocks_json: serde_json::Value::Array(blocks).to_string(),
         position: pe.planned.position,
         terms: terms_for(&pe.version),
-        fields_json: doc_fields(pe.kind_version_root, pe.planned.hide, "", "", ""),
+        fields_json: {
+            let mut f: serde_json::Value = serde_json::from_str(&doc_fields(
+                pe.kind_version_root,
+                pe.planned.hide,
+                "",
+                "",
+                "",
+            ))
+            .unwrap_or_default();
+            if pe.kind_section_root {
+                f["section_root"] = true.into();
+            }
+            f.to_string()
+        },
         seo_json: "{}".to_owned(),
         source_hash: hash.to_owned(),
         edit_url: String::new(),
@@ -1244,6 +1300,7 @@ mod tests {
             versions: Vec::new(),
             version_refs: BTreeMap::new(),
             unreleased: Vec::new(),
+            sections: Vec::new(),
         }
     }
 
@@ -1573,6 +1630,32 @@ mod tests {
         assert!(run(&mut Wrap(&f), &c, None, b)
             .unwrap_err()
             .contains("folder nope"));
+    }
+
+    #[test]
+    fn a_section_has_its_own_root_term_and_url_prefix() {
+        let mut files = repo_one();
+        files.insert("api/index.md".into(), "# API\n".into());
+        files.insert("api/calls.md".into(), "# Calls\n".into());
+        let f = fake_with(files);
+        let mut c = cfg();
+        c.sections = vec![crate::settings::SectionDef {
+            slug: "api".into(),
+            title: "API reference".into(),
+            folder: vec!["api".into()],
+            git_ref: None,
+        }];
+        let b = budget(&f);
+        assert!(run(&mut Wrap(&f), &c, None, b).unwrap().finished);
+        let fk = f.borrow();
+        let root = &fk.entries["@section/api"].0;
+        assert!(root.fields_json.contains("\"section_root\":true"));
+        assert!(!root.fields_json.contains("\"version_root\":true"));
+        assert_eq!(root.title, "API reference");
+        let calls = &fk.entries["s:api:calls.md"].0;
+        assert_eq!(calls.terms, ["doc-section:api"]);
+        assert_eq!(calls.parent_key.as_deref(), Some("@section/api"));
+        assert!(!calls.seo_json.contains("canonical"));
     }
 
     #[test]

@@ -36,6 +36,8 @@ pub struct Settings {
     pub versions: String,
     /// Labels of older versions that are unreleased (comma or space separated).
     pub unreleased_versions: String,
+    /// Section lines, see [`parse_sections`].
+    pub sections: String,
     /// Breadcrumb root label.
     pub docs_title: String,
     /// Search box placeholder.
@@ -55,6 +57,7 @@ impl Default for Settings {
             latest_label: "Latest".to_owned(),
             versions: String::new(),
             unreleased_versions: String::new(),
+            sections: String::new(),
             docs_title: "Docs".to_owned(),
             search_placeholder: "Search the docs".to_owned(),
         }
@@ -92,6 +95,7 @@ impl Settings {
             latest_label: text("latest_label", &d.latest_label),
             versions: raw("versions"),
             unreleased_versions: raw("unreleased_versions").trim().to_owned(),
+            sections: raw("sections"),
             docs_title: text("docs_title", &d.docs_title),
             search_placeholder: text("search_placeholder", &d.search_placeholder),
         }
@@ -103,7 +107,7 @@ impl Settings {
         json!({
             "repo_url": self.repo_url, "branch": self.branch, "folder": self.folder, "token": self.token,
             "webhook_secret": self.webhook_secret, "poll_minutes": self.poll_minutes,
-            "latest_version": self.latest_version, "latest_label": self.latest_label, "versions": self.versions, "unreleased_versions": self.unreleased_versions,
+            "latest_version": self.latest_version, "latest_label": self.latest_label, "versions": self.versions, "unreleased_versions": self.unreleased_versions, "sections": self.sections,
             "docs_title": self.docs_title, "search_placeholder": self.search_placeholder,
         })
         .to_string()
@@ -142,6 +146,7 @@ impl Settings {
             return Err("Branch: must be a branch name without spaces".to_owned());
         }
         let (versions, version_refs) = parse_versions(&self.versions)?;
+        let sections = parse_sections(&self.sections)?;
         Ok(Config {
             repo,
             branch: self.branch.clone(),
@@ -151,6 +156,7 @@ impl Settings {
             versions,
             version_refs,
             unreleased: self.unreleased(),
+            sections,
         })
     }
 }
@@ -311,6 +317,7 @@ pub fn admin_form() -> Value {
             {"key": "latest_version", "label": "Latest version label", "type": "text", "help": "Leave empty for unversioned docs. Pages without a version belong to this one and are served at /docs."},
             {"key": "latest_label", "label": "Name for the latest version", "type": "text", "default": "Latest"},
             {"key": "versions", "label": "Older versions", "type": "textarea", "help": "One per line: `v1 = docs-v1` (label = folder in the same repository), or `next = docs @ main` to read a version from another branch or tag. They are served at /docs/<label>/ and carry a notice pointing to the latest."},
+            {"key": "sections", "label": "Sections", "type": "textarea", "help": "One per line: `sql = SQL reference | reference/sql` (slug = title | folder in the repository), optionally `| folder @ branch-or-tag`. Each is served at /docs/<slug> with its own sidebar. At most 8."},
             {"key": "unreleased_versions", "label": "Unreleased versions", "type": "text", "help": "Labels from the list above, separated by commas, that document unreleased code (for example `next`). The switcher marks them and their notice says so."},
             {"key": "docs_title", "label": "Breadcrumb root", "type": "text", "default": "Docs"},
             {"key": "search_placeholder", "label": "Search placeholder", "type": "text", "default": "Search the docs"}
