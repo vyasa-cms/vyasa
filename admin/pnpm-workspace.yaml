@@ -10,4 +10,6 @@ overrides:
   # Zod memory exhaustion on oversized input (build-time, via @tanstack/router-generator)
   zod: ">=4.6.6"
   brace-expansion@2: "^2.1.7"
+  # minimatch denial of service (>=7.0.0 <11.0.1), via eslint
+  minimatch@10: ">=11.0.1"
   brace-expansion@5: "^5.0.12"
