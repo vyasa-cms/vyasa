@@ -33,7 +33,7 @@ fn validate(s: &MapSettings, kind: &str) -> Vec<String> {
         errors.push("provide between 1 and 12 items".into());
     }
     let fields: &[&str] = if kind == "code-tabs" {
-        &["title", "language", "code"]
+        &["title", "language", "filename", "code"]
     } else if kind == "status-cards" {
         &["title", "body", "status"]
     } else {
@@ -79,6 +79,15 @@ fn check_status(s: &MapSettings) -> Vec<String> {
     validate(s, "status-cards")
 }
 
+fn filename_html(item: &Value) -> String {
+    let name = field(item, "filename").trim();
+    if name.is_empty() {
+        String::new()
+    } else {
+        format!("<span class=\"vy-code-filename\">{}</span>", esc(name))
+    }
+}
+
 /// Render static content. All examples remain readable when JavaScript is disabled.
 #[must_use]
 pub fn render(kind: &str, s: &MapSettings) -> String {
@@ -105,7 +114,7 @@ pub fn render(kind: &str, s: &MapSettings) -> String {
     {
         let title = esc(field(item, "title"));
         if kind == "code-tabs" {
-            let _ = write!(out, "<section class=\"vy-code-example\"><h3>{title}</h3><span class=\"vy-code-language\">{}</span><pre tabindex=\"0\"><code>{}</code></pre></section>", esc(field(item, "language")), esc(field(item, "code")));
+            let _ = write!(out, "<section class=\"vy-code-example\"><h3>{title}</h3>{}<span class=\"vy-code-language\">{}</span><pre tabindex=\"0\"><code>{}</code></pre></section>", filename_html(item), esc(field(item, "language")), esc(field(item, "code")));
         } else {
             let _ = write!(
                 out,
@@ -170,7 +179,7 @@ pub(super) fn kinds() -> Vec<Builtin> {
             kind: "code-tabs",
             description: "Keyboard-accessible code examples with language tabs and copy buttons",
             schema: schema(
-                &json!({"title":{"type":"string","maxLength":4000},"language":{"type":"string","maxLength":4000},"code":{"type":"string","format":"multiline","maxLength":16000}}),
+                &json!({"title":{"type":"string","maxLength":4000},"language":{"type":"string","maxLength":4000},"filename":{"type":"string","maxLength":4000},"code":{"type":"string","format":"multiline","maxLength":16000}}),
                 &["title", "code"],
             ),
             check: check_code,
@@ -222,6 +231,16 @@ mod tests {
         assert!(!html.contains("<script>"));
         assert!(html.contains("&lt;/code&gt;"));
         assert!(html.contains("tabindex=\"0\""));
+    }
+    #[test]
+    fn a_tab_shows_its_escaped_filename_only_when_given() {
+        let s = serde_json::from_value(json!({"items":[
+            {"title":"a","code":"x","filename":"<main>.rs"},{"title":"b","code":"y"}]}))
+        .expect("settings");
+        assert!(check_code(&s).is_empty());
+        let html = render("code-tabs", &s);
+        assert!(html.contains("<span class=\"vy-code-filename\">&lt;main&gt;.rs</span>"));
+        assert_eq!(html.matches("vy-code-filename").count(), 1);
     }
     #[test]
     fn malformed_or_unbounded_items_are_rejected() {

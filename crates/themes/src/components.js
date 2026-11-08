@@ -17,6 +17,8 @@
       tab.setAttribute('role', 'tab');
       tab.setAttribute('aria-controls', `${prefix}-panel-${index}`);
       tab.textContent = panel.querySelector('h3')?.textContent || `Example ${index + 1}`;
+      const file = panel.querySelector('.vy-code-filename')?.textContent;
+      if (file) tab.title = file;
       panel.id = `${prefix}-panel-${index}`;
       panel.setAttribute('role', 'tabpanel');
       panel.setAttribute('aria-labelledby', tab.id);
