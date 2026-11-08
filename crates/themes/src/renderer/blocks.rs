@@ -221,16 +221,30 @@ fn render_form(attrs: &serde_json::Value) -> String {
                     .collect();
                 format!("<select id=\"{id}\" name=\"{k}\"{req}>{opts}</select>")
             }
-            "checkbox" => {
+            "checkbox" | "consent" => {
                 format!("<input id=\"{id}\" type=\"checkbox\" name=\"{k}\" value=\"yes\"{req}>")
             }
             "email" => format!("<input id=\"{id}\" type=\"email\" name=\"{k}\"{req}>"),
             "number" => format!("<input id=\"{id}\" type=\"number\" name=\"{k}\"{req}>"),
             _ => format!("<input id=\"{id}\" type=\"text\" name=\"{k}\"{req}>"),
         };
-        if kind == "checkbox" {
+        if kind == "checkbox" || kind == "consent" {
+            // A consent field may link the privacy page (its first option).
+            let link = f
+                .get("options")
+                .and_then(|v| v.as_array())
+                .and_then(|o| o.first())
+                .and_then(|o| o.as_str())
+                .filter(|l| kind == "consent" && (l.starts_with('/') || l.starts_with("https://")))
+                .map(|l| {
+                    format!(
+                        " (<a href=\"{}\" rel=\"noopener\">privacy</a>)",
+                        super::esc(l)
+                    )
+                })
+                .unwrap_or_default();
             out.push_str(&format!(
-                "<label class=\"vy-form-check\">{control} {lb}</label>"
+                "<label class=\"vy-form-check\">{control} {lb}{link}</label>"
             ));
         } else {
             out.push_str(&format!(

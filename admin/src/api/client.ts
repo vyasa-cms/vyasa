@@ -196,7 +196,7 @@ export interface AuditEntry {
 export interface FormField {
   key: string;
   label: string;
-  kind: "text" | "email" | "textarea" | "number" | "select" | "checkbox";
+  kind: "text" | "email" | "textarea" | "number" | "select" | "checkbox" | "consent";
   required: boolean;
   options: string[];
 }

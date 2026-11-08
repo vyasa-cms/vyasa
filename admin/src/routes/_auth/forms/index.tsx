@@ -19,6 +19,7 @@ const KINDS: { value: FormField["kind"]; label: string }[] = [
   { value: "number", label: "Number" },
   { value: "select", label: "Choice" },
   { value: "checkbox", label: "Checkbox" },
+  { value: "consent", label: "Consent (required, stored with its time)" },
 ];
 
 const NEW_FORM: FormField[] = [
@@ -117,6 +118,7 @@ function FormEditor({ form, onClose, onSaved }: { form: FormDef | null; onClose:
                   <button type="button" aria-label="Move down" className="px-1 text-muted-foreground" onClick={() => move(i, 1)}>↓</button>
                   <button type="button" aria-label="Remove field" className="px-1 text-destructive" onClick={() => setFields((fs) => fs.filter((_, j) => j !== i))}>×</button>
                 </span>
+                {f.kind === "consent" ? <div className="sm:col-span-4"><Input aria-label="Privacy page link" value={f.options[0] ?? ""} onChange={(e) => setField(i, { options: e.target.value.trim() ? [e.target.value.trim()] : [], required: true })} placeholder="Privacy page link (/privacy or https://…), optional" /></div> : null}
                 {f.kind === "select" ? <div className="sm:col-span-4"><Input aria-label="Choices" value={choices[i] ?? f.options.join(", ")} onChange={(e) => setChoices(c => ({ ...c, [i]: e.target.value }))} onBlur={() => { if (choices[i] !== undefined) setField(i, { options: choices[i].split(",").map(s => s.trim()).filter(Boolean) }); setChoices({}); }} placeholder="Choices, separated by commas" /></div> : null}
               </li>
             ))}

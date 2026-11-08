@@ -16,7 +16,8 @@ pub struct Field {
     /// The input name; letters, digits, dashes, underscores.
     pub key: String,
     pub label: String,
-    /// `text`, `email`, `textarea`, `number`, `select`, `checkbox`.
+    /// `text`, `email`, `textarea`, `number`, `select`, `checkbox`, `consent` (a required checkbox
+    /// whose acceptance is stored with its time; `options[0]` may link the privacy page).
     #[serde(default = "text")]
     pub kind: String,
     #[serde(default)]
@@ -117,12 +118,29 @@ fn check(input: &FormInput) -> Result<(), AppError> {
         }
         if !matches!(
             f.kind.as_str(),
-            "text" | "email" | "textarea" | "number" | "select" | "checkbox"
+            "text" | "email" | "textarea" | "number" | "select" | "checkbox" | "consent"
         ) {
             return Err(AppError::validation(format!(
                 "unknown field kind {:?}",
                 f.kind
             )));
+        }
+        if f.kind == "consent" {
+            if !f.required {
+                return Err(AppError::validation(format!(
+                    "consent field {:?} must be required",
+                    f.key
+                )));
+            }
+            if f.options
+                .first()
+                .is_some_and(|link| !(link.starts_with('/') || link.starts_with("https://")))
+            {
+                return Err(AppError::validation(format!(
+                    "the privacy link of {:?} must start with / or https://",
+                    f.key
+                )));
+            }
         }
         if f.kind == "select" && f.options.is_empty() {
             return Err(AppError::validation(format!(
@@ -351,7 +369,14 @@ pub async fn accept(
                 f.label
             )));
         }
-        lines.push(serde_json::json!({ "label": f.label, "value": if f.kind == "checkbox" { if value.is_empty() { "no" } else { "yes" }.to_owned() } else { value.clone() } }));
+        if f.kind == "consent" {
+            // Given or the entry is refused (required); stored with when it was given.
+            data.insert(
+                format!("{}_consent_at", f.key),
+                serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
+            );
+        }
+        lines.push(serde_json::json!({ "label": f.label, "value": if f.kind == "checkbox" || f.kind == "consent" { if value.is_empty() { "no" } else { "yes" }.to_owned() } else { value.clone() } }));
         data.insert(f.key.clone(), serde_json::Value::String(value));
     }
     // Name, email and message columns get the obvious fields, so the
@@ -472,9 +497,20 @@ pub async fn notify_owner(
     if form.notify_email.is_empty() {
         return;
     }
-    let ctx = serde_json::json!({
+    let mut ctx = serde_json::json!({
         "site": site_title(state).await, "form": form.name, "fields": lines, "path": path,
     });
+    if !include_answers {
+        // The notice of a confirmed entry: how many entries the form has now, and where to read
+        // them. Nothing the submitter wrote.
+        ctx["count"] = serde_json::json!(state
+            .audience
+            .counted_submissions(&form.slug)
+            .await
+            .unwrap_or(0));
+        let base = state.options_service.site_url().await.unwrap_or_default();
+        ctx["admin_url"] = serde_json::json!(format!("{}/admin/forms", base.trim_end_matches('/')));
+    }
     let template = if include_answers {
         "form_submission"
     } else {
