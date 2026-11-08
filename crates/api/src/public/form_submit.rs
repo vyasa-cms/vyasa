@@ -33,6 +33,7 @@ pub(crate) fn email_ok(email: &str) -> bool {
         && !domain.ends_with('.')
         && email.len() <= 254
         && !email.contains(char::is_whitespace)
+        && !email.contains([',', ';', '<', '>', '"'])
 }
 
 /// The tiny confirmation page. Standalone on purpose: a themed render
@@ -370,5 +371,7 @@ mod tests {
         assert!(!email_ok("a@nodot"));
         assert!(!email_ok("a b@x.co"));
         assert!(!email_ok("@x.co"));
+        assert!(!email_ok("a@x.co,b@y.co"));
+        assert!(!email_ok("a@x.co;b@y.co"));
     }
 }
