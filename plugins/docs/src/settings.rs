@@ -222,6 +222,79 @@ pub fn parse_versions(text: &str) -> Result<ParsedVersions, String> {
     Ok((out, refs))
 }
 
+/// Most doc sections one site may declare.
+pub const MAX_SECTIONS: usize = 8;
+
+/// One doc section: a URL prefix, a title, a folder and optionally a ref.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SectionDef {
+    /// URL segment below the docs base (`sql` serves `/docs/sql/...`).
+    pub slug: String,
+    /// Title shown as the breadcrumb root.
+    pub title: String,
+    /// Folder holding the section's Markdown, as path segments.
+    pub folder: Vec<String>,
+    /// Branch or tag it is read from, when not the plugin's branch.
+    pub git_ref: Option<String>,
+}
+
+/// Section lines: `slug = Title | folder` or `slug = Title | folder @ ref`.
+///
+/// # Errors
+/// A message naming the bad line.
+pub fn parse_sections(text: &str) -> Result<Vec<SectionDef>, String> {
+    let mut out: Vec<SectionDef> = Vec::new();
+    for line in text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+    {
+        let bad = || format!("Sections: `{line}` is not `slug = Title | folder`");
+        let (slug, rest) = line.split_once('=').ok_or_else(bad)?;
+        let (title, folder) = rest.split_once('|').ok_or_else(bad)?;
+        let slug = slug.trim();
+        if slug.is_empty()
+            || slug.len() > 40
+            || !slug
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
+            return Err(format!(
+                "Sections: `{slug}` is not a usable slug (lowercase letters, digits, -)"
+            ));
+        }
+        let title = title.trim();
+        if title.is_empty() || title.len() > 80 || title.chars().any(char::is_control) {
+            return Err(format!("Sections: `{slug}` needs a title"));
+        }
+        let (folder, git_ref) = match folder.rsplit_once('@') {
+            Some((f, r)) => (f, Some(r.trim())),
+            None => (folder, None),
+        };
+        if let Some(r) = git_ref {
+            if !valid_ref(r) {
+                return Err(format!(
+                    "Sections: `{r}` is not a branch or tag name (in `{line}`)"
+                ));
+            }
+        }
+        let folder = github::folder_segments(folder).map_err(|e| format!("Sections: {e}"))?;
+        if out.iter().any(|d| d.slug == slug) {
+            return Err(format!("Sections: {slug} appears twice"));
+        }
+        out.push(SectionDef {
+            slug: slug.to_owned(),
+            title: title.to_owned(),
+            folder,
+            git_ref: git_ref.map(str::to_owned),
+        });
+    }
+    if out.len() > MAX_SECTIONS {
+        return Err(format!("Sections: at most {MAX_SECTIONS}"));
+    }
+    Ok(out)
+}
+
 /// The `register-admin` form.
 #[must_use]
 pub fn admin_form() -> Value {
@@ -255,6 +328,36 @@ mod tests {
         assert_eq!(s.unreleased(), ["next", "v3", "edge"]);
         assert!(Settings::default().unreleased().is_empty());
         assert_eq!(Settings::from_json(&s.to_json()), s);
+    }
+
+    #[test]
+    fn section_lines_parse_and_bad_ones_name_the_line() {
+        let v = parse_sections(
+            "# c\nsql = SQL reference | reference/sql\npy = Python API | ref/py @ main\n",
+        )
+        .unwrap();
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].slug, "sql");
+        assert_eq!(v[0].folder, ["reference", "sql"]);
+        assert_eq!(v[1].git_ref.as_deref(), Some("main"));
+        for bad in [
+            "sql SQL | x",
+            "sql = SQL x",
+            "SQL = T | x",
+            "a = | x",
+            "a = T | ../x",
+            "a = T | x @ b b",
+        ] {
+            assert!(
+                parse_sections(bad).unwrap_err().starts_with("Sections:"),
+                "{bad}"
+            );
+        }
+        assert!(parse_sections("a = A | x\na = B | y")
+            .unwrap_err()
+            .contains("twice"));
+        let many: String = (0..9).map(|i| format!("s{i} = T | f{i}\n")).collect();
+        assert!(parse_sections(&many).is_err());
     }
 
     #[test]
