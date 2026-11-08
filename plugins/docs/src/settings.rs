@@ -34,6 +34,8 @@ pub struct Settings {
     pub latest_label: String,
     /// Older versions, one `label = folder` per line.
     pub versions: String,
+    /// Labels of older versions that are unreleased (comma or space separated).
+    pub unreleased_versions: String,
     /// Breadcrumb root label.
     pub docs_title: String,
     /// Search box placeholder.
@@ -52,6 +54,7 @@ impl Default for Settings {
             latest_version: String::new(),
             latest_label: "Latest".to_owned(),
             versions: String::new(),
+            unreleased_versions: String::new(),
             docs_title: "Docs".to_owned(),
             search_placeholder: "Search the docs".to_owned(),
         }
@@ -88,6 +91,7 @@ impl Settings {
             latest_version: raw("latest_version").trim().to_owned(),
             latest_label: text("latest_label", &d.latest_label),
             versions: raw("versions"),
+            unreleased_versions: raw("unreleased_versions").trim().to_owned(),
             docs_title: text("docs_title", &d.docs_title),
             search_placeholder: text("search_placeholder", &d.search_placeholder),
         }
@@ -99,10 +103,20 @@ impl Settings {
         json!({
             "repo_url": self.repo_url, "branch": self.branch, "folder": self.folder, "token": self.token,
             "webhook_secret": self.webhook_secret, "poll_minutes": self.poll_minutes,
-            "latest_version": self.latest_version, "latest_label": self.latest_label, "versions": self.versions,
+            "latest_version": self.latest_version, "latest_label": self.latest_label, "versions": self.versions, "unreleased_versions": self.unreleased_versions,
             "docs_title": self.docs_title, "search_placeholder": self.search_placeholder,
         })
         .to_string()
+    }
+
+    /// The labels marked unreleased.
+    #[must_use]
+    pub fn unreleased(&self) -> Vec<String> {
+        self.unreleased_versions
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|l| !l.is_empty())
+            .map(str::to_owned)
+            .collect()
     }
 
     /// Whether a repository has been set at all.
@@ -223,6 +237,7 @@ pub fn admin_form() -> Value {
             {"key": "latest_version", "label": "Latest version label", "type": "text", "help": "Leave empty for unversioned docs. Pages without a version belong to this one and are served at /docs."},
             {"key": "latest_label", "label": "Name for the latest version", "type": "text", "default": "Latest"},
             {"key": "versions", "label": "Older versions", "type": "textarea", "help": "One per line: `v1 = docs-v1` (label = folder in the same repository), or `next = docs @ main` to read a version from another branch or tag. They are served at /docs/<label>/ and carry a notice pointing to the latest."},
+            {"key": "unreleased_versions", "label": "Unreleased versions", "type": "text", "help": "Labels from the list above, separated by commas, that document unreleased code (for example `next`). The switcher marks them and their notice says so."},
             {"key": "docs_title", "label": "Breadcrumb root", "type": "text", "default": "Docs"},
             {"key": "search_placeholder", "label": "Search placeholder", "type": "text", "default": "Search the docs"}
         ]
@@ -232,6 +247,14 @@ pub fn admin_form() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unreleased_labels_split_on_commas_and_spaces() {
+        let s = Settings::from_json(r#"{"unreleased_versions":"next, v3  edge"}"#);
+        assert_eq!(s.unreleased(), ["next", "v3", "edge"]);
+        assert!(Settings::default().unreleased().is_empty());
+        assert_eq!(Settings::from_json(&s.to_json()), s);
+    }
 
     #[test]
     fn defaults_apply_to_an_empty_or_broken_config() {
