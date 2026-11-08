@@ -7,6 +7,10 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Added
+
+- `color_scheme` site option (`system`, `light`, `dark`; Settings > Advanced): the scheme first-time visitors see. `light`/`dark` set `data-theme` on `<html>`; a visitor's own toggle still wins, and `system` (default) follows the device.
+
 ## [0.3.5] - 2026-10-24
 
 ### Changed
