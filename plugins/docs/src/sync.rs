@@ -50,6 +50,8 @@ pub struct Config {
     pub versions: Vec<(String, Vec<String>)>,
     /// Versions read from another branch or tag than `branch`: label to ref.
     pub version_refs: BTreeMap<String, String>,
+    /// Versions that document unreleased code: their pages stay out of search engines.
+    pub unreleased: Vec<String>,
 }
 
 /// An HTTP answer, reduced to what the importer reads.
@@ -927,7 +929,7 @@ fn build_page_entry(
     if let Some(c) = canonical {
         seo.insert("canonical-path".to_owned(), c.into());
     }
-    if pe.planned.hide {
+    if pe.planned.hide || cfg.unreleased.contains(&pe.version) {
         seo.insert("noindex".to_owned(), true.into());
     }
     let seo = serde_json::Value::Object(seo).to_string();
@@ -1241,6 +1243,7 @@ mod tests {
             latest_version: String::new(),
             versions: Vec::new(),
             version_refs: BTreeMap::new(),
+            unreleased: Vec::new(),
         }
     }
 
@@ -1586,11 +1589,19 @@ mod tests {
         c.latest_version = "v2".into();
         c.versions = vec![("next".into(), vec!["docs".into()])];
         c.version_refs.insert("next".into(), "dev".into());
+        c.unreleased = vec!["next".into()];
         let b = budget(&f);
         let report = run(&mut Wrap(&f), &c, None, b).unwrap();
         assert!(report.finished, "{report:?}");
         {
             let fk = f.borrow();
+            assert!(
+                fk.entries["v:next:new.md"]
+                    .0
+                    .seo_json
+                    .contains("\"noindex\":true"),
+                "an unreleased version stays out of search engines"
+            );
             assert!(
                 fk.entries.contains_key("v:next:new.md"),
                 "{:?}",

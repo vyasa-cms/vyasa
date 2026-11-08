@@ -150,6 +150,7 @@ impl Settings {
             latest_version: self.latest_version.clone(),
             versions,
             version_refs,
+            unreleased: self.unreleased(),
         })
     }
 }
