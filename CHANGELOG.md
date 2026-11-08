@@ -11,7 +11,7 @@ follows [semantic versioning](https://semver.org) as described in
 
 - Forms can hold each entry until its sender confirms by email (double opt-in). A held entry stays out of the
   inbox, the CSV and the unread counts, the owner is mailed only after the click, and the confirmation mail
-  carries a link that deletes the entry. The links open a page with a button, so a mail scanner that fetches them changes nothing. The owner mail after a confirmation names the form only (`/form/confirm`, `/form/delete`).
+  carries a link that deletes the entry. The links open a page with a button, so a mail scanner that fetches them changes nothing. The owner mail after a confirmation names the form only (`/form/confirm`, `/form/delete`). The mail names the form, the count of confirmed entries and an admin link. A `consent` field kind (required, stored with its time, optional privacy link), `?held=true` on the submissions listing, and a forms docs page. A form's email check now also refuses lists and angle brackets, newsletter sign-up included.
 
 ## [0.3.5] - 2026-10-24
 
