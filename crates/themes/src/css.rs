@@ -47,6 +47,7 @@ pub fn tokens_to_css(tokens: &TokenSet) -> String {
 
     out.push_str(":root {\n  color-scheme: light;\n");
     push_colors(&mut out, tokens, false);
+    push_code_colors(&mut out, tokens, false);
     for line in [
         px_line("--vy-radius", tokens.radius_px),
         format!("  --vy-shadow: {};\n", tokens.shadow.css_value()),
@@ -80,7 +81,12 @@ pub fn tokens_to_css(tokens: &TokenSet) -> String {
 
     let has_dark_overrides = ROLES
         .iter()
-        .any(|r| slot_for(tokens, r).is_some_and(|s| s.dark.is_some()));
+        .any(|r| slot_for(tokens, r).is_some_and(|s| s.dark.is_some()))
+        || tokens
+            .code
+            .entries()
+            .iter()
+            .any(|(_, slot, _)| slot.is_some_and(|s| s.dark.is_some()));
     if has_dark_overrides {
         // The media block is guarded so an explicit light choice beats a
         // dark OS. Without the guard, "light" in the studio's preview (or
@@ -90,9 +96,11 @@ pub fn tokens_to_css(tokens: &TokenSet) -> String {
             "@media (prefers-color-scheme: dark) {\n:root:not([data-theme=\"light\"]) {\n",
         );
         push_colors(&mut out, tokens, true);
+        push_code_colors(&mut out, tokens, true);
         out.push_str("  color-scheme: dark;\n}\n}\n");
         out.push_str("[data-theme=\"dark\"] {\n");
         push_colors(&mut out, tokens, true);
+        push_code_colors(&mut out, tokens, true);
         out.push_str("  color-scheme: dark;\n}\n");
     }
 
@@ -105,6 +113,42 @@ pub fn tokens_to_css(tokens: &TokenSet) -> String {
                 css_string(src)
             );
         }
+    }
+    out
+}
+
+/// Custom properties (`--vy-code-*`) for the tokens a theme sets.
+fn push_code_colors(out: &mut String, tokens: &TokenSet, dark: bool) {
+    for (name, slot, _) in tokens.code.entries() {
+        let Some(slot) = slot else { continue };
+        let value = if dark {
+            match slot.dark.as_ref() {
+                Some(v) => v,
+                None => continue,
+            }
+        } else {
+            &slot.light
+        };
+        let _ = writeln!(out, "  --vy-code-{name}: {};", value.normalized());
+    }
+}
+
+/// Rules that color highlighted code from the `--vy-code-*` properties,
+/// for the tokens a theme sets. Emitted after the bundled palette and
+/// specific enough to win in light and dark; empty when none is set.
+#[must_use]
+pub fn code_palette_css(tokens: &TokenSet) -> String {
+    let mut out = String::new();
+    for (name, slot, selectors) in tokens.code.entries() {
+        if slot.is_none() {
+            continue;
+        }
+        let rule = selectors
+            .split(", ")
+            .map(|s| format!(":root:root:root .vy-code {s}"))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let _ = writeln!(out, "{rule} {{ color: var(--vy-code-{name}); }}");
     }
     out
 }
@@ -311,5 +355,29 @@ mod font_src_tests {
     fn an_ordinary_source_is_untouched() {
         let src = "https://fonts.example/inter-var.woff2?v=3&w=400";
         assert_eq!(css_string(src), src);
+    }
+}
+
+#[cfg(test)]
+mod code_palette_tests {
+    use super::{code_palette_css, tokens_to_css};
+    use crate::tokens::{ColorSlot, HexColor, TokenSet};
+
+    #[test]
+    fn set_code_tokens_become_properties_and_rules_and_unset_ones_do_nothing() {
+        let mut t = TokenSet::default();
+        assert!(code_palette_css(&t).is_empty());
+        assert!(!tokens_to_css(&t).contains("--vy-code-"));
+        t.code.keyword = Some(ColorSlot {
+            light: HexColor("#112233".into()),
+            dark: Some(HexColor("#aabbcc".into())),
+        });
+        let css = tokens_to_css(&t);
+        assert!(css.contains("--vy-code-keyword: #112233;"), "{css}");
+        assert!(css.contains("--vy-code-keyword: #aabbcc;"), "{css}");
+        assert!(!css.contains("--vy-code-string"));
+        let rules = code_palette_css(&t);
+        assert!(rules.contains(".vy-code .vy-hl-keyword { color: var(--vy-code-keyword); }"));
+        assert!(!rules.contains("string"));
     }
 }

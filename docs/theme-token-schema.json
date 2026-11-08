@@ -1,5 +1,100 @@
 {
   "$defs": {
+    "CodeColors": {
+      "additionalProperties": false,
+      "description": "Token-level palette for highlighted code. Every token is optional: one\nleft out keeps the bundled highlighter color, so a theme sets only what\nits brand needs.",
+      "properties": {
+        "comment": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorSlot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Comments."
+        },
+        "constant": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorSlot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Other constants (`true`, `NULL`)."
+        },
+        "function": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorSlot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Function names."
+        },
+        "keyword": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorSlot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Keywords (`SELECT`, `fn`)."
+        },
+        "number": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorSlot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Numeric literals."
+        },
+        "operator": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorSlot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Operators."
+        },
+        "string": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorSlot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "String literals."
+        },
+        "type_name": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorSlot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Type and class names."
+        }
+      },
+      "type": "object"
+    },
     "ColorPalette": {
       "additionalProperties": false,
       "description": "The seven color roles Vyasa themes understand.\n\nDefaults form an accessible neutral palette with blue accent; every role\nships a dark variant so `[data-theme=dark]` works out of the box.",
@@ -355,6 +450,11 @@
   "additionalProperties": false,
   "description": "Vyasa design-token schema v1.",
   "properties": {
+    "code": {
+      "$ref": "#/$defs/CodeColors",
+      "default": {},
+      "description": "Syntax-highlighting colors; unset tokens keep the bundled palette."
+    },
     "colors": {
       "$ref": "#/$defs/ColorPalette",
       "default": {

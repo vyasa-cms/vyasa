@@ -68,6 +68,8 @@ pub struct TokenSet {
     pub layout: LayoutMetrics,
     /// Text direction for the whole site.
     pub direction: Direction,
+    /// Syntax-highlighting colors; unset tokens keep the bundled palette.
+    pub code: CodeColors,
 }
 
 impl Default for TokenSet {
@@ -81,6 +83,7 @@ impl Default for TokenSet {
             shadow: ShadowLevel::Small,
             layout: LayoutMetrics::default(),
             direction: Direction::Ltr,
+            code: CodeColors::default(),
         }
     }
 }
@@ -101,6 +104,62 @@ impl ColorSlot {
     #[must_use]
     pub const fn light_only(light: HexColor) -> Self {
         Self { light, dark: None }
+    }
+}
+
+/// Token-level palette for highlighted code. Every token is optional: one
+/// left out keeps the bundled highlighter color, so a theme sets only what
+/// its brand needs.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub struct CodeColors {
+    /// Keywords (`SELECT`, `fn`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keyword: Option<ColorSlot>,
+    /// String literals.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub string: Option<ColorSlot>,
+    /// Comments.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comment: Option<ColorSlot>,
+    /// Numeric literals.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number: Option<ColorSlot>,
+    /// Function names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function: Option<ColorSlot>,
+    /// Type and class names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub type_name: Option<ColorSlot>,
+    /// Other constants (`true`, `NULL`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub constant: Option<ColorSlot>,
+    /// Operators.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operator: Option<ColorSlot>,
+}
+
+impl CodeColors {
+    /// Token name, its slot, and the highlighter selectors it colors.
+    pub(crate) fn entries(&self) -> [(&'static str, Option<&ColorSlot>, &'static str); 8] {
+        [
+            ("keyword", self.keyword.as_ref(), ".vy-hl-keyword"),
+            ("string", self.string.as_ref(), ".vy-hl-string"),
+            ("comment", self.comment.as_ref(), ".vy-hl-comment"),
+            ("number", self.number.as_ref(), ".vy-hl-constant.vy-hl-numeric"),
+            (
+                "function",
+                self.function.as_ref(),
+                ".vy-hl-entity.vy-hl-name.vy-hl-function, .vy-hl-support.vy-hl-function",
+            ),
+            (
+                "type",
+                self.type_name.as_ref(),
+                ".vy-hl-storage.vy-hl-type, .vy-hl-entity.vy-hl-name.vy-hl-class, .vy-hl-support.vy-hl-type",
+            ),
+            ("constant", self.constant.as_ref(), ".vy-hl-constant"),
+            ("operator", self.operator.as_ref(), ".vy-hl-keyword.vy-hl-operator"),
+        ]
     }
 }
 
