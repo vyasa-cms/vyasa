@@ -10,6 +10,7 @@ plugins that run in a sandbox, and an official marketplace for both.
 - [Deployment](DEPLOYMENT.md): Docker, bare metal and container platforms.
 - [Operations](OPERATIONS.md): configuration, backups, upgrades.
 - [Themes](THEMES.md) and [blocks](BLOCKS.md): how a site is designed and written.
+- [Forms](FORMS.md): fields, consent and confirming entries by email.
 - [Plugin API](plugin-api.md): what a plugin can do, and the limits it runs under.
 - [Documentation sites](DOCS-SITES.md): serving a folder of Markdown as a docs site, the way this one is served.
 

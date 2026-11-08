@@ -266,6 +266,22 @@ impl AudienceRepo {
         Ok(id)
     }
 
+    /// How many entries of the form `form` count: every entry of a form
+    /// that does not hold them, and the confirmed ones of a form that does.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn counted_submissions(&self, form: &str) -> Result<i64, AppError> {
+        sqlx::query_scalar(
+            "SELECT count(*) FROM form_submissions
+             WHERE form = $1 AND (token IS NULL OR confirmed_at IS NOT NULL)",
+        )
+        .bind(form)
+        .fetch_one(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("counted submissions: {e}")))
+    }
+
     /// Confirms a pending submission. Returns the submission when this call
     /// confirmed it, `None` for an unknown token or one already confirmed.
     ///
@@ -277,7 +293,7 @@ impl AudienceRepo {
         max_age_days: i32,
     ) -> Result<Option<FormSubmissionRow>, AppError> {
         sqlx::query_as(
-            "UPDATE form_submissions SET confirmed_at = now(), created_at = now()
+            "UPDATE form_submissions SET confirmed_at = now()
              WHERE token = $1 AND confirmed_at IS NULL
                AND created_at > now() - make_interval(days => $2)
              RETURNING id, form, name, email, message, path, created_at, data, read_at",
@@ -340,7 +356,8 @@ impl AudienceRepo {
         .rows_affected())
     }
 
-    /// Submissions for one form, newest first.
+    /// Submissions for one form, newest first: the ones that count, or with
+    /// `held` the entries still waiting for their sender's confirmation.
     ///
     /// # Errors
     /// [`AppError::Db`] on failure.
@@ -348,15 +365,17 @@ impl AudienceRepo {
         &self,
         form: &str,
         limit: i64,
+        held: bool,
     ) -> Result<Vec<FormSubmissionRow>, AppError> {
         sqlx::query_as(
             "SELECT id, form, name, email, message, path, created_at, data, read_at
              FROM form_submissions WHERE form = $1
-               AND (token IS NULL OR confirmed_at IS NOT NULL)
+               AND ((token IS NULL OR confirmed_at IS NOT NULL) <> $3)
              ORDER BY created_at DESC LIMIT $2",
         )
         .bind(form)
         .bind(limit)
+        .bind(held)
         .fetch_all(&self.pool)
         .await
         .map_err(|e| AppError::db(format!("submissions: {e}")))

@@ -113,6 +113,14 @@ async fn a_confirming_form_holds_entries_until_the_link_is_clicked() {
         .unwrap()
     };
     assert_eq!(inbox(base, &session).as_array().unwrap().len(), 0);
+    // ...but the owner can ask for the held entries (this one and the old one).
+    let held: Value = serde_json::from_str(&body(http(
+        ureq::get(format!("{base}/api/v1/forms/{fid}/submissions?held=true").as_str())
+            .set("cookie", &session)
+            .call(),
+    )))
+    .unwrap();
+    assert_eq!(held.as_array().unwrap().len(), 2, "{held}");
     assert_eq!(
         count(
             &db,
@@ -214,7 +222,10 @@ async fn a_confirming_form_holds_entries_until_the_link_is_clicked() {
     .fetch_one(db.pool())
     .await
     .unwrap();
-    assert!(!notice["body"].as_str().unwrap().contains("ada@example.com"));
+    let text = notice["body"].as_str().unwrap();
+    assert!(!text.contains("ada@example.com"));
+    assert!(text.contains("now has 1 confirmed entry"), "{text}");
+    assert!(text.contains("/admin/forms"), "{text}");
 
     // A repeat submission replaces its held entry; an invalid address and an
     // empty one are refused and leave no row.
@@ -311,5 +322,70 @@ async fn a_confirming_form_holds_entries_until_the_link_is_clicked() {
     assert!(
         list.as_array().unwrap().iter().all(|f| f["unread"] == 0),
         "held entries are not counted unread: {list}"
+    );
+}
+
+#[tokio::test]
+async fn a_consent_field_must_be_given_and_is_stored_with_its_time() {
+    let db = TestDb::new().await;
+    let server = TestServer::builder(common::BIN, &db)
+        .env("VYASA_SETUP_TOKEN", TOKEN)
+        .start();
+    let base = server.base();
+    let claimed = http(
+        ureq::post(format!("{base}/api/v1/setup/claim").as_str())
+            .send_json(json!({"token": TOKEN})),
+    );
+    let setup_cookie = cookie_of(&claimed, "vy_setup").unwrap();
+    let created = http(
+        ureq::post(format!("{base}/api/v1/setup/account").as_str())
+            .set("cookie", &setup_cookie)
+            .send_json(json!({"email": "x@example.com", "password": "twelve-char-password"})),
+    );
+    let session = cookie_of(&created, "vy_session").unwrap();
+
+    // A consent field that is not required, or links somewhere odd, is refused.
+    for field in [
+        json!({"key": "ok", "label": "I agree", "kind": "consent"}),
+        json!({"key": "ok", "label": "I agree", "kind": "consent", "required": true,
+               "options": ["javascript:alert(1)"]}),
+    ] {
+        let bad = http(
+            ureq::post(format!("{base}/api/v1/forms").as_str())
+                .set("cookie", &session)
+                .send_json(json!({"name": "Bad", "fields": [field]})),
+        );
+        assert_eq!(bad.status(), 400);
+    }
+    let made = http(
+        ureq::post(format!("{base}/api/v1/forms").as_str())
+            .set("cookie", &session)
+            .send_json(json!({"name": "Signup", "fields": [
+                {"key": "email", "label": "Email", "kind": "email", "required": true},
+                {"key": "ok", "label": "I agree", "kind": "consent", "required": true,
+                 "options": ["/privacy"]}
+            ]})),
+    );
+    assert_eq!(made.status(), 201);
+
+    // Without the box ticked the entry is refused; with it, stored with the time.
+    let refused = body(http(
+        ureq::post(format!("{base}/form").as_str())
+            .send_string("form=signup&email=a%40example.com&path=%2F"),
+    ));
+    assert!(refused.contains("is required"), "{refused}");
+    assert_eq!(count(&db, "SELECT count(*) FROM form_submissions").await, 0);
+    http(
+        ureq::post(format!("{base}/form").as_str())
+            .send_string("form=signup&email=a%40example.com&ok=yes&path=%2F"),
+    );
+    let data: Value = sqlx::query_scalar("SELECT data FROM form_submissions")
+        .fetch_one(db.pool())
+        .await
+        .unwrap();
+    assert_eq!(data["ok"], "yes");
+    assert!(
+        data["ok_consent_at"].as_str().unwrap().contains('T'),
+        "{data}"
     );
 }

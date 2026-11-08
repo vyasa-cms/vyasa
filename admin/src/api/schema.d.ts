@@ -4496,7 +4496,8 @@ export interface components {
         Field: {
             /** @description The input name; letters, digits, dashes, underscores. */
             key: string;
-            /** @description `text`, `email`, `textarea`, `number`, `select`, `checkbox`. */
+            /** @description `text`, `email`, `textarea`, `number`, `select`, `checkbox`, `consent` (a required checkbox
+             *     whose acceptance is stored with its time; `options[0]` may link the privacy page). */
             kind?: string;
             label: string;
             options?: string[];
@@ -8027,7 +8028,11 @@ export interface operations {
     };
     submissions: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description `true` lists the entries still waiting for their sender to confirm by email, instead of
+                 *     the ones that count. */
+                held?: boolean;
+            };
             header?: never;
             path: {
                 id: number;
@@ -8049,7 +8054,11 @@ export interface operations {
     };
     submissions_csv: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description `true` lists the entries still waiting for their sender to confirm by email, instead of
+                 *     the ones that count. */
+                held?: boolean;
+            };
             header?: never;
             path: {
                 id: number;

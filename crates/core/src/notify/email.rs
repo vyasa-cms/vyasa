@@ -293,6 +293,7 @@ mod tests {
             "form": "Contact us", "path": "/contact",
             "confirm_url": "https://x.test/form/confirm?token=t",
             "delete_url": "https://x.test/form/delete?token=t",
+            "count": 3, "admin_url": "https://x.test/admin/forms",
             "fields": [{"label": "Email", "value": "ada@example.com"}],
             "password_cleared": true,
             "sign_in_url": "https://x.test/admin/login",
