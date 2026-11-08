@@ -396,7 +396,10 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
     } else {
         html
     };
-    Ok(add_default_scheme(html, &site.color_scheme))
+    Ok(add_theme_toggle(add_default_scheme(
+        html,
+        &site.color_scheme,
+    )))
 }
 
 /// The "Made with Vyasa" line.
@@ -412,6 +415,23 @@ pub const FOOTER_CREDIT: &str =
 fn add_footer_credit(mut html: String) -> String {
     if let Some(at) = html.rfind("</footer>") {
         html.insert_str(at, FOOTER_CREDIT);
+    }
+    html
+}
+
+/// The tag that loads the colour-scheme toggle.
+pub const THEME_TOGGLE_TAG: &str = "<script src=\"/theme-assets/theme-toggle.js\"></script>";
+
+/// Links the toggle script at the end of `<head>`. It is blocking on
+/// purpose: it applies a stored choice before first paint, so a returning
+/// visitor sees no flash. A page with no `</head>` gets none, and a page
+/// that already links it is left alone.
+fn add_theme_toggle(mut html: String) -> String {
+    if html.contains("theme-toggle.js") {
+        return html;
+    }
+    if let Some(at) = html.find("</head>") {
+        html.insert_str(at, THEME_TOGGLE_TAG);
     }
     html
 }

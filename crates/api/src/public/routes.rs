@@ -2498,6 +2498,16 @@ pub async fn theme_asset(
         )
             .into_response();
     }
+    if file == "theme-toggle.js" {
+        return (
+            [
+                (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
+                (header::CACHE_CONTROL, "public, max-age=0, must-revalidate"),
+            ],
+            vyasa_themes::sections::THEME_TOGGLE_JS,
+        )
+            .into_response();
+    }
     if let Some(name) = file.strip_prefix("preview/") {
         let allowed = principal
             .as_ref()
