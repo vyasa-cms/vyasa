@@ -164,6 +164,7 @@ async fn site_meta(state: &AppState, asset_head: &str) -> SiteMeta {
                 .logo_media_id
                 .map(|id| format!("/api/v1/media/{id}/raw")),
             footer_credit: identity.footer_credit,
+            color_scheme: identity.color_scheme,
         },
         Err(_) => SiteMeta {
             asset_head: asset_head.to_owned(),

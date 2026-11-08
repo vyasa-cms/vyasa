@@ -29,6 +29,9 @@ pub struct SiteMeta {
     pub asset_head: String,
     /// Whether to add the "Made with Vyasa" line to the footer.
     pub footer_credit: bool,
+    /// The site's default colour scheme: `system` (follow the visitor's OS),
+    /// `light` or `dark`. A visitor's own toggle still wins.
+    pub color_scheme: String,
 }
 
 impl Default for SiteMeta {
@@ -40,6 +43,7 @@ impl Default for SiteMeta {
             logo_url: None,
             asset_head: String::new(),
             footer_credit: true,
+            color_scheme: "system".to_owned(),
         }
     }
 }
@@ -387,11 +391,12 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
     );
     fill_field_refs(&mut ctx, &engine.field_refs(template_name));
     let html = engine.render_json(template_name, &ctx)?;
-    Ok(if site.footer_credit {
+    let html = if site.footer_credit {
         add_footer_credit(html)
     } else {
         html
-    })
+    };
+    Ok(add_default_scheme(html, &site.color_scheme))
 }
 
 /// The "Made with Vyasa" line.
@@ -408,6 +413,29 @@ fn add_footer_credit(mut html: String) -> String {
     if let Some(at) = html.rfind("</footer>") {
         html.insert_str(at, FOOTER_CREDIT);
     }
+    html
+}
+
+/// Sets the site's default colour scheme on the `<html>` tag as
+/// `data-theme`, which the generated CSS already honours over the OS
+/// setting. `system` (or anything unknown) adds nothing, so the OS decides;
+/// a tag that already carries `data-theme` is left alone, and a theme's own
+/// toggle that sets the attribute afterwards still wins.
+fn add_default_scheme(html: String, scheme: &str) -> String {
+    if scheme != "light" && scheme != "dark" {
+        return html;
+    }
+    let Some(at) = html.find("<html") else {
+        return html;
+    };
+    let Some(end) = html[at..].find('>') else {
+        return html;
+    };
+    if html[at..at + end].contains("data-theme") {
+        return html;
+    }
+    let mut html = html;
+    html.insert_str(at + "<html".len(), &format!(" data-theme=\"{scheme}\""));
     html
 }
 
