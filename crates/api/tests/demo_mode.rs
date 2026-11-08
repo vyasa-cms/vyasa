@@ -407,3 +407,22 @@ async fn outside_demo_mode_nothing_about_the_demo_shows() {
         .unwrap();
     assert!(status["demo"].is_null(), "{status}");
 }
+
+#[tokio::test]
+async fn the_discourage_indexing_option_closes_the_site_to_search_engines() {
+    let db = TestDb::new().await;
+    common::seed_user(db.pool(), Role::Admin).await;
+    sqlx::query("INSERT INTO options (key, value) VALUES ('discourage_indexing', 'true')")
+        .execute(db.pool())
+        .await
+        .unwrap();
+    let server = TestServer::start(common::BIN, &db);
+    let base = server.base();
+    let home = http(ureq::get(&format!("{base}/")).call());
+    assert_eq!(home.header("x-robots-tag"), Some("noindex, nofollow"));
+    let robots = http(ureq::get(&format!("{base}/robots.txt")).call());
+    assert_eq!(robots.header("x-robots-tag"), Some("noindex, nofollow"));
+    let robots = robots.into_string().unwrap();
+    assert!(robots.starts_with("User-agent: *\nDisallow: /"), "{robots}");
+    assert!(!robots.contains("Allow: /"), "{robots}");
+}

@@ -60,6 +60,8 @@ pub const SITE_OPTION_KEYS: &[&str] = &[
     "registration_default_role",
     // The small "Made with Vyasa" line under the footer; on unless set false.
     "footer_credit",
+    // Staging sites: serve `Disallow: /` and `X-Robots-Tag: noindex` everywhere.
+    "discourage_indexing",
 ];
 
 /// Options that decide where the site's mail goes and which address its
@@ -561,6 +563,11 @@ impl OptionsService {
             "footer_credit" if !value.is_boolean() => {
                 return Err(AppError::validation("footer_credit must be true or false"));
             }
+            "discourage_indexing" if !value.is_boolean() => {
+                return Err(AppError::validation(
+                    "discourage_indexing must be true or false",
+                ));
+            }
             "newsletter_enabled" if !value.is_boolean() => {
                 return Err(AppError::validation(
                     "newsletter_enabled must be true or false",
@@ -700,6 +707,19 @@ impl OptionsService {
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true),
         })
+    }
+
+    /// Whether the site asks search engines to stay away (`robots.txt`
+    /// `Disallow: /` and `X-Robots-Tag: noindex`); off unless set. For
+    /// staging sites. A read failure counts as off, so a broken options
+    /// store never hides a live site.
+    pub async fn discourage_indexing(&self) -> bool {
+        self.raw("discourage_indexing")
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
     }
 
     /// Absolute public base URL with no trailing slash, e.g.

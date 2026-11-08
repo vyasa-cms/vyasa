@@ -118,6 +118,7 @@ pub async fn sitemap(State(state): State<AppState>, headers: HeaderMap) -> Respo
 
 /// `GET /robots.txt` — allow all, point at the sitemap.
 pub async fn robots(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    let closed = state.config.demo.enabled || state.options_service.discourage_indexing().await;
     let base = base_url(&state, &headers).await;
     crate::public::cacheable::cacheable(
         &headers,
@@ -128,7 +129,7 @@ pub async fn robots(State(state): State<AppState>, headers: HeaderMap) -> Respon
         // budget on a login screen.
         // A demo is a sandbox that resets every hour: nothing in it should
         // end up in a search index.
-        if state.config.demo.enabled {
+        if closed {
             "User-agent: *\nDisallow: /\n".to_owned()
         } else {
             format!("User-agent: *\nAllow: /\nDisallow: /admin\nSitemap: {base}/sitemap.xml\n")

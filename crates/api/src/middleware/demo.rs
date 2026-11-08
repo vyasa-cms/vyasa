@@ -183,3 +183,21 @@ mod tests {
         assert!(is_public_page("/"));
     }
 }
+
+/// Adds `X-Robots-Tag: noindex, nofollow` to every response while the
+/// `discourage_indexing` option is on (staging sites). Demo mode does the
+/// same on its own.
+pub async fn discourage_indexing(
+    State(state): State<AppState>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    let mut resp = next.run(req).await;
+    if !state.config.demo.enabled && state.options_service.discourage_indexing().await {
+        resp.headers_mut().insert(
+            header::HeaderName::from_static("x-robots-tag"),
+            HeaderValue::from_static("noindex, nofollow"),
+        );
+    }
+    resp
+}
