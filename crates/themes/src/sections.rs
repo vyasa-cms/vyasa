@@ -419,6 +419,10 @@ const SECTIONS_CSS: &str = r"
 /// Built-in interaction runtime shared by all themes.
 pub const COMPONENTS_JS: &str = include_str!("components.js");
 
+/// The colour-scheme toggle script, served at `/theme-assets/theme-toggle.js`
+/// and linked in every page's `<head>` (see `render::add_theme_toggle`).
+pub const THEME_TOGGLE_JS: &str = include_str!("theme-toggle.js");
+
 #[cfg(test)]
 mod tests {
     use super::*;

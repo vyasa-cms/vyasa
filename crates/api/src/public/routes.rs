@@ -1,6 +1,6 @@
 //! Public route handlers: home, singles, archives, search, preview.
 
-use axum::extract::{Path, Query, State};
+use axum::extract::{Path, Query, RawQuery, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{Html, IntoResponse, Redirect, Response};
 
@@ -2485,6 +2485,7 @@ async fn theme_file(
 pub async fn theme_asset(
     State(state): State<AppState>,
     Path(file): Path<String>,
+    RawQuery(raw_query): RawQuery,
     req_headers: HeaderMap,
     crate::middleware::MaybePrincipal(principal): crate::middleware::MaybePrincipal,
 ) -> R {
@@ -2495,6 +2496,23 @@ pub async fn theme_asset(
                 (header::CACHE_CONTROL, "public, max-age=0, must-revalidate"),
             ],
             vyasa_themes::sections::COMPONENTS_JS,
+        )
+            .into_response();
+    }
+    if file == "theme-toggle.js" {
+        // Linked as `?v=<hash of the script>`, so a versioned URL never
+        // changes meaning; a bare URL stays revalidated.
+        let cache = if raw_query.as_deref().is_some_and(|q| q.starts_with("v=")) {
+            "public, max-age=31536000, immutable"
+        } else {
+            "public, max-age=0, must-revalidate"
+        };
+        return (
+            [
+                (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
+                (header::CACHE_CONTROL, cache),
+            ],
+            vyasa_themes::sections::THEME_TOGGLE_JS,
         )
             .into_response();
     }
