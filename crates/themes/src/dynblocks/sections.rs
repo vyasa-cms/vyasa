@@ -125,8 +125,27 @@ fn check_hero(s: &MapSettings) -> Vec<String> {
             "image",
             "image_alt",
             "image_position",
+            "aside_code",
+            "aside_language",
+            "aside_filename",
         ],
     );
+    if text(s, "aside_code").is_some_and(|c| !c.trim().is_empty())
+        && text(s, "image").is_some_and(|i| !i.trim().is_empty())
+    {
+        out.push("set image or aside_code, not both".to_owned());
+    }
+    for (key, max) in [
+        ("aside_code", 16000),
+        ("aside_language", 100),
+        ("aside_filename", 200),
+    ] {
+        if s.get(key)
+            .is_some_and(|v| v.as_str().is_none_or(|v| v.len() > max))
+        {
+            out.push(format!("{key} must be text of at most {max} bytes"));
+        }
+    }
     if text(s, "headline").is_none_or(|h| h.trim().is_empty()) {
         out.push("headline is required".to_owned());
     }
@@ -322,6 +341,22 @@ fn render_hero(s: &MapSettings, editor: bool) -> String {
                 crate::renderer::blocks::responsive_attrs(&src)
             )
         });
+    let media = media.or_else(|| {
+        text(s, "aside_code")
+            .filter(|c| !c.trim().is_empty())
+            .map(|code| {
+                let name = text(s, "aside_filename")
+                    .filter(|n| !n.trim().is_empty())
+                    .map(|n| format!("<figcaption class=\"vy-code-filename\">{}</figcaption>", esc(&n)))
+                    .unwrap_or_default();
+                let lang = text(s, "aside_language").unwrap_or_default();
+                format!(
+                    "<figure class=\"vy-hero-media vy-hero-aside\">{name}<pre tabindex=\"0\"><code class=\"language-{}\">{}</code></pre></figure>",
+                    esc(&lang),
+                    esc(&code)
+                )
+            })
+    });
     let copy = format!(
         "{eyebrow}<h1 class=\"vy-hero-title\"{}>{}</h1>{subhead}{actions}",
         edit_marker(editor, "headline"),
@@ -875,7 +910,10 @@ fn marketing() -> Vec<Builtin> {
                     "align": {"type": "string", "enum": ["start", "center"]},
                     "image": {"type": "string", "description": "Picture beside the copy; the hero splits when set"},
                     "image_alt": {"type": "string"},
-                    "image_position": {"type": "string", "enum": ["start", "end"], "description": "Side of the hero artwork on desktop; stacks on mobile"}
+                    "image_position": {"type": "string", "enum": ["start", "end"], "description": "Side of the hero artwork on desktop; stacks on mobile"},
+                    "aside_code": {"type": "string", "format": "multiline", "maxLength": 16000, "description": "Code panel beside the copy instead of an image; the hero splits when set"},
+                    "aside_language": {"type": "string", "maxLength": 100},
+                    "aside_filename": {"type": "string", "maxLength": 200, "description": "Caption above the aside code"}
                 },
                 "required": ["headline"],
                 "additionalProperties": false
@@ -1075,6 +1113,22 @@ mod modern_tests {
         assert!(html.contains("vy-hero--media-start"));
         assert!(html.contains("data-vy-edit"));
         settings.set("align", json!("sideways"));
+        assert!(!check_hero(&settings).is_empty());
+    }
+
+    #[test]
+    fn a_hero_aside_code_panel_splits_the_hero_and_escapes() {
+        let mut settings: MapSettings = serde_json::from_value(json!({
+            "headline": "h", "aside_code": "</code><b>x", "aside_language": "sql",
+            "aside_filename": "q.sql"
+        }))
+        .expect("settings");
+        assert!(check_hero(&settings).is_empty());
+        let html = render_hero(&settings, false);
+        assert!(html.contains("vy-hero--split") && html.contains("vy-hero-aside"));
+        assert!(html.contains("&lt;/code&gt;&lt;b&gt;x") && !html.contains("<b>"));
+        assert!(html.contains("q.sql"));
+        settings.set("image", json!("/a.png"));
         assert!(!check_hero(&settings).is_empty());
     }
 
