@@ -53,13 +53,24 @@
     root.querySelector('.vy-code-examples').prepend(list);
     select(0);
   });
-  // Never hide content while waiting for a script or an observer callback.
-  if (typeof IntersectionObserver !== 'undefined' && !window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  // In-view hook for theme CSS: any [data-vy-reveal] element gets `vy-in-view`
+  // once, when it first scrolls into view (at once without an observer or for
+  // visitors who prefer reduced motion), so CSS written against the class can
+  // never leave content hidden. Built-in fade/rise sections also get
+  // `vy-motion-enter`. Content is never hidden waiting for a script.
+  const reveal = document.querySelectorAll('[data-vy-reveal], .vy-motion-fade, .vy-motion-rise');
+  const mark = (node) => {
+    node.classList.add('vy-in-view');
+    if (node.matches('.vy-motion-fade, .vy-motion-rise')) node.classList.add('vy-motion-enter');
+  };
+  if (typeof IntersectionObserver === 'undefined' || window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+    reveal.forEach((node) => node.matches('[data-vy-reveal]') && node.classList.add('vy-in-view'));
+  } else {
     const observer = new IntersectionObserver((entries) => {
       entries.forEach((entry) => {
-        if (entry.isIntersecting) { entry.target.classList.add('vy-motion-enter'); observer.unobserve(entry.target); }
+        if (entry.isIntersecting) { mark(entry.target); observer.unobserve(entry.target); }
       });
     }, { threshold: 0.1 });
-    document.querySelectorAll('.vy-motion-fade, .vy-motion-rise').forEach((node) => observer.observe(node));
+    reveal.forEach((node) => observer.observe(node));
   }
 })();
