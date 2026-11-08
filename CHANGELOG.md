@@ -7,6 +7,12 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Added
+
+- `discourage_indexing` site option (Settings > Advanced) for staging sites:
+  `robots.txt` answers `Disallow: /` and every response carries
+  `X-Robots-Tag: noindex, nofollow`. Off by default.
+
 ## [0.3.5] - 2026-10-24
 
 ### Changed
