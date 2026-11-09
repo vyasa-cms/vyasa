@@ -128,48 +128,7 @@ impl MediaService {
         alt: Option<String>,
         caption: Option<String>,
     ) -> Result<MediaRow, AppError> {
-        if bytes.len() > MAX_BYTES {
-            return Err(AppError::too_large(format!(
-                "The file is {} MB; the limit is {} MB.",
-                bytes.len() / (1024 * 1024),
-                MAX_BYTES / (1024 * 1024)
-            )));
-        }
-        if bytes.is_empty() {
-            return Err(AppError::validation("file is empty"));
-        }
-        // Sanitize file name: keep only basename, replace risky chars.
-        let file_name = sanitize_file_name(file_name);
-        if file_name.is_empty() {
-            return Err(AppError::validation(
-                "file name is empty after sanitization",
-            ));
-        }
-        // Reject SVG by extension (case-insensitive).
-        let ext = std::path::Path::new(&file_name)
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or_default()
-            .to_ascii_lowercase();
-        if ext == "svg" || ext == "svgz" {
-            return Err(AppError::validation("SVG files are not allowed"));
-        }
-        // Sniff MIME via magic bytes.
-        let mime = sniff_mime(&bytes, &file_name);
-        if mime == "image/svg+xml" {
-            return Err(AppError::validation("SVG files are not allowed"));
-        }
-        if mime == "image/heic" || mime == "image/heif" {
-            return Err(AppError::validation(
-                "HEIC photos are not supported. The editor converts them on browsers that can \
-                 read them; otherwise set the camera to Most Compatible, or export as JPEG.",
-            ));
-        }
-        if !ALLOWLIST.contains(&mime.as_str()) {
-            return Err(AppError::validation(format!(
-                "unsupported media type: {mime}"
-            )));
-        }
+        let (file_name, mime, bytes) = prepare_upload(file_name, bytes)?;
         let sha256 = sha256_hex(&bytes);
         let id = vyasa_common::next_id_i64();
         // Sharded path: `{id % 1000}/{id}/{file_name}` – no user input in dir components.
@@ -307,7 +266,7 @@ impl MediaService {
         bytes: Vec<u8>,
     ) -> Result<MediaRow, AppError> {
         let old = self.repo.get(id).await?;
-        let (file_name, mime) = check_upload(file_name, &bytes)?;
+        let (file_name, mime, bytes) = prepare_upload(file_name, bytes)?;
         let sha256 = sha256_hex(&bytes);
         let shard = (id % 1000).abs();
         let path = format!("{shard}/{id}/{file_name}");
@@ -450,9 +409,24 @@ pub fn sha256_hex(bytes: &[u8]) -> String {
 ///
 /// # Errors
 ///
-/// `AppError::TooLarge` past the cap, `AppError::Validation` for an empty
-/// file, an unsafe name, or a type outside the allowlist.
+/// As [`prepare_upload`].
 pub fn check_upload(file_name: &str, bytes: &[u8]) -> Result<(String, String), AppError> {
+    let (name, mime, _) = prepare_upload(file_name, bytes.to_vec())?;
+    Ok((name, mime))
+}
+
+/// Checks an upload and returns what to store: the safe file name, the MIME type, and the
+/// bytes (for an SVG, the sanitised document: see [`super::svg`]; unchanged for anything else).
+///
+/// # Errors
+///
+/// `AppError::TooLarge` past the cap, `AppError::Validation` for an empty
+/// file, an unsafe name, an SVG that cannot be made safe (also `.svgz`), or a type outside the
+/// allowlist.
+pub fn prepare_upload(
+    file_name: &str,
+    bytes: Vec<u8>,
+) -> Result<(String, String, Vec<u8>), AppError> {
     if bytes.len() > MAX_BYTES {
         return Err(AppError::too_large(format!(
             "The file is {} MB; the limit is {} MB.",
@@ -474,12 +448,26 @@ pub fn check_upload(file_name: &str, bytes: &[u8]) -> Result<(String, String), A
         .and_then(|e| e.to_str())
         .unwrap_or_default()
         .to_ascii_lowercase();
-    if ext == "svg" || ext == "svgz" {
-        return Err(AppError::validation("SVG files are not allowed"));
+    if ext == "svgz" {
+        return Err(AppError::validation(
+            "Compressed SVG (.svgz) is not supported. Upload the plain .svg file.",
+        ));
     }
-    let mime = sniff_mime(bytes, &file_name);
-    if mime == "image/svg+xml" {
-        return Err(AppError::validation("SVG files are not allowed"));
+    let mime = sniff_mime(&bytes, &file_name);
+    if mime == "image/svg+xml" || ext == "svg" || looks_like_svg(&bytes) {
+        // The sanitised copy is the only one stored.
+        let clean = super::svg::sanitize(&bytes)?;
+        let file_name = if ext == "svg" {
+            file_name
+        } else {
+            format!(
+                "{}.svg",
+                file_name
+                    .rsplit_once('.')
+                    .map_or(file_name.as_str(), |(stem, _)| stem)
+            )
+        };
+        return Ok((file_name, "image/svg+xml".to_owned(), clean));
     }
     if mime == "image/heic" || mime == "image/heif" {
         return Err(AppError::validation(
@@ -492,7 +480,17 @@ pub fn check_upload(file_name: &str, bytes: &[u8]) -> Result<(String, String), A
             "unsupported media type: {mime}"
         )));
     }
-    Ok((file_name, mime))
+    Ok((file_name, mime, bytes))
+}
+
+/// Text that starts like an XML document and has an `<svg` tag near the top, whatever its name says.
+fn looks_like_svg(bytes: &[u8]) -> bool {
+    let head = &bytes[..bytes.len().min(2048)];
+    let trimmed = head
+        .strip_prefix(&[0xef, 0xbb, 0xbf][..])
+        .unwrap_or(head)
+        .trim_ascii_start();
+    trimmed.starts_with(b"<") && head.windows(4).any(|w| w.eq_ignore_ascii_case(b"<svg"))
 }
 
 /// Sanitizes a file name: keeps basename, replaces path separators, trims.
@@ -568,7 +566,7 @@ mod tests {
     }
 
     #[test]
-    fn sniff_rejects_svg() {
+    fn sniff_recognises_svg() {
         let svg = b"<?xml version=\"1.0\"?><svg></svg>";
         let mime = sniff_mime(svg, "image.svg");
         assert_eq!(mime, "image/svg+xml");
@@ -586,7 +584,10 @@ mod tests {
     #[test]
     fn allowlist_enforced() {
         assert!(ALLOWLIST.contains(&"image/png"));
-        assert!(!ALLOWLIST.contains(&"image/svg+xml"));
+        assert!(
+            !ALLOWLIST.contains(&"image/svg+xml"),
+            "svg is admitted only through the sanitiser"
+        );
         assert!(!ALLOWLIST.contains(&"application/x-msdownload"));
     }
 
@@ -614,7 +615,7 @@ mod tests {
 
 #[cfg(test)]
 mod library_tests {
-    use super::{check_upload, sha256_hex};
+    use super::{check_upload, prepare_upload, sha256_hex};
 
     #[test]
     fn the_hash_is_of_the_bytes_and_stable() {
@@ -633,7 +634,19 @@ mod library_tests {
         assert_eq!(name, "My-Photo.PNG");
         assert_eq!(mime, "image/png");
         assert!(check_upload("x.png", b"").is_err(), "empty");
-        assert!(check_upload("x.svg", b"<svg/>").is_err(), "svg by name");
+        assert!(check_upload("x.svgz", b"<svg/>").is_err(), "compressed svg");
+        assert!(check_upload("x.svg", b"<script>").is_err(), "not an svg");
+        let (name, mime, clean) = prepare_upload(
+            "logo.PNG",
+            br#"<svg xmlns="http://www.w3.org/2000/svg"><script>x</script><path d="M0 0"/></svg>"#
+                .to_vec(),
+        )
+        .expect("an svg under a png name");
+        assert_eq!(
+            (name.as_str(), mime.as_str()),
+            ("logo.svg", "image/svg+xml")
+        );
+        assert!(!String::from_utf8(clean).unwrap().contains("script"));
         assert!(
             check_upload("x.txt", b"hello").is_err(),
             "outside the allowlist"

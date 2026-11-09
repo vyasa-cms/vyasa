@@ -672,6 +672,25 @@ fn served_mime(row_mime: &str, variant_path: Option<&str>) -> String {
     )
 }
 
+/// Headers that lock down an SVG served on its own URL, a second line of defence behind the
+/// upload sanitiser: nothing may load, run or be framed from it, and the browser must not
+/// reinterpret it. Empty for every other type.
+fn svg_headers(mime: &str) -> Vec<(HeaderName, HeaderValue)> {
+    if mime != "image/svg+xml" {
+        return Vec::new();
+    }
+    vec![
+        (
+            HeaderName::from_static("content-security-policy"),
+            HeaderValue::from_static("default-src 'none'; style-src 'unsafe-inline'; sandbox"),
+        ),
+        (
+            HeaderName::from_static("x-content-type-options"),
+            HeaderValue::from_static("nosniff"),
+        ),
+    ]
+}
+
 /// `GET /api/v1/media/{id}/raw` — serve raw bytes with ETag/Cache-Control.
 /// Public (no auth) for published use; still checks If-None-Match.
 ///
@@ -753,6 +772,9 @@ pub async fn raw(
             HeaderName::from_static("vary"),
             HeaderValue::from_static("Accept"),
         );
+    }
+    for (name, value) in svg_headers(&mime) {
+        response_headers.insert(name, value);
     }
     let mut response = (StatusCode::OK, bytes).into_response();
     // Override content-type from `bytes` default.
@@ -919,5 +941,25 @@ mod raw_tests {
             "image/jpeg"
         );
         assert_eq!(served_mime("image/png", None), "image/png");
+    }
+}
+
+#[cfg(test)]
+mod svg_header_tests {
+    use super::svg_headers;
+
+    #[test]
+    fn an_svg_is_sandboxed_and_other_types_are_untouched() {
+        let h = svg_headers("image/svg+xml");
+        let csp = h
+            .iter()
+            .find(|(n, _)| n == "content-security-policy")
+            .expect("csp");
+        assert!(csp.1.to_str().unwrap().contains("default-src 'none'"));
+        assert!(csp.1.to_str().unwrap().contains("sandbox"));
+        assert!(h
+            .iter()
+            .any(|(n, v)| n == "x-content-type-options" && v == "nosniff"));
+        assert!(svg_headers("image/png").is_empty());
     }
 }

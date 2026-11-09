@@ -9,6 +9,7 @@ follows [semantic versioning](https://semver.org) as described in
 
 ### Added
 
+- SVG uploads (logos, icons) in the media library. Each file is rewritten through an allow-list sanitiser before it is stored: scripts, `foreignObject`, styles, images, animation, event handlers and every reference that leaves the file are removed, and a file with a DOCTYPE or a root other than `<svg>` is refused. `.svgz` stays refused. SVGs are served with `Content-Security-Policy: default-src 'none'; sandbox` and `nosniff`.
 - `color_scheme` site option (`system`, `light`, `dark`; Settings > Advanced): the scheme first-time visitors see. `light`/`dark` set `data-theme` on `<html>`; a visitor's own toggle still wins, and `system` (default) follows the device.
 
 ## [0.3.5] - 2026-10-24
