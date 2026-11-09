@@ -446,7 +446,7 @@ mod tests {
             "{out}"
         );
         let many = format!(
-            r##"<svg xmlns="http://www.w3.org/2000/svg">{}</svg>"##,
+            r#"<svg xmlns="http://www.w3.org/2000/svg">{}</svg>"#,
             r##"<use href="#a"/>"##.repeat(17)
         );
         assert!(sanitize(many.as_bytes()).is_err());
