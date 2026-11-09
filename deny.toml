@@ -19,6 +19,11 @@ ignore = [
     "RUSTSEC-2026-0367",
     "RUSTSEC-2026-0368",
     "RUSTSEC-2026-0369",
+    # libsqlite3-sys 0.30.1 (bundled SQLite < 3.54): locked only through
+    # sqlx-sqlite, which sqlx-macros-core pulls in for all drivers. Vyasa
+    # speaks Postgres only and never builds or opens SQLite. Revisit when
+    # sqlx moves to rusqlite 0.41 / libsqlite3-sys 0.39.
+    "RUSTSEC-2026-0459",
 ]
 
 [licenses]
