@@ -485,7 +485,7 @@ pub fn prepare_upload(
 
 /// Text that starts like an XML document and has an `<svg` tag near the top, whatever its name says.
 fn looks_like_svg(bytes: &[u8]) -> bool {
-    let head = &bytes[..bytes.len().min(2048)];
+    let head = &bytes[..bytes.len().min(64 * 1024)];
     let trimmed = head
         .strip_prefix(&[0xef, 0xbb, 0xbf][..])
         .unwrap_or(head)

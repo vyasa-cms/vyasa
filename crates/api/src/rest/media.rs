@@ -675,7 +675,7 @@ fn served_mime(row_mime: &str, variant_path: Option<&str>) -> String {
 /// Headers that lock down an SVG served on its own URL, a second line of defence behind the
 /// upload sanitiser: nothing may load, run or be framed from it, and the browser must not
 /// reinterpret it. Empty for every other type.
-fn svg_headers(mime: &str) -> Vec<(HeaderName, HeaderValue)> {
+pub(crate) fn svg_headers(mime: &str) -> Vec<(HeaderName, HeaderValue)> {
     if mime != "image/svg+xml" {
         return Vec::new();
     }

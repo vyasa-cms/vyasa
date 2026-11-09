@@ -2054,15 +2054,23 @@ async fn serve_media_option(state: &AppState, key: &str) -> R {
     };
     match state.media.get(id).await {
         Ok(row) => match state.media.get_bytes(&row).await {
-            Ok(bytes) => (
-                StatusCode::OK,
-                [
-                    (header::CONTENT_TYPE, row.mime),
-                    (header::CACHE_CONTROL, "public, max-age=3600".to_owned()),
-                ],
-                axum::body::Body::from(bytes),
-            )
-                .into_response(),
+            Ok(bytes) => {
+                // An SVG logo is served sandboxed, as on the media route.
+                let extra = crate::rest::media::svg_headers(&row.mime);
+                let mut response = (
+                    StatusCode::OK,
+                    [
+                        (header::CONTENT_TYPE, row.mime),
+                        (header::CACHE_CONTROL, "public, max-age=3600".to_owned()),
+                    ],
+                    axum::body::Body::from(bytes),
+                )
+                    .into_response();
+                for (name, value) in extra {
+                    response.headers_mut().insert(name, value);
+                }
+                response
+            }
             Err(_) => not_found(),
         },
         Err(_) => not_found(),

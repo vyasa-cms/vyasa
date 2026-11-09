@@ -15,6 +15,8 @@ const SVG_NS: &str = "http://www.w3.org/2000/svg";
 const XLINK_NS: &str = "http://www.w3.org/1999/xlink";
 /// Deepest element nesting kept; deeper is refused.
 const MAX_DEPTH: usize = 64;
+/// Most `<use>` elements kept: references can nest, so their number bounds the expansion.
+const MAX_USE: usize = 16;
 
 /// Elements kept. Anything else (script, foreignObject, style, image, a, animate, set, iframe,
 /// filter, pattern, marker ...) is removed with its children.
@@ -112,10 +114,40 @@ fn refuse(why: &str) -> AppError {
     AppError::validation(format!("The SVG cannot be used: {why}."))
 }
 
-/// A value that may only point inside the file: no scheme, no external url(), no script.
+/// Functions an attribute value may call. Anything else (`image-set()`, `image()`, `element()`,
+/// `src()`, `cross-fade()`, `paint()` ...) can load a resource or is not needed for a logo.
+const FUNCTIONS: &[&str] = &[
+    "url",
+    "rgb",
+    "rgba",
+    "hsl",
+    "hsla",
+    "hwb",
+    "lab",
+    "lch",
+    "oklab",
+    "oklch",
+    "color",
+    "matrix",
+    "translate",
+    "translatex",
+    "translatey",
+    "scale",
+    "scalex",
+    "scaley",
+    "rotate",
+    "skew",
+    "skewx",
+    "skewy",
+    "calc",
+];
+
+/// A value that may only point inside the file: no scheme, no external url(), no script, no
+/// CSS escape (`u\72 l(` is `url(` to a browser), only known functions.
 fn value_is_safe(value: &str) -> bool {
     let lower = value.to_ascii_lowercase();
-    if lower.contains("javascript:")
+    if value.contains('\\')
+        || lower.contains("javascript:")
         || lower.contains("data:")
         || lower.contains("expression(")
         || lower.contains("@import")
@@ -123,16 +155,25 @@ fn value_is_safe(value: &str) -> bool {
     {
         return false;
     }
-    // Every url(...) must be a fragment reference.
-    let mut rest = lower.as_str();
-    while let Some(i) = rest.find("url(") {
-        rest = &rest[i + 4..];
-        let inner = rest
-            .trim_start()
-            .trim_start_matches(['\'', '"'])
-            .trim_start();
-        if !inner.starts_with('#') {
+    // Every function call is on the list, and every url(...) is a fragment reference.
+    let bytes = lower.as_bytes();
+    for (i, _) in lower.match_indices('(') {
+        let name_start = bytes[..i]
+            .iter()
+            .rposition(|b| !(b.is_ascii_alphanumeric() || *b == b'-'))
+            .map_or(0, |p| p + 1);
+        let name = &lower[name_start..i];
+        if !FUNCTIONS.contains(&name) {
             return false;
+        }
+        if name == "url" {
+            let inner = lower[i + 1..]
+                .trim_start()
+                .trim_start_matches(['\'', '"'])
+                .trim_start();
+            if !inner.starts_with('#') {
+                return false;
+            }
         }
     }
     true
@@ -155,7 +196,7 @@ fn clean_start(e: &BytesStart<'_>, root: bool) -> Result<Option<BytesStart<'stat
         let keep = match key.as_str() {
             // Written once, below, on the root.
             "xmlns" => false,
-            "xmlns:xlink" => root && value == XLINK_NS,
+            "xmlns:xlink" => false,
             // A reference to something in the same file, on the elements that take one.
             "href" | "xlink:href" => {
                 matches!(name.as_str(), "use" | "linearGradient" | "radialGradient")
@@ -170,6 +211,7 @@ fn clean_start(e: &BytesStart<'_>, root: bool) -> Result<Option<BytesStart<'stat
     if root {
         // A standalone SVG needs its namespace to render; always the SVG one.
         out.push_attribute(("xmlns", SVG_NS));
+        out.push_attribute(("xmlns:xlink", XLINK_NS));
     }
     Ok(Some(out.into_owned()))
 }
@@ -188,6 +230,7 @@ pub fn sanitize(bytes: &[u8]) -> Result<Vec<u8>, AppError> {
     let mut depth = 0usize;
     let mut skipping = 0usize;
     let mut saw_root = false;
+    let mut uses = 0usize;
     loop {
         let event = reader
             .read_event()
@@ -205,8 +248,11 @@ pub fn sanitize(bytes: &[u8]) -> Result<Vec<u8>, AppError> {
                 }
                 match clean_start(&e, depth == 0)? {
                     Some(start) => {
-                        if depth >= MAX_DEPTH {
-                            return Err(refuse("it is nested too deeply"));
+                        if start.name().as_ref() == "use" {
+                            uses += 1;
+                        }
+                        if uses > MAX_USE || depth >= MAX_DEPTH {
+                            return Err(refuse("it is nested too deeply or uses <use> too often"));
                         }
                         saw_root = true;
                         depth += 1;
@@ -223,6 +269,12 @@ pub fn sanitize(bytes: &[u8]) -> Result<Vec<u8>, AppError> {
                     return Err(refuse("the root element must be <svg>"));
                 }
                 if let Some(start) = clean_start(&e, depth == 0)? {
+                    if start.name().as_ref() == "use" {
+                        uses += 1;
+                        if uses > MAX_USE {
+                            return Err(refuse("it uses <use> too often"));
+                        }
+                    }
                     saw_root = true;
                     write(&mut writer, Event::Empty(start))?;
                 }
@@ -309,7 +361,7 @@ mod tests {
         );
         assert_eq!(
             out,
-            r#"<svg xmlns="http://www.w3.org/2000/svg"><g><circle r="1"/></g></svg>"#
+            r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><g><circle r="1"/></g></svg>"#
         );
     }
 
@@ -320,7 +372,7 @@ mod tests {
         );
         assert_eq!(
             out,
-            r#"<svg xmlns="http://www.w3.org/2000/svg"><rect width="1"/><use/><use/></svg>"#
+            r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><rect width="1"/><use/><use/></svg>"#
         );
     }
 
@@ -331,7 +383,7 @@ mod tests {
         );
         assert_eq!(
             out,
-            r#"<svg xmlns="http://www.w3.org/2000/svg"><rect width="1"></rect></svg>"#
+            r#"<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"><rect width="1"></rect></svg>"#
         );
     }
 
@@ -367,5 +419,39 @@ mod tests {
             "</g>".repeat(100)
         );
         assert!(sanitize(deep.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn css_escapes_and_image_functions_are_dropped() {
+        let out = clean(
+            r#"<svg xmlns="http://www.w3.org/2000/svg"><rect fill="u\72 l(http://evil/x.svg#p)" stroke="u\rl(http://evil/y)" mask="image-set('https://evil/a.png' 1x)" clip-path="-webkit-image-set(x)" width="1"/><rect fill="rgb(1,2,3)" mask="url(#m)" transform="translate(1 2) rotate(3)"/></svg>"#,
+        );
+        assert!(!out.contains("evil"), "{out}");
+        assert!(out.contains("fill=\"rgb(1,2,3)\""), "{out}");
+        assert!(out.contains("mask=\"url(#m)\""), "{out}");
+        assert!(
+            out.contains("transform=\"translate(1 2) rotate(3)\""),
+            "{out}"
+        );
+    }
+
+    #[test]
+    fn the_root_always_binds_both_namespaces_and_use_is_capped() {
+        let out = clean(r##"<svg><use xlink:href="#a"/></svg>"##);
+        assert!(
+            out.contains("xmlns=\"http://www.w3.org/2000/svg\""),
+            "{out}"
+        );
+        assert!(
+            out.contains("xmlns:xlink=\"http://www.w3.org/1999/xlink\""),
+            "{out}"
+        );
+        let many = format!(
+            r##"<svg xmlns="http://www.w3.org/2000/svg">{}</svg>"##,
+            r##"<use href="#a"/>"##.repeat(17)
+        );
+        assert!(sanitize(many.as_bytes()).is_err());
+        let few = many.replacen(r##"<use href="#a"/>"##, "", 1);
+        assert!(sanitize(few.as_bytes()).is_ok());
     }
 }
