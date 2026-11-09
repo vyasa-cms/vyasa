@@ -80,7 +80,12 @@ pub fn tokens_to_css(tokens: &TokenSet) -> String {
 
     let has_dark_overrides = ROLES
         .iter()
-        .any(|r| slot_for(tokens, r).is_some_and(|s| s.dark.is_some()));
+        .any(|r| slot_for(tokens, r).is_some_and(|s| s.dark.is_some()))
+        || tokens
+            .colors
+            .extra_roles()
+            .iter()
+            .any(|(_, s)| s.is_some_and(|s| s.dark.is_some()));
     if has_dark_overrides {
         // The media block is guarded so an explicit light choice beats a
         // dark OS. Without the guard, "light" in the studio's preview (or
@@ -147,6 +152,18 @@ fn push_colors(out: &mut String, tokens: &TokenSet, dark: bool) {
         let Some(slot) = slot_for(tokens, role) else {
             continue;
         };
+        let value = if dark {
+            match slot.dark.as_ref() {
+                Some(v) => v,
+                None => continue,
+            }
+        } else {
+            &slot.light
+        };
+        let _ = writeln!(out, "  --vy-color-{}: {};", role, value.normalized());
+    }
+    for (role, slot) in tokens.colors.extra_roles() {
+        let Some(slot) = slot else { continue };
         let value = if dark {
             match slot.dark.as_ref() {
                 Some(v) => v,
@@ -311,5 +328,46 @@ mod font_src_tests {
     fn an_ordinary_source_is_untouched() {
         let src = "https://fonts.example/inter-var.woff2?v=3&w=400";
         assert_eq!(css_string(src), src);
+    }
+}
+
+#[cfg(test)]
+mod extra_role_tests {
+    use super::tokens_to_css;
+    use crate::scope::role_slot;
+    use crate::tokens::{ColorSlot, HexColor, TokenSet};
+
+    fn slot(light: &str, dark: Option<&str>) -> ColorSlot {
+        ColorSlot {
+            light: HexColor::parse(light).unwrap(),
+            dark: dark.map(|d| HexColor::parse(d).unwrap()),
+        }
+    }
+
+    #[test]
+    fn unset_extra_roles_emit_nothing() {
+        let css = tokens_to_css(&TokenSet::default());
+        assert!(!css.contains("bg-subtle"), "{css}");
+        assert!(!css.contains("--vy-color-success"), "{css}");
+    }
+
+    #[test]
+    fn set_extra_roles_become_custom_properties_in_both_schemes() {
+        let mut t = TokenSet::default();
+        t.colors.bg_subtle = Some(slot("#f0f0f0", Some("#0a0a0a")));
+        t.colors.success = Some(slot("#16a34a", None));
+        let css = tokens_to_css(&t);
+        assert!(css.contains("--vy-color-bg-subtle: #f0f0f0;"), "{css}");
+        assert!(css.contains("--vy-color-bg-subtle: #0a0a0a;"), "{css}");
+        assert!(css.contains("--vy-color-success: #16a34a;"), "{css}");
+        assert_eq!(css.matches("--vy-color-success").count(), 1, "{css}");
+    }
+
+    #[test]
+    fn scopes_can_reference_an_extra_role_only_when_set() {
+        let mut t = TokenSet::default();
+        assert!(role_slot(&t, "bg_subtle").is_none());
+        t.colors.surface_2 = Some(slot("#eeeeee", None));
+        assert!(role_slot(&t, "surface-2").is_some());
     }
 }

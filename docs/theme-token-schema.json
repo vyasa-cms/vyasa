@@ -12,6 +12,17 @@
           },
           "description": "Page background."
         },
+        "bg_subtle": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorSlot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional band background between `bg` and `surface`."
+        },
         "border": {
           "$ref": "#/$defs/ColorSlot",
           "default": {
@@ -19,6 +30,28 @@
             "light": "#e4e4e7"
           },
           "description": "Hairlines and separators."
+        },
+        "border_strong": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorSlot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional stronger hairline (hovered borders, focus rings)."
+        },
+        "danger": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorSlot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional status colour: danger / error."
         },
         "on_primary": {
           "$ref": "#/$defs/ColorSlot",
@@ -36,6 +69,17 @@
           },
           "description": "Brand / accent color."
         },
+        "success": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorSlot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional status colour: success / available."
+        },
         "surface": {
           "$ref": "#/$defs/ColorSlot",
           "default": {
@@ -43,6 +87,17 @@
             "light": "#f4f4f5"
           },
           "description": "Cards and raised panels."
+        },
+        "surface_2": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorSlot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional second raised level (hovered cards, nested panels)."
         },
         "text": {
           "$ref": "#/$defs/ColorSlot",
@@ -59,6 +114,17 @@
             "light": "#52525b"
           },
           "description": "Secondary text color."
+        },
+        "warning": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ColorSlot"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional status colour: warning / in progress."
         }
       },
       "type": "object"

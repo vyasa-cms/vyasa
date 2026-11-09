@@ -125,6 +125,39 @@ pub struct ColorPalette {
     pub primary: ColorSlot,
     /// Text placed on top of `primary`.
     pub on_primary: ColorSlot,
+    /// Optional band background between `bg` and `surface`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bg_subtle: Option<ColorSlot>,
+    /// Optional second raised level (hovered cards, nested panels).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub surface_2: Option<ColorSlot>,
+    /// Optional stronger hairline (hovered borders, focus rings).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub border_strong: Option<ColorSlot>,
+    /// Optional status colour: success / available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub success: Option<ColorSlot>,
+    /// Optional status colour: warning / in progress.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<ColorSlot>,
+    /// Optional status colour: danger / error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub danger: Option<ColorSlot>,
+}
+
+impl ColorPalette {
+    /// The optional roles (kebab-case CSS name, slot) that this palette sets.
+    #[must_use]
+    pub fn extra_roles(&self) -> [(&'static str, Option<&ColorSlot>); 6] {
+        [
+            ("bg-subtle", self.bg_subtle.as_ref()),
+            ("surface-2", self.surface_2.as_ref()),
+            ("border-strong", self.border_strong.as_ref()),
+            ("success", self.success.as_ref()),
+            ("warning", self.warning.as_ref()),
+            ("danger", self.danger.as_ref()),
+        ]
+    }
 }
 
 fn hex(raw: &str) -> HexColor {
@@ -162,6 +195,12 @@ impl Default for ColorPalette {
                 light: hex("#ffffff"),
                 dark: Some(hex("#0b1220")),
             },
+            bg_subtle: None,
+            surface_2: None,
+            border_strong: None,
+            success: None,
+            warning: None,
+            danger: None,
         }
     }
 }
