@@ -4916,6 +4916,10 @@ export interface components {
         };
         /** @description One menu item. */
         MenuItemResponse: {
+            /** @description Short badge shown beside the label; empty = none. */
+            badge: string;
+            /** @description One-line description shown under the label; empty = none. */
+            description: string;
             /**
              * Format: int64
              * @description Item id.
@@ -5759,6 +5763,10 @@ export interface components {
         };
         /** @description Partial update for a menu item. Absent fields are left alone. */
         UpdateItemBody: {
+            /** @description New badge (empty string clears it). */
+            badge?: string | null;
+            /** @description New description (empty string clears it). */
+            description?: string | null;
             /** @description Move the item to the top level, clearing any parent. */
             detach?: boolean;
             /** @description New link text. */

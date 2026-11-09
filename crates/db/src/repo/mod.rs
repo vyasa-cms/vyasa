@@ -39,7 +39,7 @@ pub use content_types::{
 };
 pub use managed::{ManagedInfoRow, ManagedRepo, ManagedRow};
 pub use media::{MediaFilter, MediaRepo, MediaStats, NewMedia};
-pub use menus::{MenuItemRow, MenuRow, MenusRepo, NewMenuItem};
+pub use menus::{MenuItemPatch, MenuItemRow, MenuRow, MenusRepo, NewMenuItem};
 pub use options::OptionsRepo;
 pub use plugins::{PluginAuditRow, PluginRow, PluginsRepo};
 pub use posts::{
