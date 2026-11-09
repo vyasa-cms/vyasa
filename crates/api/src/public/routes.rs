@@ -859,6 +859,7 @@ pub(super) async fn render_single(
                 _ => None,
             },
             entry: Some(entry_context(state_ref, &post).await),
+            entry_slug: Some(post.slug.clone()),
             // Which page a paginated listing on this entry shows.
             pagination_page: params.page.unwrap_or(1).max(1),
             ..PageContext::default()
@@ -1941,6 +1942,7 @@ pub async fn preview(
             _ => None,
         },
         entry: Some(entry_context(&state, &post).await),
+        entry_slug: Some(post.slug.clone()),
         ..PageContext::default()
     };
     // The template the entry will actually publish through, not always
@@ -2260,6 +2262,7 @@ async fn preview_single(
             _ => None,
         },
         entry: Some(entry_context(state, &post).await),
+        entry_slug: Some(post.slug.clone()),
         ..PageContext::default()
     };
     let template = match post.post_type {
