@@ -11,7 +11,7 @@ use std::fmt::Write as _;
 use serde::{Deserialize, Serialize};
 use vyasa_db::repo::{MenuItemRow, MenuRow};
 
-use super::service::{MAX_LABEL_LEN, MAX_MENU_DEPTH};
+use super::service::{MAX_BADGE_LEN, MAX_DESCRIPTION_LEN, MAX_LABEL_LEN, MAX_MENU_DEPTH};
 
 /// Most links one menu may hold, subtrees included. Generous for a nav,
 /// tight enough that a runaway model cannot stage a phone book.
@@ -28,12 +28,18 @@ pub(super) fn url_allowed(url: &str) -> bool {
 }
 
 /// One link, possibly with a submenu.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MenuDraftItem {
     /// Link text.
     pub label: String,
     /// Target href.
     pub url: String,
+    /// Optional one-line description shown under the label.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    /// Optional short badge shown beside the label.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub badge: String,
     /// Submenu, depth-limited by [`validate`](MenuDraft::validate).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub children: Vec<MenuDraftItem>,
@@ -68,6 +74,8 @@ impl MenuDraft {
                 .map(|r| MenuDraftItem {
                     label: r.label.trim().to_owned(),
                     url: r.url.clone(),
+                    description: r.description.trim().to_owned(),
+                    badge: r.badge.trim().to_owned(),
                     children: tree(rows, Some(r.id), depth + 1),
                 })
                 .collect()
@@ -143,6 +151,7 @@ fn check_items(items: &[MenuDraftItem], depth: usize, problems: &mut Vec<String>
                 item.url
             ));
         }
+        problems.extend(extras_problem(&item.description, &item.badge));
         if !item.children.is_empty() && depth >= MAX_MENU_DEPTH {
             problems.push(format!(
                 "{label:?} nests too deep — menus nest at most {MAX_MENU_DEPTH} levels"
@@ -151,6 +160,20 @@ fn check_items(items: &[MenuDraftItem], depth: usize, problems: &mut Vec<String>
             check_items(&item.children, depth + 1, problems);
         }
     }
+}
+
+/// The rule for an item's description and badge, shared with the service: both optional, bounded.
+#[must_use]
+pub fn extras_problem(description: &str, badge: &str) -> Option<String> {
+    if description.trim().chars().count() > MAX_DESCRIPTION_LEN {
+        return Some(format!(
+            "description must be at most {MAX_DESCRIPTION_LEN} characters"
+        ));
+    }
+    if badge.trim().chars().count() > MAX_BADGE_LEN {
+        return Some(format!("badge must be at most {MAX_BADGE_LEN} characters"));
+    }
+    None
 }
 
 fn esc(t: &str) -> String {
@@ -167,13 +190,21 @@ fn render_level(items: &[MenuDraftItem], depth: usize) -> String {
     }
     let mut out = String::from("<ul class=\"vy-menu\">");
     for item in items {
-        let _ = write!(
-            out,
-            "<li><a href=\"{}\">{}</a>{}</li>",
-            esc(&item.url),
-            esc(item.label.trim()),
-            render_level(&item.children, depth + 1)
-        );
+        let badge = item.badge.trim();
+        let description = item.description.trim();
+        let _ = write!(out, "<li><a href=\"{}\">", esc(&item.url));
+        out.push_str(&esc(item.label.trim()));
+        if !badge.is_empty() {
+            let _ = write!(out, " <span class=\"vy-menu-badge\">{}</span>", esc(badge));
+        }
+        if !description.is_empty() {
+            let _ = write!(
+                out,
+                "<span class=\"vy-menu-desc\">{}</span>",
+                esc(description)
+            );
+        }
+        let _ = write!(out, "</a>{}</li>", render_level(&item.children, depth + 1));
     }
     out.push_str("</ul>");
     out
@@ -188,7 +219,7 @@ mod tests {
         MenuDraftItem {
             label: label.into(),
             url: url.into(),
-            children: Vec::new(),
+            ..Default::default()
         }
     }
 
@@ -217,6 +248,45 @@ mod tests {
             "<ul class=\"vy-menu\"><li><a href=\"/\">Home</a></li>\
              <li><a href=\"https://docs.example.com\">Docs</a>\
              <ul class=\"vy-menu\"><li><a href=\"/api-docs\">API</a></li></ul></li></ul>"
+        );
+    }
+
+    #[test]
+    fn a_badge_and_description_render_inside_the_link_escaped() {
+        let d = draft(vec![MenuDraftItem {
+            description: "Batch & <streaming>".into(),
+            badge: "0.2".into(),
+            ..link("Engine", "/engine")
+        }]);
+        assert_eq!(
+            d.render_html(),
+            "<ul class=\"vy-menu\"><li><a href=\"/engine\">Engine \
+             <span class=\"vy-menu-badge\">0.2</span>\
+             <span class=\"vy-menu-desc\">Batch &amp; &lt;streaming&gt;</span></a></li></ul>"
+        );
+    }
+
+    #[test]
+    fn an_item_without_extras_renders_as_before() {
+        let d = draft(vec![link("Home", "/")]);
+        assert_eq!(
+            d.render_html(),
+            "<ul class=\"vy-menu\"><li><a href=\"/\">Home</a></li></ul>"
+        );
+    }
+
+    #[test]
+    fn overlong_description_and_badge_are_refused() {
+        let d = draft(vec![MenuDraftItem {
+            description: "d".repeat(MAX_DESCRIPTION_LEN + 1),
+            badge: "b".repeat(MAX_BADGE_LEN + 1),
+            ..link("Engine", "/engine")
+        }]);
+        let problems = d.validate();
+        assert_eq!(problems.len(), 1, "{problems:?}");
+        assert!(extras_problem("ok", &"b".repeat(MAX_BADGE_LEN + 1)).is_some());
+        assert!(
+            extras_problem(&"d".repeat(MAX_DESCRIPTION_LEN), &"b".repeat(MAX_BADGE_LEN)).is_none()
         );
     }
 
@@ -273,6 +343,8 @@ mod tests {
                 label: "Home".into(),
                 url: "/".into(),
                 sort_order: 0,
+                description: String::new(),
+                badge: String::new(),
             },
             MenuItemRow {
                 id: 11,
@@ -281,6 +353,8 @@ mod tests {
                 label: "Docs".into(),
                 url: "/docs".into(),
                 sort_order: 1,
+                description: String::new(),
+                badge: String::new(),
             },
             MenuItemRow {
                 id: 12,
@@ -289,6 +363,8 @@ mod tests {
                 label: "API".into(),
                 url: "/api".into(),
                 sort_order: 0,
+                description: String::new(),
+                badge: String::new(),
             },
         ];
         let d = MenuDraft::from_rows(&menu, &rows);

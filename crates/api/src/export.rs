@@ -188,6 +188,10 @@ pub struct ArchiveMenu {
 pub struct ArchiveMenuItem {
     pub label: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub badge: String,
     #[serde(default)]
     pub children: Vec<ArchiveMenuItem>,
 }
@@ -336,6 +340,8 @@ pub async fn build(state: &AppState, site_url: &str) -> Result<Archive, AppError
                 .map(|i| ArchiveMenuItem {
                     label: i.label,
                     url: i.url,
+                    description: i.description,
+                    badge: i.badge,
                     children: lift(i.children),
                 })
                 .collect()
@@ -1180,6 +1186,8 @@ pub async fn import(
                 .map(|i| vyasa_core::menu::MenuDraftItem {
                     label: i.label.clone(),
                     url: i.url.clone(),
+                    description: i.description.clone(),
+                    badge: i.badge.clone(),
                     children: lower(&i.children),
                 })
                 .collect()
