@@ -228,6 +228,7 @@ async fn a_visitor_can_read_and_comment() {
     let comment_id = commenting_works(base, post_id);
     moderation_is_honoured(base, &cookie, comment_id);
     footer_credit_follows_the_option(base, &cookie);
+    color_scheme_follows_the_option(base, &cookie);
     listings_and_feeds(base);
 }
 
@@ -449,6 +450,45 @@ fn footer_credit_follows_the_option(base: &str, cookie: &str) {
     assert_eq!(stored["footer_credit"], false, "round trip");
     assert_eq!(put(serde_json::json!(true)), 204);
     assert!(get(base, "/").contains(credit), "credit back on");
+}
+
+/// The default colour scheme is `system` (no `data-theme` on `<html>`) until
+/// an operator saves `light` or `dark`; it takes effect on the next page and
+/// anything else is refused.
+fn color_scheme_follows_the_option(base: &str, cookie: &str) {
+    let put = |value: serde_json::Value| {
+        http(
+            ureq::put(format!("{base}/api/v1/options").as_str())
+                .set("Cookie", cookie)
+                .send_json(serde_json::json!({ "color_scheme": value })),
+        )
+        .status()
+    };
+    let html_tag = |page: String| {
+        let at = page.find("<html").expect("html tag");
+        page[at..].split('>').next().unwrap_or_default().to_owned()
+    };
+    assert!(
+        !html_tag(get(base, "/")).contains("data-theme"),
+        "system by default"
+    );
+    assert_eq!(put(serde_json::json!("sepia")), 400, "unknown scheme");
+    assert_eq!(put(serde_json::json!(true)), 400, "must be a string");
+    assert_eq!(put(serde_json::json!("dark")), 204);
+    assert!(
+        html_tag(get(base, "/")).contains("data-theme=\"dark\""),
+        "dark default"
+    );
+    assert_eq!(put(serde_json::json!("light")), 204);
+    assert!(
+        html_tag(get(base, "/")).contains("data-theme=\"light\""),
+        "light default"
+    );
+    assert_eq!(put(serde_json::json!("system")), 204);
+    assert!(
+        !html_tag(get(base, "/")).contains("data-theme"),
+        "back to system"
+    );
 }
 
 /// Listings, pagination, the search route and the feeds.
