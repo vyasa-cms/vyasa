@@ -108,6 +108,8 @@ pub struct AppState {
     pub content_queries: std::sync::Arc<dyn vyasa_themes::ContentQueries>,
     /// Public-site render cache (phase 23); `None` until routes land.
     pub render_cache: Option<std::sync::Arc<crate::render_cache::RenderCache>>,
+    /// The `discourage_indexing` option, cached for the response middleware.
+    pub indexing_flag: std::sync::Arc<crate::middleware::demo::IndexingFlag>,
     /// Per-IP rate limiter shared across requests.
     pub rate_limiter: std::sync::Arc<crate::middleware::rate_limit::RateLimiter>,
     /// Progressive lockout tracker for repeated failed logins.
@@ -298,6 +300,7 @@ impl AppState {
                 .map(std::sync::Arc::new),
             content_queries,
             render_cache,
+            indexing_flag: std::sync::Arc::new(crate::middleware::demo::IndexingFlag::new()),
             rate_limiter: std::sync::Arc::new(crate::middleware::rate_limit::RateLimiter::new(
                 crate::middleware::rate_limit::DEFAULT_LIMITS.to_vec(),
             )),

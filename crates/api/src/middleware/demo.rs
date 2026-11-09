@@ -146,6 +146,74 @@ pub async fn demo(State(state): State<AppState>, req: Request<Body>, next: Next)
     Response::from_parts(parts, Body::from(out))
 }
 
+/// The `discourage_indexing` option as the middleware reads it: one
+/// database read at most every few seconds instead of one per response.
+/// Option writes call [`IndexingFlag::invalidate`] so a change shows at once.
+#[derive(Debug, Default)]
+pub struct IndexingFlag {
+    /// Milliseconds since `epoch` of the last read; `u64::MAX` = never read.
+    read_at: std::sync::atomic::AtomicU64,
+    on: std::sync::atomic::AtomicBool,
+}
+
+const INDEXING_FLAG_TTL_MS: u64 = 5_000;
+
+impl IndexingFlag {
+    /// A flag that reads the option on first use.
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            read_at: std::sync::atomic::AtomicU64::new(u64::MAX),
+            on: std::sync::atomic::AtomicBool::new(false),
+        }
+    }
+
+    /// Forces the next read to go to the database.
+    pub fn invalidate(&self) {
+        self.read_at
+            .store(u64::MAX, std::sync::atomic::Ordering::Relaxed);
+    }
+
+    /// Whether the option is on, read at most every few seconds.
+    pub async fn get(&self, options: &vyasa_core::options::OptionsService) -> bool {
+        use std::sync::atomic::Ordering::Relaxed;
+        static EPOCH: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        let now = u64::try_from(
+            EPOCH
+                .get_or_init(std::time::Instant::now)
+                .elapsed()
+                .as_millis(),
+        )
+        .unwrap_or(u64::MAX - 1);
+        let at = self.read_at.load(Relaxed);
+        if at != u64::MAX && now.saturating_sub(at) < INDEXING_FLAG_TTL_MS {
+            return self.on.load(Relaxed);
+        }
+        let on = options.discourage_indexing().await;
+        self.on.store(on, Relaxed);
+        self.read_at.store(now, Relaxed);
+        on
+    }
+}
+
+/// Adds `X-Robots-Tag: noindex, nofollow` to every response while the
+/// `discourage_indexing` option is on (staging sites). Demo mode does the
+/// same on its own.
+pub async fn discourage_indexing(
+    State(state): State<AppState>,
+    req: Request<Body>,
+    next: Next,
+) -> Response {
+    let mut resp = next.run(req).await;
+    if !state.config.demo.enabled && state.indexing_flag.get(&state.options_service).await {
+        resp.headers_mut().insert(
+            header::HeaderName::from_static("x-robots-tag"),
+            HeaderValue::from_static("noindex, nofollow"),
+        );
+    }
+    resp
+}
+
 #[cfg(test)]
 mod tests {
     use super::{inject_banner, is_public_page};

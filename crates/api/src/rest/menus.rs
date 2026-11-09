@@ -42,6 +42,10 @@ pub struct MenuItemResponse {
     pub url: String,
     /// Sibling order.
     pub sort_order: i32,
+    /// One-line description shown under the label; empty = none.
+    pub description: String,
+    /// Short badge shown beside the label; empty = none.
+    pub badge: String,
 }
 
 /// Create payload.
@@ -73,6 +77,12 @@ pub struct AddItemBody {
     /// Sibling order.
     #[serde(default)]
     pub sort_order: i32,
+    /// One-line description shown under the label (at most 140 characters).
+    #[serde(default)]
+    pub description: String,
+    /// Short badge shown beside the label (at most 24 characters).
+    #[serde(default)]
+    pub badge: String,
 }
 
 impl From<vyasa_db::repo::MenuRow> for MenuResponse {
@@ -94,6 +104,8 @@ impl From<MenuItemRow> for MenuItemResponse {
             label: i.label,
             url: i.url,
             sort_order: i.sort_order,
+            description: i.description,
+            badge: i.badge,
         }
     }
 }
@@ -147,6 +159,8 @@ pub async fn add_item(
         label: body.label,
         url: body.url,
         sort_order: body.sort_order,
+        description: body.description,
+        badge: body.badge,
     };
     let row = service(&state)
         .add_item(id, &item)
@@ -171,6 +185,10 @@ pub struct UpdateItemBody {
     pub detach: bool,
     /// New position among siblings.
     pub sort_order: Option<i32>,
+    /// New description (empty string clears it).
+    pub description: Option<String>,
+    /// New badge (empty string clears it).
+    pub badge: Option<String>,
 }
 
 /// `PATCH /api/v1/menus/items/{item_id}` — rename, re-parent or reorder.
@@ -190,20 +208,30 @@ pub async fn update_item(
     Path(item_id): Path<i64>,
     Json(body): Json<UpdateItemBody>,
 ) -> ApiResult<Json<MenuItemResponse>> {
+    if let Some(problem) = vyasa_core::menu::item_extras_problem(
+        body.description.as_deref().unwrap_or(""),
+        body.badge.as_deref().unwrap_or(""),
+    ) {
+        return Err(ApiError(vyasa_common::AppError::validation(problem)));
+    }
     let row = state
         .menus
         .update_item(
             item_id,
-            body.label.as_deref(),
-            body.url.as_deref(),
-            // Three-state: `detach` clears the parent, a value re-parents,
-            // and absent leaves the item where it is.
-            if body.detach {
-                Some(None)
-            } else {
-                body.parent_id.map(Some)
+            vyasa_db::repo::MenuItemPatch {
+                label: body.label.as_deref(),
+                url: body.url.as_deref(),
+                // Three-state: `detach` clears the parent, a value re-parents,
+                // and absent leaves the item where it is.
+                parent_id: if body.detach {
+                    Some(None)
+                } else {
+                    body.parent_id.map(Some)
+                },
+                sort_order: body.sort_order,
+                description: body.description.as_deref().map(str::trim),
+                badge: body.badge.as_deref().map(str::trim),
             },
-            body.sort_order,
         )
         .await
         .map_err(ApiError)?;

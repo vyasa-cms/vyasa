@@ -9,6 +9,10 @@ use super::draft::{url_allowed, MenuDraft, MenuDraftItem};
 pub const MAX_MENU_DEPTH: usize = 3;
 /// Maximum label length.
 pub const MAX_LABEL_LEN: usize = 80;
+/// Longest item description, in characters.
+pub const MAX_DESCRIPTION_LEN: usize = 140;
+/// Longest item badge, in characters.
+pub const MAX_BADGE_LEN: usize = 24;
 
 /// Application service for menus.
 #[derive(Clone, Debug)]
@@ -153,6 +157,8 @@ impl MenuService {
                             label: item.label.trim().to_owned(),
                             url: item.url.clone(),
                             sort_order: i32::try_from(order).unwrap_or(i32::MAX),
+                            description: item.description.trim().to_owned(),
+                            badge: item.badge.trim().to_owned(),
                         },
                     )
                     .await?;
@@ -178,6 +184,9 @@ impl MenuService {
             return Err(AppError::validation(format!(
                 "label must be 1..={MAX_LABEL_LEN} characters"
             )));
+        }
+        if let Some(problem) = super::draft::extras_problem(&item.description, &item.badge) {
+            return Err(AppError::validation(problem));
         }
         if !url_allowed(&item.url) {
             return Err(AppError::validation(format!(

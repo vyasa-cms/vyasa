@@ -748,7 +748,8 @@ async fn menus_crud_and_validation_rules() {
                     parent_id: None,
                     label: String::new(),
                     url: "/".into(),
-                    sort_order: 0
+                    sort_order: 0,
+                    ..Default::default()
                 }
             )
             .await
@@ -763,7 +764,8 @@ async fn menus_crud_and_validation_rules() {
                     parent_id: None,
                     label: "x".into(),
                     url: "javascript:alert(1)".into(),
-                    sort_order: 0
+                    sort_order: 0,
+                    ..Default::default()
                 }
             )
             .await
@@ -779,6 +781,7 @@ async fn menus_crud_and_validation_rules() {
                 label: "Home".into(),
                 url: "/".into(),
                 sort_order: 0,
+                ..Default::default()
             },
         )
         .await
@@ -793,7 +796,8 @@ async fn menus_crud_and_validation_rules() {
                     parent_id: Some(home.id),
                     label: "X".into(),
                     url: "/x".into(),
-                    sort_order: 0
+                    sort_order: 0,
+                    ..Default::default()
                 }
             )
             .await,
@@ -953,6 +957,7 @@ async fn a_menu_draft_applies_whole_created_then_rewritten() {
         label: label.into(),
         url: url.into(),
         children: Vec::new(),
+        ..Default::default()
     };
 
     // First apply creates the menu — nested items and all.
@@ -1030,6 +1035,7 @@ async fn menus_render_nested_html() {
                 label: "Home".into(),
                 url: "/".into(),
                 sort_order: 0,
+                ..Default::default()
             },
         )
         .await
@@ -1042,6 +1048,7 @@ async fn menus_render_nested_html() {
                 label: "Docs".into(),
                 url: "https://docs.example.com".into(),
                 sort_order: 1,
+                ..Default::default()
             },
         )
         .await
@@ -1054,6 +1061,7 @@ async fn menus_render_nested_html() {
                 label: "API".into(),
                 url: "/api-docs".into(),
                 sort_order: 0,
+                ..Default::default()
             },
         )
         .await
