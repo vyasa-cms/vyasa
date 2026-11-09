@@ -332,7 +332,7 @@ pub async fn bootstrap_menu(
         items: vec![vyasa_core::menu::MenuDraftItem {
             label: "Home".to_owned(),
             url: "/".to_owned(),
-            children: Vec::new(),
+            ..Default::default()
         }],
     };
     service.apply_draft(&draft).await?;

@@ -32,10 +32,14 @@ pub struct MenuItemRow {
     pub url: String,
     /// Ascending position within siblings.
     pub sort_order: i32,
+    /// Optional one-line description shown under the label; empty = none.
+    pub description: String,
+    /// Optional short badge shown beside the label (`0.2`, `Early access`); empty = none.
+    pub badge: String,
 }
 
 /// Payload to create a menu item.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct NewMenuItem {
     /// Parent item id (nesting).
     pub parent_id: Option<i64>,
@@ -45,6 +49,30 @@ pub struct NewMenuItem {
     pub url: String,
     /// Position within siblings.
     pub sort_order: i32,
+    /// Optional one-line description; empty = none.
+    #[serde(default)]
+    pub description: String,
+    /// Optional short badge; empty = none.
+    #[serde(default)]
+    pub badge: String,
+}
+
+/// Fields to change on a menu item; `None` leaves a field as it was.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct MenuItemPatch<'a> {
+    /// New label.
+    pub label: Option<&'a str>,
+    /// New url.
+    pub url: Option<&'a str>,
+    /// Three-state parent: `None` leaves it, `Some(None)` detaches to the top
+    /// level, `Some(Some(id))` re-parents.
+    pub parent_id: Option<Option<i64>>,
+    /// New position among siblings.
+    pub sort_order: Option<i32>,
+    /// New description; `Some("")` clears it.
+    pub description: Option<&'a str>,
+    /// New badge; `Some("")` clears it.
+    pub badge: Option<&'a str>,
 }
 
 /// Data access for menus.
@@ -197,9 +225,9 @@ impl MenusRepo {
             }
         }
         sqlx::query_as::<_, MenuItemRow>(
-            "INSERT INTO menu_items (id, menu_id, parent_id, label, url, sort_order)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             RETURNING id, menu_id, parent_id, label, url, sort_order",
+            "INSERT INTO menu_items (id, menu_id, parent_id, label, url, sort_order, description, badge)
+             VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+             RETURNING id, menu_id, parent_id, label, url, sort_order, description, badge",
         )
         .bind(vyasa_common::next_id_i64())
         .bind(menu_id)
@@ -207,6 +235,8 @@ impl MenusRepo {
         .bind(&item.label)
         .bind(&item.url)
         .bind(item.sort_order)
+        .bind(&item.description)
+        .bind(&item.badge)
         .fetch_one(&self.pool)
         .await
         .map_err(|err| AppError::db(format!("menu item insert failed: {err}")))
@@ -225,7 +255,7 @@ impl MenusRepo {
     /// [`AppError::Db`] on failure.
     pub async fn items(&self, menu_id: i64) -> Result<Vec<MenuItemRow>, AppError> {
         sqlx::query_as::<_, MenuItemRow>(
-            "SELECT id, menu_id, parent_id, label, url, sort_order
+            "SELECT id, menu_id, parent_id, label, url, sort_order, description, badge
              FROM menu_items WHERE menu_id = $1
              ORDER BY sort_order, id",
         )
@@ -235,7 +265,7 @@ impl MenusRepo {
         .map_err(|err| AppError::db(format!("menu items failed: {err}")))
     }
 
-    /// Updates one item's label, url, parent or position.
+    /// Updates one item's label, url, parent, position, description or badge.
     ///
     /// Passing `None` leaves that field as it was. Re-parenting is validated
     /// against the same menu so an item cannot be moved into another menu's
@@ -248,11 +278,16 @@ impl MenusRepo {
     pub async fn update_item(
         &self,
         item_id: i64,
-        label: Option<&str>,
-        url: Option<&str>,
-        parent_id: Option<Option<i64>>,
-        sort_order: Option<i32>,
+        patch: MenuItemPatch<'_>,
     ) -> Result<MenuItemRow, AppError> {
+        let MenuItemPatch {
+            label,
+            url,
+            parent_id,
+            sort_order,
+            description,
+            badge,
+        } = patch;
         let current: Option<(i64, Option<i64>)> =
             sqlx::query_as("SELECT menu_id, parent_id FROM menu_items WHERE id = $1")
                 .bind(item_id)
@@ -297,9 +332,11 @@ impl MenusRepo {
                 SET label = COALESCE($2, label),
                     url = COALESCE($3, url),
                     parent_id = CASE WHEN $4 THEN $5 ELSE parent_id END,
-                    sort_order = COALESCE($6, sort_order)
+                    sort_order = COALESCE($6, sort_order),
+                    description = COALESCE($7, description),
+                    badge = COALESCE($8, badge)
               WHERE id = $1
-              RETURNING id, menu_id, parent_id, label, url, sort_order",
+              RETURNING id, menu_id, parent_id, label, url, sort_order, description, badge",
         )
         .bind(item_id)
         .bind(label)
@@ -307,6 +344,8 @@ impl MenusRepo {
         .bind(set_parent)
         .bind(parent_value)
         .bind(sort_order)
+        .bind(description)
+        .bind(badge)
         .fetch_optional(&self.pool)
         .await
         .map_err(|err| AppError::db(format!("menu item update failed: {err}")))?

@@ -60,6 +60,8 @@ pub const SITE_OPTION_KEYS: &[&str] = &[
     "registration_default_role",
     // The small "Made with Vyasa" line under the footer; on unless set false.
     "footer_credit",
+    // Staging sites: serve `Disallow: /` and `X-Robots-Tag: noindex` everywhere.
+    "discourage_indexing",
     // Default colour scheme: "system" (OS), "light" or "dark"; a visitor's toggle wins.
     "color_scheme",
 ];
@@ -563,6 +565,11 @@ impl OptionsService {
             "footer_credit" if !value.is_boolean() => {
                 return Err(AppError::validation("footer_credit must be true or false"));
             }
+            "discourage_indexing" if !value.is_boolean() => {
+                return Err(AppError::validation(
+                    "discourage_indexing must be true or false",
+                ));
+            }
             "color_scheme" if !matches!(value.as_str(), Some("system" | "light" | "dark")) => {
                 return Err(AppError::validation(
                     "color_scheme must be \"system\", \"light\" or \"dark\"",
@@ -712,6 +719,19 @@ impl OptionsService {
                 .and_then(|v| v.as_str().map(str::to_owned))
                 .unwrap_or_else(|| "system".to_owned()),
         })
+    }
+
+    /// Whether the site asks search engines to stay away (`robots.txt`
+    /// `Disallow: /` and `X-Robots-Tag: noindex`); off unless set. For
+    /// staging sites. A read failure counts as off, so a broken options
+    /// store never hides a live site.
+    pub async fn discourage_indexing(&self) -> bool {
+        self.raw("discourage_indexing")
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
     }
 
     /// Absolute public base URL with no trailing slash, e.g.

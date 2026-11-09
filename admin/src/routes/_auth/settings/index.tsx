@@ -406,6 +406,7 @@ const SECTIONS: Section[] = [
     title: "Advanced",
     description: "Styles applied on top of your theme.",
     keys: [
+      { key: "discourage_indexing", label: "Ask search engines not to index this site", hint: "For staging sites: serves robots.txt Disallow: / and an X-Robots-Tag: noindex header on every response. Off by default.", kind: "toggle" },
       {
         key: "color_scheme",
         label: "Default colour scheme",
