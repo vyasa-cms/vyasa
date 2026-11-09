@@ -39,6 +39,7 @@ read correctly without it).
 | Latest version | The label of the version served at `/docs`; empty for unversioned docs |
 | Latest label | How the version switcher names it, default `Latest` |
 | Older versions | One `label = folder` per line, for example `v1 = docs-v1` |
+| Sections | One `slug = Title \| folder [@ ref]` per line, for example `sql = SQL reference \| reference/sql` |
 | Docs title | The breadcrumb root, default `Docs` |
 | Search placeholder | Default `Search the docs` |
 
@@ -139,8 +140,22 @@ Two ways to keep old documentation online:
 2. **A `version:` key in front matter.** A page with `version: v2` moves
    under that version's entry, keeping its relative path.
 
+3. **A version from another branch or tag.** Add `@ ref` to a line under
+   *Older versions*: `next = docs @ main` serves the `docs` folder of the
+   `main` branch at `/docs/next/`, while `/docs` keeps following the
+   plugin's branch (for example a release branch or tag). Pushes to that
+   branch or tag reach the webhook like pushes to the main one, and each
+   page's *Edit source* link points at its own ref. Up to 4 distinct refs.
+
 Releasing v4 means setting *Latest version* to `v4` and adding `v3 =
 docs-v3`; the next sync moves the pages.
+
+## Sections
+
+A section is a separate folder served under `/docs/<slug>/` with its own
+sidebar, a breadcrumb that starts at the section title, and a search box
+limited to it (`doc-section:<slug>`). Sections are single-version. Removing a
+line trashes the section's pages on the next sync.
 
 ## Limits
 
