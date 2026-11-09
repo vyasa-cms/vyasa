@@ -195,8 +195,7 @@ fn clean_start(e: &BytesStart<'_>, root: bool) -> Result<Option<BytesStart<'stat
             .into_owned();
         let keep = match key.as_str() {
             // Written once, below, on the root.
-            "xmlns" => false,
-            "xmlns:xlink" => false,
+            "xmlns" | "xmlns:xlink" => false,
             // A reference to something in the same file, on the elements that take one.
             "href" | "xlink:href" => {
                 matches!(name.as_str(), "use" | "linearGradient" | "radialGradient")
