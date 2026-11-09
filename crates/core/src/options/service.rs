@@ -60,6 +60,8 @@ pub const SITE_OPTION_KEYS: &[&str] = &[
     "registration_default_role",
     // The small "Made with Vyasa" line under the footer; on unless set false.
     "footer_credit",
+    // Default colour scheme: "system" (OS), "light" or "dark"; a visitor's toggle wins.
+    "color_scheme",
 ];
 
 /// Option rows the media-storage settings own (`/api/v1/media/storage`).
@@ -578,6 +580,11 @@ impl OptionsService {
             "footer_credit" if !value.is_boolean() => {
                 return Err(AppError::validation("footer_credit must be true or false"));
             }
+            "color_scheme" if !matches!(value.as_str(), Some("system" | "light" | "dark")) => {
+                return Err(AppError::validation(
+                    "color_scheme must be \"system\", \"light\" or \"dark\"",
+                ));
+            }
             "newsletter_enabled" if !value.is_boolean() => {
                 return Err(AppError::validation(
                     "newsletter_enabled must be true or false",
@@ -716,6 +723,11 @@ impl OptionsService {
                 .await?
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true),
+            color_scheme: self
+                .raw("color_scheme")
+                .await?
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_else(|| "system".to_owned()),
         })
     }
 
@@ -850,6 +862,8 @@ pub struct SiteIdentity {
     pub favicon_media_id: Option<i64>,
     /// Whether the footer carries the "Made with Vyasa" line (default on).
     pub footer_credit: bool,
+    /// Default colour scheme: `system`, `light` or `dark`.
+    pub color_scheme: String,
 }
 
 impl Default for SiteIdentity {
@@ -860,6 +874,7 @@ impl Default for SiteIdentity {
             logo_media_id: None,
             favicon_media_id: None,
             footer_credit: true,
+            color_scheme: "system".to_owned(),
         }
     }
 }

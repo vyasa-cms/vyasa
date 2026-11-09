@@ -21,6 +21,8 @@ follows [semantic versioning](https://semver.org) as described in
 - The Cloudflare package passes the R2 keys only when both secrets are
   set, so a site can start on the container's disk and move to R2 from
   the admin.
+- `color_scheme` site option (`system`, `light`, `dark`; Settings > Advanced): the scheme first-time visitors see. `light`/`dark` set `data-theme` on `<html>`; a visitor's own toggle still wins, and `system` (default) follows the device.
+- Built-in colour-scheme toggle: every page links `/theme-assets/theme-toggle.js` in `<head>`. It applies the visitor's stored choice before first paint (no flash), and any element with `data-vy-theme-toggle` switches light/dark and remembers it (`localStorage` key `vy-theme`). Works under `script-src 'self'`; themes only add the button.
 
 ## [0.3.5] - 2026-10-24
 

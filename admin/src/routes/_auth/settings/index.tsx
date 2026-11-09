@@ -407,6 +407,17 @@ const SECTIONS: Section[] = [
     title: "Advanced",
     description: "Styles applied on top of your theme.",
     keys: [
+      {
+        key: "color_scheme",
+        label: "Default colour scheme",
+        hint: "Which scheme first-time visitors see. “System” follows their device; a visitor's own light/dark toggle always wins.",
+        kind: "select",
+        options: [
+          { value: "system", label: "System (follow the visitor's device)" },
+          { value: "light", label: "Light" },
+          { value: "dark", label: "Dark" },
+        ],
+      },
       { key: "footer_credit", label: "Show 'Made with Vyasa' in the footer", hint: "A small link under the copyright line on every page. On by default; turn it off any time.", kind: "toggle", defaultOn: true },
       { key: "custom_css", label: "Custom CSS", hint: "Scoped to your site's content, so it can't affect this admin.", kind: "css" },
     ],

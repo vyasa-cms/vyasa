@@ -29,6 +29,9 @@ pub struct SiteMeta {
     pub asset_head: String,
     /// Whether to add the "Made with Vyasa" line to the footer.
     pub footer_credit: bool,
+    /// The site's default colour scheme: `system` (follow the visitor's OS),
+    /// `light` or `dark`. A visitor's own toggle still wins.
+    pub color_scheme: String,
 }
 
 impl Default for SiteMeta {
@@ -40,6 +43,7 @@ impl Default for SiteMeta {
             logo_url: None,
             asset_head: String::new(),
             footer_credit: true,
+            color_scheme: "system".to_owned(),
         }
     }
 }
@@ -387,11 +391,15 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
     );
     fill_field_refs(&mut ctx, &engine.field_refs(template_name));
     let html = engine.render_json(template_name, &ctx)?;
-    Ok(if site.footer_credit {
+    let html = if site.footer_credit {
         add_footer_credit(html)
     } else {
         html
-    })
+    };
+    Ok(add_theme_toggle(add_default_scheme(
+        html,
+        &site.color_scheme,
+    )))
 }
 
 /// The "Made with Vyasa" line.
@@ -408,6 +416,61 @@ fn add_footer_credit(mut html: String) -> String {
     if let Some(at) = html.rfind("</footer>") {
         html.insert_str(at, FOOTER_CREDIT);
     }
+    html
+}
+
+/// The tag that loads the colour-scheme toggle. The URL carries a hash of
+/// the script, so the response can be cached for good and a changed script
+/// still reaches visitors.
+#[must_use]
+pub fn theme_toggle_tag() -> String {
+    use std::sync::OnceLock;
+    static VERSION: OnceLock<u64> = OnceLock::new();
+    // FNV-1a: fixed by definition, so the URL (and the page snapshots) do
+    // not move with the Rust toolchain.
+    let version = VERSION.get_or_init(|| {
+        crate::sections::THEME_TOGGLE_JS
+            .bytes()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+                (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+            })
+    });
+    format!("<script src=\"/theme-assets/theme-toggle.js?v={version:x}\"></script>")
+}
+
+/// Links the toggle script at the end of `<head>`. It is blocking on
+/// purpose: it applies a stored choice before first paint, so a returning
+/// visitor sees no flash. A page with no `</head>` gets none, and a page
+/// that already links it is left alone.
+fn add_theme_toggle(mut html: String) -> String {
+    if let Some(at) = html.find("</head>") {
+        if !html[..at].contains("/theme-assets/theme-toggle.js") {
+            html.insert_str(at, &theme_toggle_tag());
+        }
+    }
+    html
+}
+
+/// Sets the site's default colour scheme on the `<html>` tag as
+/// `data-theme`, which the generated CSS already honours over the OS
+/// setting. `system` (or anything unknown) adds nothing, so the OS decides;
+/// a tag that already carries `data-theme` is left alone, and a theme's own
+/// toggle that sets the attribute afterwards still wins.
+fn add_default_scheme(html: String, scheme: &str) -> String {
+    if scheme != "light" && scheme != "dark" {
+        return html;
+    }
+    let Some(at) = html.find("<html") else {
+        return html;
+    };
+    let Some(end) = html[at..].find('>') else {
+        return html;
+    };
+    if html[at..at + end].contains("data-theme") {
+        return html;
+    }
+    let mut html = html;
+    html.insert_str(at + "<html".len(), &format!(" data-theme=\"{scheme}\""));
     html
 }
 
