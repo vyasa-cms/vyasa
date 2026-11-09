@@ -53,6 +53,7 @@ pub async fn put(
     crate::policy::option_write(&principal, [key.as_str()])?;
     state.options_service.put(&key, value).await?;
     // Site settings can appear anywhere: drop every rendered page.
+    state.indexing_flag.invalidate();
     if let Some(cache) = &state.render_cache {
         cache.invalidate_options();
     }
@@ -117,6 +118,7 @@ pub async fn put_many(
         state.options_service.put(&key, value).await?;
     }
 
+    state.indexing_flag.invalidate();
     if let Some(cache) = &state.render_cache {
         cache.invalidate_options();
     }
