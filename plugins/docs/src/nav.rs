@@ -30,6 +30,8 @@ pub struct Node {
     pub hide: bool,
     /// Field `version_root`.
     pub version_root: bool,
+    /// Field `section_root`.
+    pub section_root: bool,
     /// Field `section_label`.
     pub label: String,
 }
@@ -69,6 +71,7 @@ fn node_of(v: &Value) -> Option<Node> {
         url: v["url"].as_str()?.to_owned(),
         hide: f["hide_from_nav"].as_bool().unwrap_or(false),
         version_root: f["version_root"].as_bool().unwrap_or(false),
+        section_root: f["section_root"].as_bool().unwrap_or(false),
         label: f["section_label"].as_str().unwrap_or("").to_owned(),
     })
 }
@@ -136,14 +139,24 @@ impl Page {
         self.node(top).filter(|n| n.version_root)
     }
 
+    /// The doc section this page lives under, if any.
+    fn section_root(&self) -> Option<&Node> {
+        let top = self
+            .ancestors
+            .first()
+            .map(String::as_str)
+            .or(Some(self.id.as_str()))?;
+        self.node(top).filter(|n| n.section_root)
+    }
+
     /// The nodes the sidebar lists at its top level.
     fn nav_roots(&self) -> Vec<&Node> {
-        match self.version_root() {
+        match self.version_root().or_else(|| self.section_root()) {
             Some(v) => self.children(Some(&v.id)),
             None => self
                 .children(None)
                 .into_iter()
-                .filter(|n| !n.version_root)
+                .filter(|n| !n.version_root && !n.section_root)
                 .collect(),
         }
     }
@@ -152,7 +165,7 @@ impl Page {
     fn flat(&self) -> Vec<&Node> {
         fn walk<'a>(p: &'a Page, nodes: Vec<&'a Node>, out: &mut Vec<&'a Node>) {
             for n in nodes {
-                if n.hide || n.version_root {
+                if n.hide || n.version_root || n.section_root {
                     continue;
                 }
                 out.push(n);
@@ -175,11 +188,11 @@ impl Page {
 /// The sidebar: a collapsible tree with the current page marked, a version
 /// switcher when the site has more than one version.
 #[must_use]
-pub fn sidebar(page: &Page, latest_label: &str) -> String {
+pub fn sidebar(page: &Page, latest_label: &str, unreleased: &[String]) -> String {
     let mut out = String::from(
         "<details class=\"docs-drawer\" open><summary class=\"docs-drawer__toggle\">Pages</summary>",
     );
-    out.push_str(&version_switcher(page, latest_label));
+    out.push_str(&version_switcher(page, latest_label, unreleased));
     out.push_str("<nav class=\"docs-nav\" aria-label=\"Documentation\">");
     out.push_str(&list(page, page.nav_roots(), 0));
     out.push_str("</nav></details>");
@@ -190,7 +203,7 @@ fn list(page: &Page, nodes: Vec<&Node>, depth: usize) -> String {
     let mut out = String::from("<ul class=\"docs-nav__list\">");
     let mut last_label = String::new();
     for n in nodes {
-        if n.hide || n.version_root {
+        if n.hide || n.version_root || n.section_root {
             continue;
         }
         if !n.label.is_empty() && n.label != last_label {
@@ -217,7 +230,7 @@ fn list(page: &Page, nodes: Vec<&Node>, depth: usize) -> String {
         let visible_kids: Vec<&Node> = kids
             .iter()
             .copied()
-            .filter(|k| !k.hide && !k.version_root)
+            .filter(|k| !k.hide && !k.version_root && !k.section_root)
             .collect();
         if visible_kids.is_empty() {
             out.push_str(&format!("<li class=\"docs-nav__item\">{link}</li>"));
@@ -233,7 +246,10 @@ fn list(page: &Page, nodes: Vec<&Node>, depth: usize) -> String {
     out
 }
 
-fn version_switcher(page: &Page, latest_label: &str) -> String {
+fn version_switcher(page: &Page, latest_label: &str, unreleased: &[String]) -> String {
+    if page.section_root().is_some() {
+        return String::new();
+    }
     let roots: Vec<&Node> = page
         .children(None)
         .into_iter()
@@ -257,8 +273,13 @@ fn version_switcher(page: &Page, latest_label: &str) -> String {
         esc(latest_label)
     ));
     for r in roots {
+        let mark = if unreleased.contains(&r.title) {
+            " <span class=\"docs-versions__mark\">unreleased</span>"
+        } else {
+            ""
+        };
         out.push_str(&format!(
-            "<li><a class=\"docs-versions__link{}\" href=\"{}\">{}</a></li>",
+            "<li><a class=\"docs-versions__link{}\" href=\"{}\">{}{mark}</a></li>",
             if current_root == Some(r.id.as_str()) {
                 " is-current"
             } else {
@@ -359,7 +380,7 @@ pub fn breadcrumbs(page: &Page, home_label: &str) -> String {
 
 /// The notice on a page of an old version, linking to the same page in the latest.
 #[must_use]
-pub fn banner(page: &Page, latest_label: &str) -> String {
+pub fn banner(page: &Page, latest_label: &str, unreleased: &[String]) -> String {
     let Some(root) = page.version_root() else {
         return String::new();
     };
@@ -390,8 +411,13 @@ pub fn banner(page: &Page, latest_label: &str) -> String {
         }
     }
     let href = target.map_or_else(|| format!("/{}", page.base()), |n| n.url.clone());
+    let kind = if unreleased.contains(&root.title) {
+        "the unreleased documentation for"
+    } else {
+        "the documentation for"
+    };
     format!(
-        "<div class=\"docs-banner\" role=\"note\"><span>You are reading the documentation for <strong>{}</strong>.</span> <a href=\"{}\">Go to {}</a></div>",
+        "<div class=\"docs-banner\" role=\"note\"><span>You are reading {kind} <strong>{}</strong>.</span> <a href=\"{}\">Go to {}</a></div>",
         esc(&root.title),
         esc(&href),
         esc(latest_label)
@@ -402,16 +428,32 @@ pub fn banner(page: &Page, latest_label: &str) -> String {
 /// into its scoped search (`/search?type=doc&term=doc-version:v2`).
 #[must_use]
 pub fn search(page: &Page, latest_version: &str, placeholder: &str) -> String {
+    if let Some(sec) = page.section_root() {
+        return search_form(
+            page,
+            &format!("doc-section:{}", crate::plan::slugify(&sec.slug)),
+            placeholder,
+        );
+    }
     let version = page.version_root().map_or_else(
         || crate::plan::slugify(latest_version),
         |n| crate::plan::slugify(&n.slug),
     );
-    let hidden = if version.is_empty() {
+    let term = if version.is_empty() {
+        String::new()
+    } else {
+        format!("doc-version:{version}")
+    };
+    search_form(page, &term, placeholder)
+}
+
+fn search_form(page: &Page, term: &str, placeholder: &str) -> String {
+    let hidden = if term.is_empty() {
         String::new()
     } else {
         format!(
-            "<input type=\"hidden\" name=\"term\" value=\"doc-version:{}\">",
-            esc(&version)
+            "<input type=\"hidden\" name=\"term\" value=\"{}\">",
+            esc(term)
         )
     };
     format!(
@@ -449,6 +491,36 @@ mod tests {
     }
 
     #[test]
+    fn a_section_has_its_own_sidebar_breadcrumb_and_search_scope() {
+        let v = json!({"context": {
+            "entry": {"id": "22", "ancestors": ["20"]},
+            "tree": [
+                n("1", None, 10, "Overview", "/docs/overview", json!({})),
+                n("9", None, 900, "v1", "/docs/v1", json!({"version_root": true, "hide_from_nav": true})),
+                n("20", None, 950, "SQL reference", "/docs/sql", json!({"section_root": true, "hide_from_nav": true})),
+                n("22", Some("20"), 10, "SELECT", "/docs/sql/select", json!({})),
+                n("23", Some("20"), 20, "INSERT", "/docs/sql/insert", json!({})),
+            ]
+        }});
+        let p = parse(&v).unwrap();
+        let side = sidebar(&p, "latest", &[]);
+        assert!(side.contains("SELECT") && side.contains("INSERT"));
+        assert!(!side.contains("Overview") && !side.contains("docs-versions"));
+        let crumbs = breadcrumbs(&p, "Docs");
+        assert!(crumbs.contains("<a href=\"/docs/sql\">SQL reference</a>"));
+        assert!(search(&p, "latest", "s").contains("value=\"doc-section:sql\""));
+        assert!(pager(&p).contains("INSERT"));
+        // The main sidebar never lists a section.
+        let main = parse(&json!({"context": {"entry": {"id": "1", "ancestors": []}, "tree": v["context"]["tree"]}})).unwrap();
+        let side = sidebar(&main, "latest", &[]);
+        assert!(
+            side.contains("Overview")
+                && !side.contains("SQL reference")
+                && !side.contains("SELECT")
+        );
+    }
+
+    #[test]
     fn the_payload_parses() {
         let p = parse(&payload("3", &["2"])).unwrap();
         assert_eq!(p.id, "3");
@@ -461,7 +533,7 @@ mod tests {
     #[test]
     fn the_sidebar_marks_the_current_page_opens_its_path_and_hides_hidden_pages() {
         let p = parse(&payload("3", &["2"])).unwrap();
-        let html = sidebar(&p, "Latest");
+        let html = sidebar(&p, "Latest", &[]);
         assert!(html.contains("aria-current=\"page\""), "{html}");
         assert_eq!(html.matches("aria-current").count(), 1);
         assert!(
@@ -481,7 +553,7 @@ mod tests {
     #[test]
     fn inside_an_old_version_the_nav_is_that_versions_pages() {
         let p = parse(&payload("10", &["9"])).unwrap();
-        let html = sidebar(&p, "Latest");
+        let html = sidebar(&p, "Latest", &[]);
         assert!(html.contains("Old guide") && html.contains("Old install"));
         assert!(!html.contains("Overview"));
     }
@@ -525,7 +597,10 @@ mod tests {
 
     #[test]
     fn the_banner_appears_only_on_old_versions_and_links_to_the_same_page() {
-        assert_eq!(banner(&parse(&payload("3", &["2"])).unwrap(), "latest"), "");
+        assert_eq!(
+            banner(&parse(&payload("3", &["2"])).unwrap(), "latest", &[]),
+            ""
+        );
         let mut v = payload("10", &["9"]);
         // Give the latest tree an "install" at the top so the slug chain matches.
         v["context"]["tree"].as_array_mut().unwrap().push(n(
@@ -536,14 +611,25 @@ mod tests {
             "/docs/install",
             json!({}),
         ));
-        let html = banner(&parse(&v).unwrap(), "latest");
+        let html = banner(&parse(&v).unwrap(), "latest", &[]);
         assert!(html.contains("<strong>v1</strong>"), "{html}");
         assert!(html.contains("href=\"/docs/install\""), "{html}");
-        let html = banner(&parse(&payload("11", &["9"])).unwrap(), "latest");
+        let html = banner(&parse(&payload("11", &["9"])).unwrap(), "latest", &[]);
         assert!(
             html.contains("href=\"/docs\""),
             "no equivalent page: fall back to the docs home: {html}"
         );
+    }
+
+    #[test]
+    fn an_unreleased_version_is_marked_in_the_switcher_and_the_banner() {
+        let p = parse(&payload("10", &["9"])).unwrap();
+        let un = vec!["v1".to_owned()];
+        let html = sidebar(&p, "Latest", &un);
+        assert!(html.contains("docs-versions__mark\">unreleased<"), "{html}");
+        assert!(!sidebar(&p, "Latest", &[]).contains("unreleased"));
+        assert!(banner(&p, "latest", &un).contains("the unreleased documentation for <strong>v1"));
+        assert!(!banner(&p, "latest", &[]).contains("unreleased"));
     }
 
     #[test]
