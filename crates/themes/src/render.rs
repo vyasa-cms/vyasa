@@ -293,11 +293,13 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
     };
     let by_slug = slug_template(page, default_name);
     let specific = type_template(page, default_name);
-    let template_name: &str = match (&by_slug, &specific) {
-        (Some(name), _) if engine.template_names().contains(&name.as_str()) => name,
-        (_, Some(name)) if engine.template_names().contains(&name.as_str()) => name,
-        _ => default_name,
-    };
+    let template_name: &str = [&by_slug, &specific]
+        .into_iter()
+        .flatten()
+        .map(String::as_str)
+        .find(|name| engine.template_names().contains(name))
+        .unwrap_or(default_name);
+
     // A composed entry (its own tree, or its type's) must show its tree
     // even when the theme's template for this slot never prints `sections`.
     // A template named for the type (`single-doc.html`) is the theme saying
