@@ -339,6 +339,9 @@ async fn backend_from_input(
             "endpoint is the service URL, e.g. https://<account>.r2.cloudflarestorage.com",
         ));
     }
+    // Saved keys are reused only for the saved endpoint: pointing the
+    // endpoint elsewhere must not send them to a new host.
+    let saved = saved.filter(|s| s.endpoint.trim().trim_end_matches('/') == endpoint);
     let access_key_id = match input.access_key_id.as_deref().map(str::trim) {
         Some(k) if !k.is_empty() => k.to_owned(),
         _ => saved
@@ -500,7 +503,20 @@ pub async fn start_migration(state: &AppState) -> Result<MigrationProgress, AppE
         last_error: None,
     };
     write_progress(state, &progress).await?;
-    vyasa_jobs::queue::enqueue(&state.pool, MIGRATE_KIND, serde_json::json!({}), None).await?;
+    if let Err(err) =
+        vyasa_jobs::queue::enqueue(&state.pool, MIGRATE_KIND, serde_json::json!({}), None).await
+    {
+        // Never leave "running" behind a job that was not queued: it would
+        // answer 409 for good.
+        let failed = MigrationProgress {
+            state: String::from("failed"),
+            finished_at: Some(chrono::Utc::now().to_rfc3339()),
+            last_error: Some(err.to_string()),
+            ..progress
+        };
+        let _ = write_progress(state, &failed).await;
+        return Err(err);
+    }
     Ok(progress)
 }
 
@@ -596,11 +612,10 @@ async fn run_migration_inner(
                         progress.done += 1;
                     }
                     Ok(false) => {
-                        // Deleted, replaced or moved meanwhile: the copy just
-                        // written is an orphan, not a file anyone asked for.
-                        for path in &paths {
-                            let _ = dst.delete(path).await;
-                        }
+                        // Deleted, replaced or moved meanwhile. The copy just
+                        // written stays: both stores use the same path, so it
+                        // may be the only copy of a live file (a concurrent
+                        // move or a replace under the same name).
                         tracing::info!(
                             media_id = row.id,
                             "media move: row changed under the job, skipped"
