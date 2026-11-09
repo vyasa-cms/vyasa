@@ -9,6 +9,9 @@ follows [semantic versioning](https://semver.org) as described in
 
 ### Added
 
+- `discourage_indexing` site option (Settings > Advanced) for staging sites:
+  `robots.txt` answers `Disallow: /` and every response carries
+  `X-Robots-Tag: noindex, nofollow`. Off by default.
 - `color_scheme` site option (`system`, `light`, `dark`; Settings > Advanced): the scheme first-time visitors see. `light`/`dark` set `data-theme` on `<html>`; a visitor's own toggle still wins, and `system` (default) follows the device.
 - Built-in colour-scheme toggle: every page links `/theme-assets/theme-toggle.js` in `<head>`. It applies the visitor's stored choice before first paint (no flash), and any element with `data-vy-theme-toggle` switches light/dark and remembers it (`localStorage` key `vy-theme`). Works under `script-src 'self'`; themes only add the button.
 

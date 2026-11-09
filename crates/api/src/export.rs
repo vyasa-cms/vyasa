@@ -196,8 +196,9 @@ pub struct ArchiveMenuItem {
     pub children: Vec<ArchiveMenuItem>,
 }
 
-/// Options that never leave the site: secrets, progress, keys.
-const PRIVATE_OPTIONS: &[&str] = &["smtp_password", "setup_progress"];
+/// Options that never leave the site: secrets, progress, keys, and the
+/// indexing switch (an import must not hide or expose another site).
+const PRIVATE_OPTIONS: &[&str] = &["smtp_password", "setup_progress", "discourage_indexing"];
 
 /// Builds the archive from the live database.
 ///

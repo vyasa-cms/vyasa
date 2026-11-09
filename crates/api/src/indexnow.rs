@@ -85,6 +85,10 @@ pub fn spawn(state: &AppState) {
 }
 
 async fn enqueue_ping(state: &AppState, post_id: i64) {
+    // A site that asks engines not to index itself does not announce its pages.
+    if state.options_service.discourage_indexing().await {
+        return;
+    }
     let Ok(site_url) = state.options_service.site_url().await else {
         return;
     };

@@ -1519,6 +1519,12 @@ fn app_router(state: &AppState) -> axum::Router {
             state.clone(),
             middleware::demo::demo,
         ))
+        // Staging sites: `X-Robots-Tag: noindex` on every response while the
+        // `discourage_indexing` option is on.
+        .layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            middleware::demo::discourage_indexing,
+        ))
         // Outermost so the recorded duration is what the client actually
         // waited, including time spent in the layers below.
         .layer(axum::middleware::from_fn_with_state(
