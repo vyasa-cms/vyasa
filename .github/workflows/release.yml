@@ -81,7 +81,7 @@ jobs:
           - { target: x86_64-unknown-linux-gnu, os: ubuntu-22.04, public_only: false }
           # Free arm64 Linux runners exist only for public repositories.
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-22.04-arm, public_only: true }
-          - { target: aarch64-apple-darwin, os: macos-14, public_only: false }
+          - { target: aarch64-apple-darwin, os: macos-15, public_only: false }
     # A public-only entry on a private repository lands on an ordinary
     # runner where every step is skipped, instead of waiting for an arm64
     # runner that never comes.

@@ -7,6 +7,14 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-10
+
+### Fixed
+
+- The release workflow builds the macOS arm64 binary on `macos-15`; GitHub
+  retired the `macos-14` runner image, so the 0.4.0 binaries and GitHub
+  release were never published. 0.4.1 has the same code as 0.4.0.
+
 ## [0.4.0] - 2026-11-10
 
 ### Added
