@@ -248,6 +248,10 @@ pub enum Credit {
 }
 
 impl Credit {
+    #[expect(
+        clippy::trivially_copy_pass_by_ref,
+        reason = "serde skip_serializing_if takes &T"
+    )]
     fn is_engine(&self) -> bool {
         *self == Self::Engine
     }
