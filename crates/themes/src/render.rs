@@ -336,6 +336,9 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
 
     let mut ctx = serde_json::json!({
         "site": { "name": site.name, "tagline": site.tagline, "lang": site.lang },
+        // `credit_html` is what a theme with `"credit": "theme"` prints in
+        // its own footer. Empty when the site turned the credit off.
+        "vyasa": { "credit_html": if site.footer_credit { FOOTER_CREDIT } else { "" } },
         "page": {
             "title": page.title,
             "direction": tokens.direction.css_value(),
@@ -409,7 +412,11 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
     );
     fill_field_refs(&mut ctx, &engine.field_refs(template_name));
     let html = engine.render_json(template_name, &ctx)?;
-    let html = if site.footer_credit {
+    // A theme that places the credit itself keeps it only if it really did:
+    // the credit is the price of the engine, so a page without it still gets
+    // the engine's own line.
+    let placed = layout.credit == crate::layout::Credit::Theme && has_credit(&html);
+    let html = if site.footer_credit && !placed {
         add_footer_credit(html)
     } else {
         html
@@ -423,6 +430,11 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
 /// The "Made with Vyasa" line.
 pub const FOOTER_CREDIT: &str =
     "<p class=\"vy-credit\">Made with <a href=\"https://vyasa.site\" rel=\"noopener\">Vyasa</a></p>";
+
+/// Whether the page already carries the credit link.
+fn has_credit(html: &str) -> bool {
+    html.contains("class=\"vy-credit\"") && html.contains("https://vyasa.site")
+}
 
 /// Puts [`FOOTER_CREDIT`] at the end of the page's footer.
 ///

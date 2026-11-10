@@ -236,6 +236,23 @@ impl MapSettings {
     }
 }
 
+/// Who places the "Made with Vyasa" credit.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "lowercase")]
+pub enum Credit {
+    /// The engine appends it to the page's last footer.
+    #[default]
+    Engine,
+    /// The theme prints `{{ vyasa.credit_html }}` itself.
+    Theme,
+}
+
+impl Credit {
+    fn is_engine(&self) -> bool {
+        *self == Self::Engine
+    }
+}
+
 /// Per-template block compositions.
 ///
 /// Serialized with kebab-case keys so `layout.json` reads
@@ -243,6 +260,12 @@ impl MapSettings {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "kebab-case", deny_unknown_fields, default)]
 pub struct Layout {
+    /// Who places the "Made with Vyasa" credit: the engine (default, at the
+    /// end of the page's last footer) or the theme, which prints
+    /// `{{ vyasa.credit_html }}` in its own footer. Either way the credit is
+    /// on the page; see `render_page`.
+    #[serde(skip_serializing_if = "Credit::is_engine")]
+    pub credit: Credit,
     /// Home / blog index.
     pub index: Vec<Section>,
     /// Single post view.
@@ -547,6 +570,9 @@ fn validate_section(
 #[must_use]
 pub fn merge_layouts(parent: &Layout, child: &Layout) -> Layout {
     let mut out = parent.clone();
+    if child.credit != Credit::Engine {
+        out.credit = child.credit;
+    }
     for t in TemplateType::ALL {
         let child_blocks = child.for_template(t);
         if child_blocks.is_empty() {
