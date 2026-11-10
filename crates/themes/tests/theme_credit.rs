@@ -12,8 +12,7 @@ use vyasa_themes::{
 mod fake_queries;
 
 const WITH_CREDIT: &str = r#"{% extends "base.html" %}{% block body %}<main>x</main><footer class="mine">{{ vyasa.credit_html | safe }}</footer>{% endblock %}"#;
-const WITHOUT_CREDIT: &str =
-    r#"{% extends "base.html" %}{% block body %}<main>x</main><footer class="mine">c</footer>{% endblock %}"#;
+const WITHOUT_CREDIT: &str = r#"{% extends "base.html" %}{% block body %}<main>x</main><footer class="mine">c</footer>{% endblock %}"#;
 
 fn render(template: &str, credit: Credit, footer_credit: bool) -> String {
     let mut engine = Engine::builtin().expect("engine");
@@ -52,7 +51,10 @@ fn credits(html: &str) -> usize {
 fn a_theme_that_places_the_credit_gets_exactly_one() {
     let html = render(WITH_CREDIT, Credit::Theme, true);
     assert_eq!(credits(&html), 1, "{html}");
-    assert!(html.contains("<footer class=\"mine\"><p class=\"vy-credit\">"), "{html}");
+    assert!(
+        html.contains("<footer class=\"mine\"><p class=\"vy-credit\">"),
+        "{html}"
+    );
 }
 
 #[test]
