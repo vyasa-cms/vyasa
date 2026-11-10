@@ -83,6 +83,10 @@ plugin's own route, public, decided by the plugin.
 | POST | /media | upload_media |
 | POST | /media/batch-delete | upload_media |
 | GET | /media/stats | upload_media or edit_posts |
+| GET | /media/storage | manage_options |
+| PUT | /media/storage | manage_options |
+| POST | /media/storage/migrate | manage_options |
+| POST | /media/storage/test | manage_options |
 | POST | /media/trash/empty | edit_others |
 | DELETE | /media/{id} | upload_media |
 | GET | /media/{id} | upload_media or edit_posts |

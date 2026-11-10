@@ -311,6 +311,7 @@ impl MediaService {
         let sha256 = sha256_hex(&bytes);
         let shard = (id % 1000).abs();
         let path = format!("{shard}/{id}/{file_name}");
+        let kind = self.storage.kind();
         self.storage.put(&path, &bytes).await?;
         let row = self
             .repo
@@ -321,12 +322,23 @@ impl MediaService {
                 i64::try_from(bytes.len()).unwrap_or(i64::MAX),
                 &path,
                 &sha256,
+                kind,
             )
             .await?;
-        if old.path != path {
-            if let Err(err) = self.storage.delete(&old.path).await {
-                tracing::warn!(media_id = id, "could not delete replaced original: {err}");
+        if old.path == path {
+            // Same path, different store (the admin switched since the
+            // upload): the stale copy would otherwise be "moved" over the
+            // new bytes later.
+            if old.storage != kind {
+                if let Err(err) = self.storage.delete_from(old.storage, &path).await {
+                    tracing::warn!(
+                        media_id = id,
+                        "could not delete the replaced original's old copy: {err}"
+                    );
+                }
             }
+        } else if let Err(err) = self.storage.delete(&old.path).await {
+            tracing::warn!(media_id = id, "could not delete replaced original: {err}");
         }
         super::derivatives::delete_derivatives(self.storage.as_ref(), id, &old.derivatives).await;
         self.enqueue_derivatives(id);
