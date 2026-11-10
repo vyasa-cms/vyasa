@@ -35,7 +35,7 @@ fn validate(s: &MapSettings, kind: &str) -> Vec<String> {
     let fields: &[&str] = if kind == "code-tabs" {
         &["title", "language", "filename", "code"]
     } else if kind == "status-cards" {
-        &["title", "body", "status"]
+        &["title", "body", "status", "status_label"]
     } else {
         &["title", "body", "label"]
     };
@@ -59,11 +59,17 @@ fn validate(s: &MapSettings, kind: &str) -> Vec<String> {
             errors.push(format!("items[{index}].code is required"));
         }
         if kind == "status-cards"
-            && !["available", "preview", "experimental", "coming-soon"]
-                .contains(&field(item, "status"))
+            && ![
+                "available",
+                "preview",
+                "experimental",
+                "early-access",
+                "coming-soon",
+            ]
+            .contains(&field(item, "status"))
         {
             errors.push(format!(
-                "items[{index}].status must be available, preview, experimental, or coming-soon"
+                "items[{index}].status must be available, preview, experimental, early-access, or coming-soon"
             ));
         }
     }
@@ -131,9 +137,21 @@ pub fn render(kind: &str, s: &MapSettings) -> String {
                     "available" => "Available",
                     "preview" => "Preview",
                     "experimental" => "Experimental",
+                    "early-access" => "Early access",
                     _ => "Coming soon",
                 };
-                let _ = write!(out, "<span class=\"vy-status\">{label}</span>");
+                // A theme names its own maturity words ("In progress",
+                // "Planned"); the status still drives the styling class.
+                let custom = field(item, "status_label").trim();
+                let label = if custom.is_empty() {
+                    label.to_owned()
+                } else {
+                    esc(custom)
+                };
+                let _ = write!(
+                    out,
+                    "<span class=\"vy-status vy-status-{status}\">{label}</span>"
+                );
             } else {
                 let _ = write!(
                     out,
@@ -205,7 +223,7 @@ pub(super) fn kinds() -> Vec<Builtin> {
             kind: "status-cards",
             description: "Product capabilities with explicit maturity labels",
             schema: schema(
-                &json!({"title":{"type":"string","maxLength":4000},"body":{"type":"string","format":"multiline","maxLength":4000},"status":{"type":"string","enum":["available","preview","experimental","coming-soon"]}}),
+                &json!({"title":{"type":"string","maxLength":4000},"body":{"type":"string","format":"multiline","maxLength":4000},"status":{"type":"string","enum":["available","preview","experimental","early-access","coming-soon"]},"status_label":{"type":"string","maxLength":40}}),
                 &["title", "status"],
             ),
             check: check_status,
@@ -258,5 +276,23 @@ mod tests {
             let s = serde_json::from_value(value).expect("settings");
             assert!(!check_status(&s).is_empty());
         }
+    }
+    #[test]
+    fn status_cards_take_early_access_and_a_theme_label() {
+        let s = serde_json::from_value(json!({"items":[
+            {"title":"a","status":"early-access"},
+            {"title":"b","status":"preview","status_label":"In <progress>"}
+        ]}))
+        .expect("settings");
+        assert!(check_status(&s).is_empty());
+        let html = render("status-cards", &s);
+        assert!(
+            html.contains("vy-status-early-access\">Early access<"),
+            "{html}"
+        );
+        assert!(
+            html.contains("vy-status-preview\">In &lt;progress&gt;<"),
+            "{html}"
+        );
     }
 }
