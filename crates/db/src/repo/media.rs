@@ -167,6 +167,68 @@ impl MediaRepo {
         .map_err(|err| AppError::db(format!("media stats failed: {err}")))
     }
 
+    /// How many rows (trashed ones included: their bytes are still held
+    /// and still move) each store holds.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Db`] on database failure.
+    pub async fn count_by_storage(&self) -> Result<Vec<(MediaStorage, i64)>, AppError> {
+        sqlx::query_as::<_, (MediaStorage, i64)>(
+            "SELECT storage, count(*) FROM media GROUP BY storage",
+        )
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| AppError::db(format!("media count by storage failed: {err}")))
+    }
+
+    /// Rows (live or trashed) whose bytes sit in `storage`, by id, after
+    /// `after_id`: the move job's cursor.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Db`] on database failure.
+    pub async fn list_by_storage(
+        &self,
+        storage: MediaStorage,
+        after_id: i64,
+        limit: i64,
+    ) -> Result<Vec<MediaRow>, AppError> {
+        sqlx::query_as::<_, MediaRow>(sqlx::AssertSqlSafe(format!(
+            "SELECT {MEDIA_COLUMNS} FROM media WHERE storage = $1 AND id > $2 ORDER BY id ASC LIMIT $3"
+        )))
+        .bind(storage)
+        .bind(after_id)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| AppError::db(format!("media list by storage failed: {err}")))
+    }
+
+    /// Records that a row's bytes moved from `from` to `to`. `false` when
+    /// the row is gone or no longer in `from` (deleted, replaced or moved
+    /// by someone else meanwhile), so the caller knows not to touch the
+    /// source.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Db`] on database failure.
+    pub async fn update_storage(
+        &self,
+        id: i64,
+        from: MediaStorage,
+        to: MediaStorage,
+    ) -> Result<bool, AppError> {
+        let result = sqlx::query("UPDATE media SET storage = $1 WHERE id = $2 AND storage = $3")
+            .bind(to)
+            .bind(id)
+            .bind(from)
+            .execute(&self.pool)
+            .await
+            .map_err(|err| AppError::db(format!("media storage update failed: {err}")))?;
+        Ok(result.rows_affected() == 1)
+    }
+
     /// The row holding these exact bytes, if the library has one.
     ///
     /// # Errors
@@ -214,6 +276,8 @@ impl MediaRepo {
     /// # Errors
     ///
     /// Returns [`AppError::Db`] on database failure, `NotFound` when missing.
+    // One row, one write: the arguments are the columns a replacement touches.
+    #[allow(clippy::too_many_arguments)]
     pub async fn replace_file(
         &self,
         id: i64,
@@ -222,10 +286,11 @@ impl MediaRepo {
         byte_size: i64,
         path: &str,
         sha256: &str,
+        storage: MediaStorage,
     ) -> Result<MediaRow, AppError> {
         sqlx::query_as::<_, MediaRow>(sqlx::AssertSqlSafe(format!(
             "UPDATE media SET file_name = $2, mime = $3, byte_size = $4, path = $5, sha256 = $6,
-                 width = NULL, height = NULL, blurhash = NULL, derivatives = '{{}}'::jsonb
+                 storage = $7, width = NULL, height = NULL, blurhash = NULL, derivatives = '{{}}'::jsonb
              WHERE id = $1 RETURNING {MEDIA_COLUMNS}"
         )))
         .bind(id)
@@ -234,6 +299,7 @@ impl MediaRepo {
         .bind(byte_size)
         .bind(path)
         .bind(sha256)
+        .bind(storage)
         .fetch_optional(&self.pool)
         .await
         .map_err(|err| AppError::db(format!("media replace failed: {err}")))?
