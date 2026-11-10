@@ -642,6 +642,17 @@ fn demo_refusal(what: &str) -> AppError {
 /// lock the next visitor out of the shared account.
 pub const DEMO_REFUSED_ROUTES: &[(&str, &str, &str)] = &[
     ("POST", "/api/v1/updates/apply", "Updating the site"),
+    ("PUT", "/api/v1/media/storage", "Changing media storage"),
+    (
+        "POST",
+        "/api/v1/media/storage/test",
+        "Testing a storage connection",
+    ),
+    (
+        "POST",
+        "/api/v1/media/storage/migrate",
+        "Moving media between stores",
+    ),
     (
         "GET",
         "/api/v1/setup/verify-url",

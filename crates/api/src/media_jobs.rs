@@ -27,7 +27,7 @@ impl MediaJobs {
     #[must_use]
     pub fn handler(state: &AppState) -> Arc<dyn JobHandler> {
         Arc::new(Self {
-            storage: state.media.storage(),
+            storage: state.media_storage.clone(),
             pool: state.pool.clone(),
         })
     }

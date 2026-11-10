@@ -22,6 +22,6 @@
     "R2_ENDPOINT": "https://<account-id>.r2.cloudflarestorage.com"
   }
   // Secrets (wrangler secret put): DATABASE_URL, VYASA_SECRET_KEY,
-  // R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, VYASA_ADMIN_EMAIL,
-  // VYASA_ADMIN_PASSWORD.
+  // VYASA_ADMIN_EMAIL, VYASA_ADMIN_PASSWORD; R2_ACCESS_KEY_ID and
+  // R2_SECRET_ACCESS_KEY are optional (the admin can hold the keys instead).
 }
