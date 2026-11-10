@@ -271,7 +271,8 @@ impl Guest for Docs {
                 {"key": "hide_from_nav", "label": "Hide from navigation", "kind": "boolean", "help": "The page stays reachable and searchable."},
                 {"key": "edit_url", "label": "Edit URL", "kind": "url", "help": "Where readers can edit this page (set by the importer for synced pages)."},
                 {"key": "last_updated", "label": "Last updated", "kind": "date"},
-                {"key": "version_root", "label": "Version entry", "kind": "boolean", "help": "Marks the entry an older version's pages hang under."}
+                {"key": "version_root", "label": "Version entry", "kind": "boolean", "help": "Marks the entry an older version's pages hang under."},
+                {"key": "section_root", "label": "Section entry", "kind": "boolean", "help": "Marks the entry a doc section's pages hang under."}
             ]
         }])
         .to_string()
@@ -280,6 +281,9 @@ impl Guest for Docs {
     fn register_taxonomies() -> String {
         serde_json::json!([{
             "slug": sync::VERSION_TAXONOMY, "singular": "Docs version", "plural": "Docs versions",
+            "hierarchical": false, "public": false
+        }, {
+            "slug": sync::SECTION_TAXONOMY, "singular": "Docs section", "plural": "Docs sections",
             "hierarchical": false, "public": false
         }])
         .to_string()

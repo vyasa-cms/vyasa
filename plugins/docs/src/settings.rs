@@ -1,9 +1,14 @@
 //! The plugin's settings form and what the importer makes of it.
 
+use std::collections::BTreeMap;
+
 use serde_json::{json, Value};
 
 use crate::github;
 use crate::sync::Config;
+
+/// Most distinct branches or tags versions may be read from.
+const MAX_REFS: usize = 4;
 
 /// Most older versions one site may declare.
 pub const MAX_VERSIONS: usize = 12;
@@ -29,6 +34,10 @@ pub struct Settings {
     pub latest_label: String,
     /// Older versions, one `label = folder` per line.
     pub versions: String,
+    /// Labels of older versions that are unreleased (comma or space separated).
+    pub unreleased_versions: String,
+    /// Section lines, see [`parse_sections`].
+    pub sections: String,
     /// Breadcrumb root label.
     pub docs_title: String,
     /// Search box placeholder.
@@ -47,6 +56,8 @@ impl Default for Settings {
             latest_version: String::new(),
             latest_label: "Latest".to_owned(),
             versions: String::new(),
+            unreleased_versions: String::new(),
+            sections: String::new(),
             docs_title: "Docs".to_owned(),
             search_placeholder: "Search the docs".to_owned(),
         }
@@ -83,6 +94,8 @@ impl Settings {
             latest_version: raw("latest_version").trim().to_owned(),
             latest_label: text("latest_label", &d.latest_label),
             versions: raw("versions"),
+            unreleased_versions: raw("unreleased_versions").trim().to_owned(),
+            sections: raw("sections"),
             docs_title: text("docs_title", &d.docs_title),
             search_placeholder: text("search_placeholder", &d.search_placeholder),
         }
@@ -94,10 +107,20 @@ impl Settings {
         json!({
             "repo_url": self.repo_url, "branch": self.branch, "folder": self.folder, "token": self.token,
             "webhook_secret": self.webhook_secret, "poll_minutes": self.poll_minutes,
-            "latest_version": self.latest_version, "latest_label": self.latest_label, "versions": self.versions,
+            "latest_version": self.latest_version, "latest_label": self.latest_label, "versions": self.versions, "unreleased_versions": self.unreleased_versions, "sections": self.sections,
             "docs_title": self.docs_title, "search_placeholder": self.search_placeholder,
         })
         .to_string()
+    }
+
+    /// The labels marked unreleased.
+    #[must_use]
+    pub fn unreleased(&self) -> Vec<String> {
+        self.unreleased_versions
+            .split(|c: char| c == ',' || c.is_whitespace())
+            .filter(|l| !l.is_empty())
+            .map(str::to_owned)
+            .collect()
     }
 
     /// Whether a repository has been set at all.
@@ -122,7 +145,8 @@ impl Settings {
         {
             return Err("Branch: must be a branch name without spaces".to_owned());
         }
-        let versions = parse_versions(&self.versions)?;
+        let (versions, version_refs) = parse_versions(&self.versions)?;
+        let sections = parse_sections(&self.sections)?;
         Ok(Config {
             repo,
             branch: self.branch.clone(),
@@ -130,16 +154,31 @@ impl Settings {
             token: Some(self.token.clone()).filter(|t| !t.is_empty()),
             latest_version: self.latest_version.clone(),
             versions,
+            version_refs,
+            unreleased: self.unreleased(),
+            sections,
         })
     }
 }
 
-/// `label = folder` lines.
+/// The versions in order, and the ref of each version that has one.
+pub type ParsedVersions = (Vec<(String, Vec<String>)>, BTreeMap<String, String>);
+
+/// A branch or tag name an operator typed: no spaces or control characters.
+fn valid_ref(r: &str) -> bool {
+    !r.is_empty() && r.len() <= 200 && !r.chars().any(|c| c.is_control() || c.is_whitespace())
+}
+
+/// Version lines: `label = folder`, or `label = folder @ ref` when that
+/// version is read from another branch or tag of the repository.
+///
+/// Returns the versions in order and the ref of each version that has one.
 ///
 /// # Errors
 /// A message naming the bad line.
-pub fn parse_versions(text: &str) -> Result<Vec<(String, Vec<String>)>, String> {
+pub fn parse_versions(text: &str) -> Result<ParsedVersions, String> {
     let mut out: Vec<(String, Vec<String>)> = Vec::new();
+    let mut refs: BTreeMap<String, String> = BTreeMap::new();
     for line in text
         .lines()
         .map(str::trim)
@@ -159,6 +198,18 @@ pub fn parse_versions(text: &str) -> Result<Vec<(String, Vec<String>)>, String> 
                 "Older versions: `{label}` is not a usable version label (letters, digits, . - _)"
             ));
         }
+        let (folder, git_ref) = match folder.rsplit_once('@') {
+            Some((f, r)) => (f, Some(r.trim())),
+            None => (folder, None),
+        };
+        if let Some(r) = git_ref {
+            if !valid_ref(r) {
+                return Err(format!(
+                    "Older versions: `{r}` is not a branch or tag name (after the @ in `{line}`)"
+                ));
+            }
+            refs.insert(label.to_owned(), r.to_owned());
+        }
         let folder = github::folder_segments(folder).map_err(|e| format!("Older versions: {e}"))?;
         if out.iter().any(|(l, _)| l == label) {
             return Err(format!("Older versions: {label} appears twice"));
@@ -167,6 +218,85 @@ pub fn parse_versions(text: &str) -> Result<Vec<(String, Vec<String>)>, String> 
     }
     if out.len() > MAX_VERSIONS {
         return Err(format!("Older versions: at most {MAX_VERSIONS}"));
+    }
+    let distinct: std::collections::BTreeSet<&String> = refs.values().collect();
+    if distinct.len() > MAX_REFS {
+        return Err(format!(
+            "Older versions: at most {MAX_REFS} different branches or tags"
+        ));
+    }
+    Ok((out, refs))
+}
+
+/// Most doc sections one site may declare.
+pub const MAX_SECTIONS: usize = 8;
+
+/// One doc section: a URL prefix, a title, a folder and optionally a ref.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SectionDef {
+    /// URL segment below the docs base (`sql` serves `/docs/sql/...`).
+    pub slug: String,
+    /// Title shown as the breadcrumb root.
+    pub title: String,
+    /// Folder holding the section's Markdown, as path segments.
+    pub folder: Vec<String>,
+    /// Branch or tag it is read from, when not the plugin's branch.
+    pub git_ref: Option<String>,
+}
+
+/// Section lines: `slug = Title | folder` or `slug = Title | folder @ ref`.
+///
+/// # Errors
+/// A message naming the bad line.
+pub fn parse_sections(text: &str) -> Result<Vec<SectionDef>, String> {
+    let mut out: Vec<SectionDef> = Vec::new();
+    for line in text
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty() && !l.starts_with('#'))
+    {
+        let bad = || format!("Sections: `{line}` is not `slug = Title | folder`");
+        let (slug, rest) = line.split_once('=').ok_or_else(bad)?;
+        let (title, folder) = rest.split_once('|').ok_or_else(bad)?;
+        let slug = slug.trim();
+        if slug.is_empty()
+            || slug.len() > 40
+            || !slug
+                .chars()
+                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        {
+            return Err(format!(
+                "Sections: `{slug}` is not a usable slug (lowercase letters, digits, -)"
+            ));
+        }
+        let title = title.trim();
+        if title.is_empty() || title.len() > 80 || title.chars().any(char::is_control) {
+            return Err(format!("Sections: `{slug}` needs a title"));
+        }
+        let (folder, git_ref) = match folder.rsplit_once('@') {
+            Some((f, r)) => (f, Some(r.trim())),
+            None => (folder, None),
+        };
+        if let Some(r) = git_ref {
+            if !valid_ref(r) {
+                return Err(format!(
+                    "Sections: `{r}` is not a branch or tag name (in `{line}`)"
+                ));
+            }
+        }
+        let folder = github::folder_segments(folder).map_err(|e| format!("Sections: {e}"))?;
+        if out.iter().any(|d| d.slug == slug) {
+            return Err(format!("Sections: {slug} appears twice"));
+        }
+        out.push(SectionDef {
+            slug: slug.to_owned(),
+            title: title.to_owned(),
+            folder,
+            git_ref: git_ref.map(str::to_owned),
+        });
+    }
+    if out.len() > MAX_SECTIONS {
+        return Err(format!("Sections: at most {MAX_SECTIONS}"));
     }
     Ok(out)
 }
@@ -186,7 +316,9 @@ pub fn admin_form() -> Value {
             {"key": "poll_minutes", "label": "Check every (minutes)", "type": "number", "default": 60, "help": "Between 5 and 1440. A check with nothing new costs one conditional request."},
             {"key": "latest_version", "label": "Latest version label", "type": "text", "help": "Leave empty for unversioned docs. Pages without a version belong to this one and are served at /docs."},
             {"key": "latest_label", "label": "Name for the latest version", "type": "text", "default": "Latest"},
-            {"key": "versions", "label": "Older versions", "type": "textarea", "help": "One per line: `v1 = docs-v1` (label = folder in the same repository). They are served at /docs/<label>/ and carry a notice pointing to the latest."},
+            {"key": "versions", "label": "Older versions", "type": "textarea", "help": "One per line: `v1 = docs-v1` (label = folder in the same repository), or `next = docs @ main` to read a version from another branch or tag. They are served at /docs/<label>/ and carry a notice pointing to the latest."},
+            {"key": "sections", "label": "Sections", "type": "textarea", "help": "One per line: `sql = SQL reference | reference/sql` (slug = title | folder in the repository), optionally `| folder @ branch-or-tag`. Each is served at /docs/<slug> with its own sidebar. At most 8."},
+            {"key": "unreleased_versions", "label": "Unreleased versions", "type": "text", "help": "Labels from the list above, separated by commas, that document unreleased code (for example `next`). The switcher marks them and their notice says so."},
             {"key": "docs_title", "label": "Breadcrumb root", "type": "text", "default": "Docs"},
             {"key": "search_placeholder", "label": "Search placeholder", "type": "text", "default": "Search the docs"}
         ]
@@ -196,6 +328,44 @@ pub fn admin_form() -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unreleased_labels_split_on_commas_and_spaces() {
+        let s = Settings::from_json(r#"{"unreleased_versions":"next, v3  edge"}"#);
+        assert_eq!(s.unreleased(), ["next", "v3", "edge"]);
+        assert!(Settings::default().unreleased().is_empty());
+        assert_eq!(Settings::from_json(&s.to_json()), s);
+    }
+
+    #[test]
+    fn section_lines_parse_and_bad_ones_name_the_line() {
+        let v = parse_sections(
+            "# c\nsql = SQL reference | reference/sql\npy = Python API | ref/py @ main\n",
+        )
+        .unwrap();
+        assert_eq!(v.len(), 2);
+        assert_eq!(v[0].slug, "sql");
+        assert_eq!(v[0].folder, ["reference", "sql"]);
+        assert_eq!(v[1].git_ref.as_deref(), Some("main"));
+        for bad in [
+            "sql SQL | x",
+            "sql = SQL x",
+            "SQL = T | x",
+            "a = | x",
+            "a = T | ../x",
+            "a = T | x @ b b",
+        ] {
+            assert!(
+                parse_sections(bad).unwrap_err().starts_with("Sections:"),
+                "{bad}"
+            );
+        }
+        assert!(parse_sections("a = A | x\na = B | y")
+            .unwrap_err()
+            .contains("twice"));
+        let many: String = (0..9).map(|i| format!("s{i} = T | f{i}\n")).collect();
+        assert!(parse_sections(&many).is_err());
+    }
 
     #[test]
     fn defaults_apply_to_an_empty_or_broken_config() {
@@ -274,7 +444,14 @@ mod tests {
         assert!(parse_versions("v1 = a\nv1 = b").is_err());
         assert!(parse_versions("v 1 = a").is_err());
         assert!(parse_versions("v1 = ../a").is_err());
-        assert_eq!(parse_versions("").unwrap(), vec![]);
+        assert_eq!(parse_versions("").unwrap(), (vec![], BTreeMap::new()));
+        let (v, r) = parse_versions("next = docs @ main\nv1 = old").unwrap();
+        assert_eq!(v.len(), 2);
+        assert_eq!(r.get("next").map(String::as_str), Some("main"));
+        assert!(!r.contains_key("v1"));
+        assert!(parse_versions("next = docs @ ").is_err());
+        assert!(parse_versions("next = docs @ a b").is_err());
+        assert!(parse_versions("a=d@r1\nb=d@r2\nc=d@r3\ne=d@r4\nf=d@r5").is_err());
     }
 
     #[test]

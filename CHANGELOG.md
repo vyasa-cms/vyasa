@@ -21,6 +21,10 @@ follows [semantic versioning](https://semver.org) as described in
 - The Cloudflare package passes the R2 keys only when both secrets are
   set, so a site can start on the container's disk and move to R2 from
   the admin.
+- vyasa-docs: a version can be read from another branch or tag
+  (`next = docs @ main`), so the unreleased docs can be served at
+  `/docs/next/` beside the latest release. The webhook accepts pushes to
+  those refs.
 - `discourage_indexing` site option (Settings > Advanced) for staging sites:
   `robots.txt` answers `Disallow: /` and every response carries
   `X-Robots-Tag: noindex, nofollow`. Off by default.

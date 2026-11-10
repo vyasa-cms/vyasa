@@ -1,6 +1,6 @@
 //! The plugin's one public route: the GitHub webhook.
 
-use crate::settings::Settings;
+use crate::settings::{self, Settings};
 use crate::webhook::{self, Delivery};
 
 /// The route path, below the plugin's mount point.
@@ -57,11 +57,20 @@ pub fn handle(
     ) {
         return reply(401, r#"{"error":"bad signature"}"#);
     }
+    let others: Vec<String> = settings::parse_versions(&settings.versions)
+        .map(|(_, refs)| refs.into_values().collect())
+        .unwrap_or_default();
     match webhook::interpret(
         header("x-github-event").unwrap_or(""),
         body,
         &settings.branch,
+        &others,
     ) {
+        Delivery::Refresh => Outcome {
+            status: 202,
+            body: r#"{"queued":true}"#.to_owned(),
+            pending: Some("refresh".to_owned()),
+        },
         Delivery::Ping => reply(200, r#"{"pong":true}"#),
         Delivery::Ignored => reply(200, r#"{"ignored":true}"#),
         Delivery::Push { sha } => Outcome {

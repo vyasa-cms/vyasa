@@ -32,6 +32,10 @@ pub const POST_TYPE: &str = "doc";
 pub const BASE: &str = "docs";
 /// The version taxonomy.
 pub const VERSION_TAXONOMY: &str = "doc-version";
+/// The section taxonomy.
+pub const SECTION_TAXONOMY: &str = "doc-section";
+/// A section's pseudo-version starts with this; the rest is its slug.
+const SECTION_PREFIX: &str = "section/";
 
 /// What an operator configured.
 #[derive(Debug, Clone)]
@@ -48,6 +52,12 @@ pub struct Config {
     pub latest_version: String,
     /// Older versions: label and the folder they live in.
     pub versions: Vec<(String, Vec<String>)>,
+    /// Versions read from another branch or tag than `branch`: label to ref.
+    pub version_refs: BTreeMap<String, String>,
+    /// Versions that document unreleased code: their pages stay out of search engines.
+    pub unreleased: Vec<String>,
+    /// Doc sections: own folder (and ref), served below `/docs/<slug>`.
+    pub sections: Vec<crate::settings::SectionDef>,
 }
 
 /// An HTTP answer, reduced to what the importer reads.
@@ -269,61 +279,123 @@ pub fn run<E: Env>(
 }
 
 fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
-    // 1. Which commit? A conditional request: unchanged costs nothing.
-    let commit = match hint {
-        Some(h) if h.len() >= 40 => h.to_owned(),
-        _ => {
-            let url = format!(
-                "https://api.github.com/repos/{}/{}/commits/{}",
-                cx.cfg.repo.owner,
-                cx.cfg.repo.name,
-                github::encode_path(&cx.cfg.branch)
-            );
-            let etag = cx.env.kv_get("sync/commit-etag");
-            // Done means done by this importer: after an upgrade that
-            // changes what pages are made of, the same commit syncs again.
-            let done = cx.env.kv_get("sync/complete").as_deref() == Some("1")
-                && cx.env.kv_get("sync/format").as_deref() == Some(FORMAT);
-            let r = cx.get(
-                &url,
-                "application/vnd.github.sha",
-                if done { etag.as_deref() } else { None },
-            )?;
-            if r.status == 304 {
-                cx.report.up_to_date = true;
-                return Ok(());
-            }
-            if let Some(e) = &r.etag {
-                let _ = cx.env.kv_set("sync/commit-etag-next", e);
-            }
-            r.body.trim().to_owned()
+    // 1. Which commits? One conditional request per branch or tag in use
+    // (the main one, plus any a version is read from): unchanged costs nothing.
+    let mut refs: Vec<String> = vec![cx.cfg.branch.clone()];
+    for r in cx
+        .cfg
+        .version_refs
+        .values()
+        .chain(cx.cfg.sections.iter().filter_map(|s| s.git_ref.as_ref()))
+    {
+        if !refs.contains(r) {
+            refs.push(r.clone());
         }
-    };
-    if commit.len() < 40 || !commit.chars().all(|c| c.is_ascii_hexdigit()) {
-        return Err(Stop::Fail("GitHub did not return a commit hash".to_owned()));
     }
+    // Done means done by this importer: after an upgrade that
+    // changes what pages are made of, the same commit syncs again.
+    let done = cx.env.kv_get("sync/complete").as_deref() == Some("1")
+        && cx.env.kv_get("sync/format").as_deref() == Some(FORMAT);
+    let mut heads: Vec<String> = Vec::new();
+    let mut all_unchanged = true;
+    for (i, r) in refs.iter().enumerate() {
+        let (etag_key, head_key) = if i == 0 {
+            ("sync/commit-etag".to_owned(), "sync/head/0".to_owned())
+        } else {
+            (format!("sync/commit-etag/{i}"), format!("sync/head/{i}"))
+        };
+        let sha = match hint {
+            Some(h) if i == 0 && h.len() >= 40 => {
+                all_unchanged = false;
+                h.to_owned()
+            }
+            _ => {
+                let url = format!(
+                    "https://api.github.com/repos/{}/{}/commits/{}",
+                    cx.cfg.repo.owner,
+                    cx.cfg.repo.name,
+                    github::encode_path(r)
+                );
+                let kept = cx.env.kv_get(&head_key);
+                let etag = cx.env.kv_get(&etag_key);
+                let use_etag = done && kept.is_some();
+                let reply = cx.get(
+                    &url,
+                    "application/vnd.github.sha",
+                    if use_etag { etag.as_deref() } else { None },
+                )?;
+                if reply.status == 304 {
+                    kept.unwrap_or_default()
+                } else {
+                    all_unchanged = false;
+                    if let Some(e) = &reply.etag {
+                        let _ = cx.env.kv_set(&format!("{etag_key}-next"), e);
+                    }
+                    reply.body.trim().to_owned()
+                }
+            }
+        };
+        if sha.len() < 40 || !sha.chars().all(|c| c.is_ascii_hexdigit()) {
+            return Err(Stop::Fail("GitHub did not return a commit hash".to_owned()));
+        }
+        heads.push(sha);
+    }
+    if all_unchanged {
+        cx.report.up_to_date = true;
+        return Ok(());
+    }
+    for (i, sha) in heads.iter().enumerate() {
+        cx.env.kv_set(&format!("sync/head/{i}"), sha)?;
+    }
+    let commit = heads[0].clone();
     cx.report.commit.clone_from(&commit);
-    if cx.env.kv_get("sync/commit").as_deref() != Some(commit.as_str()) {
-        cx.env.kv_set("sync/commit", &commit)?;
+    let combined = heads.join(",");
+    if cx.env.kv_get("sync/commit").as_deref() != Some(combined.as_str()) {
+        cx.env.kv_set("sync/commit", &combined)?;
         cx.env.kv_set("sync/complete", "0")?;
     }
+    let commit_of = |r: &str| -> String {
+        refs.iter()
+            .position(|x| x == r)
+            .map_or_else(|| commit.clone(), |i| heads[i].clone())
+    };
 
     // 2. Files of every tree.
     let mut trees: Vec<TreeSpec> = vec![TreeSpec {
         label: cx.cfg.latest_version.clone(),
         folder: cx.cfg.folder.clone(),
         tag: "main".to_owned(),
+        git_ref: cx.cfg.branch.clone(),
+        commit: commit.clone(),
     }];
     for (label, folder) in &cx.cfg.versions {
+        let git_ref = cx
+            .cfg
+            .version_refs
+            .get(label)
+            .cloned()
+            .unwrap_or_else(|| cx.cfg.branch.clone());
         trees.push(TreeSpec {
             label: label.clone(),
             folder: folder.clone(),
             tag: format!("v:{label}"),
+            git_ref: git_ref.clone(),
+            commit: commit_of(&git_ref),
+        });
+    }
+    for sec in &cx.cfg.sections {
+        let git_ref = sec.git_ref.clone().unwrap_or_else(|| cx.cfg.branch.clone());
+        trees.push(TreeSpec {
+            label: sec.slug.clone(),
+            folder: sec.folder.clone(),
+            tag: format!("s:{}", sec.slug),
+            commit: commit_of(&git_ref),
+            git_ref,
         });
     }
     let mut files: Vec<SrcFile> = Vec::new();
     for t in &trees {
-        let listing = list_folder(cx, &commit, &t.folder)?;
+        let listing = list_folder(cx, &t.commit, &t.folder)?;
         for e in github::doc_files(&listing, MAX_PAGE_BYTES) {
             files.push(SrcFile {
                 tree: t.clone(),
@@ -355,7 +427,7 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
         } else {
             let url = github::raw_url(
                 &cx.cfg.repo,
-                &commit,
+                &f.tree.commit,
                 &join_repo_path(&f.tree.folder, &f.path),
             );
             let body = cx.get(&url, "text/plain", None)?.body;
@@ -421,14 +493,24 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
             Source::Page(f) => {
                 let url = github::raw_url(
                     &cx.cfg.repo,
-                    &commit,
+                    &f.tree.commit,
                     &join_repo_path(&f.tree.folder, &f.path),
                 );
                 let body = match bodies.remove(&f.sha) {
                     Some(b) => b,
                     None => cx.get(&url, "text/plain", None)?.body,
                 };
-                build_page_entry(cx.cfg, &commit, f, &body, pe, &p, &hash, &today, &infos)
+                build_page_entry(
+                    cx.cfg,
+                    &f.tree.commit,
+                    f,
+                    &body,
+                    pe,
+                    &p,
+                    &hash,
+                    &today,
+                    &infos,
+                )
             }
             Source::Generated => build_generated_entry(pe, &p, &hash),
         };
@@ -457,8 +539,15 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
             cx.env.kv_delete(&k);
         }
     }
-    if let Some(next) = cx.env.kv_get("sync/commit-etag-next") {
-        cx.env.kv_set("sync/commit-etag", &next)?;
+    for i in 0..refs.len() {
+        let key = if i == 0 {
+            "sync/commit-etag".to_owned()
+        } else {
+            format!("sync/commit-etag/{i}")
+        };
+        if let Some(next) = cx.env.kv_get(&format!("{key}-next")) {
+            cx.env.kv_set(&key, &next)?;
+        }
     }
     cx.env.kv_set("sync/complete", "1")?;
     cx.env.kv_set("sync/format", FORMAT)?;
@@ -472,6 +561,10 @@ struct TreeSpec {
     label: String,
     folder: Vec<String>,
     tag: String,
+    /// The branch or tag this tree is read from.
+    git_ref: String,
+    /// The commit that ref pointed at for this run.
+    commit: String,
 }
 
 #[derive(Clone)]
@@ -557,6 +650,7 @@ struct PlannedEntry {
     source: Source,
     version: String,
     kind_version_root: bool,
+    kind_section_root: bool,
 }
 
 struct FullPlan {
@@ -567,6 +661,9 @@ struct FullPlan {
 }
 
 fn effective_version(cfg: &Config, f: &SrcFile, scan: &Scan) -> String {
+    if let Some(slug) = f.tree.tag.strip_prefix("s:") {
+        return format!("{SECTION_PREFIX}{slug}");
+    }
     scan.version.clone().unwrap_or_else(|| {
         if f.tree.tag == "main" {
             cfg.latest_version.clone()
@@ -612,25 +709,40 @@ fn make_plan(
         let Some(pages) = by_version.get(&version) else {
             continue;
         };
-        let is_latest = version == cfg.latest_version;
-        let root_key = format!("@version/{version}");
+        let section = version.strip_prefix(SECTION_PREFIX);
+        let is_latest = section.is_none() && version == cfg.latest_version;
+        let (shown, seg) = match section {
+            Some(slug) => (
+                cfg.sections
+                    .iter()
+                    .find(|d| d.slug == slug)
+                    .map_or_else(|| slug.to_owned(), |d| d.title.clone()),
+                slug.to_owned(),
+            ),
+            None => (version.clone(), plan::slugify(&version)),
+        };
+        let root_key = match section {
+            Some(slug) => format!("@section/{slug}"),
+            None => format!("@version/{version}"),
+        };
         if !is_latest {
             roots_made += 1;
             entries.push(PlannedEntry {
                 planned: Planned {
                     key: root_key.clone(),
                     parent_key: None,
-                    slug: plan::slugify(&version),
-                    title: version.clone(),
+                    slug: seg.clone(),
+                    title: shown.clone(),
                     position: 1000 + roots_made * 10,
                     hide: true,
                     section: None,
                     kind: Kind::Group,
-                    site_path: format!("/{BASE}/{}", plan::slugify(&version)),
+                    site_path: format!("/{BASE}/{seg}"),
                 },
                 source: Source::Generated,
                 version: version.clone(),
-                kind_version_root: true,
+                kind_version_root: section.is_none(),
+                kind_section_root: section.is_some(),
             });
         }
         let infos_for: Vec<PageInfo> = pages
@@ -670,7 +782,7 @@ fn make_plan(
             prefix: if is_latest {
                 Vec::new()
             } else {
-                vec![plan::slugify(&version)]
+                vec![seg.clone()]
             },
             parent_key: if is_latest {
                 None
@@ -680,7 +792,7 @@ fn make_plan(
             tree: if is_latest {
                 "main".to_owned()
             } else {
-                plan::slugify(&version)
+                seg.clone()
             },
         };
         let (planned, w) = plan::plan_tree(&infos_for, &vmetas, &root);
@@ -698,6 +810,7 @@ fn make_plan(
                 source,
                 version: version.clone(),
                 kind_version_root: false,
+                kind_section_root: false,
             });
         }
     }
@@ -793,7 +906,9 @@ fn doc_fields(
 }
 
 fn terms_for(version: &str) -> Vec<String> {
-    if version.is_empty() {
+    if let Some(slug) = version.strip_prefix(SECTION_PREFIX) {
+        vec![format!("{SECTION_TAXONOMY}:{slug}")]
+    } else if version.is_empty() {
         Vec::new()
     } else {
         vec![format!("{VERSION_TAXONOMY}:{}", plan::slugify(version))]
@@ -837,11 +952,11 @@ fn build_page_entry(
         .unwrap_or_else(|| today.to_owned());
     let edit = github::edit_url(
         &cfg.repo,
-        &cfg.branch,
+        &f.tree.git_ref,
         &join_repo_path(&f.tree.folder, &f.path),
     );
     // An older version's page points search engines at its counterpart.
-    let canonical = (pe.version != cfg.latest_version)
+    let canonical = (pe.version != cfg.latest_version && !pe.version.starts_with(SECTION_PREFIX))
         .then(|| {
             let rel = pe.planned.site_path.splitn(4, '/').nth(3).unwrap_or("");
             let latest = format!("/{BASE}/{rel}");
@@ -857,7 +972,7 @@ fn build_page_entry(
     if let Some(c) = canonical {
         seo.insert("canonical-path".to_owned(), c.into());
     }
-    if pe.planned.hide {
+    if pe.planned.hide || cfg.unreleased.contains(&pe.version) {
         seo.insert("noindex".to_owned(), true.into());
     }
     let seo = serde_json::Value::Object(seo).to_string();
@@ -918,7 +1033,20 @@ fn build_generated_entry(pe: &PlannedEntry, p: &FullPlan, hash: &str) -> Entry {
         blocks_json: serde_json::Value::Array(blocks).to_string(),
         position: pe.planned.position,
         terms: terms_for(&pe.version),
-        fields_json: doc_fields(pe.kind_version_root, pe.planned.hide, "", "", ""),
+        fields_json: {
+            let mut f: serde_json::Value = serde_json::from_str(&doc_fields(
+                pe.kind_version_root,
+                pe.planned.hide,
+                "",
+                "",
+                "",
+            ))
+            .unwrap_or_default();
+            if pe.kind_section_root {
+                f["section_root"] = true.into();
+            }
+            f.to_string()
+        },
         seo_json: "{}".to_owned(),
         source_hash: hash.to_owned(),
         edit_url: String::new(),
@@ -955,6 +1083,10 @@ mod tests {
     struct Fake {
         commits: BTreeMap<String, Files>, // commit -> files (full repo paths)
         head: String,
+        /// Other branches and tags: ref -> commit. Anything else is `head`.
+        refs: BTreeMap<String, String>,
+        /// The commit the last root listing named; directory listings follow it.
+        walking: String,
         kv: RefCell<BTreeMap<String, String>>,
         entries: BTreeMap<String, (Entry, String)>,
         now: u64,
@@ -1036,7 +1168,9 @@ mod tests {
                     .iter()
                     .find(|(k, _)| *k == "if-none-match")
                     .map(|(_, v)| v.clone());
-                let etag = format!("\"{}\"", f.head);
+                let r = url.rsplit('/').next().unwrap_or("");
+                let head = f.refs.get(r).unwrap_or(&f.head).clone();
+                let etag = format!("\"{head}\"");
                 if inm.as_deref() == Some(etag.as_str()) {
                     return Ok(Reply {
                         status: 304,
@@ -1047,7 +1181,7 @@ mod tests {
                 return Ok(Reply {
                     status: 200,
                     etag: Some(etag),
-                    body: f.head.clone(),
+                    body: head,
                 });
             }
             if let Some(rest) = url.strip_prefix("https://api.github.com/repos/o/r/git/trees/") {
@@ -1055,7 +1189,14 @@ mod tests {
                     .strip_suffix("?recursive=1")
                     .map_or((rest, false), |r| (r, true));
                 let tree_ref = r.replace("%3A", ":");
-                let commit = f.head.clone();
+                if f.commits.contains_key(&tree_ref) {
+                    f.walking.clone_from(&tree_ref);
+                }
+                let commit = if f.walking.is_empty() {
+                    f.head.clone()
+                } else {
+                    f.walking.clone()
+                };
                 let body = f
                     .tree_json(&commit, &tree_ref, recursive)
                     .ok_or("no such tree")?;
@@ -1157,6 +1298,9 @@ mod tests {
             token: None,
             latest_version: String::new(),
             versions: Vec::new(),
+            version_refs: BTreeMap::new(),
+            unreleased: Vec::new(),
+            sections: Vec::new(),
         }
     }
 
@@ -1486,6 +1630,94 @@ mod tests {
         assert!(run(&mut Wrap(&f), &c, None, b)
             .unwrap_err()
             .contains("folder nope"));
+    }
+
+    #[test]
+    fn a_section_has_its_own_root_term_and_url_prefix() {
+        let mut files = repo_one();
+        files.insert("api/index.md".into(), "# API\n".into());
+        files.insert("api/calls.md".into(), "# Calls\n".into());
+        let f = fake_with(files);
+        let mut c = cfg();
+        c.sections = vec![crate::settings::SectionDef {
+            slug: "api".into(),
+            title: "API reference".into(),
+            folder: vec!["api".into()],
+            git_ref: None,
+        }];
+        let b = budget(&f);
+        assert!(run(&mut Wrap(&f), &c, None, b).unwrap().finished);
+        let fk = f.borrow();
+        let root = &fk.entries["@section/api"].0;
+        assert!(root.fields_json.contains("\"section_root\":true"));
+        assert!(!root.fields_json.contains("\"version_root\":true"));
+        assert_eq!(root.title, "API reference");
+        let calls = &fk.entries["s:api:calls.md"].0;
+        assert_eq!(calls.terms, ["doc-section:api"]);
+        assert_eq!(calls.parent_key.as_deref(), Some("@section/api"));
+        assert!(!calls.seo_json.contains("canonical"));
+    }
+
+    #[test]
+    fn a_version_read_from_another_ref_uses_that_refs_commit_and_edit_link() {
+        let mut next_files = repo_one();
+        next_files.insert("docs/intro.md".into(), "# Intro, unreleased\n".into());
+        next_files.insert("docs/new.md".into(), "# New\n".into());
+        let f = fake_with(repo_one());
+        f.borrow_mut().commits.insert(SHA2.to_owned(), next_files);
+        f.borrow_mut()
+            .refs
+            .insert("dev".to_owned(), SHA2.to_owned());
+        let mut c = cfg();
+        c.latest_version = "v2".into();
+        c.versions = vec![("next".into(), vec!["docs".into()])];
+        c.version_refs.insert("next".into(), "dev".into());
+        c.unreleased = vec!["next".into()];
+        let b = budget(&f);
+        let report = run(&mut Wrap(&f), &c, None, b).unwrap();
+        assert!(report.finished, "{report:?}");
+        {
+            let fk = f.borrow();
+            assert!(
+                fk.entries["v:next:new.md"]
+                    .0
+                    .seo_json
+                    .contains("\"noindex\":true"),
+                "an unreleased version stays out of search engines"
+            );
+            assert!(
+                fk.entries.contains_key("v:next:new.md"),
+                "{:?}",
+                fk.entries.keys()
+            );
+            assert!(!fk.entries.contains_key("main:new.md"));
+            assert!(fk.entries["v:next:new.md"]
+                .0
+                .edit_url
+                .contains("/edit/dev/docs/new.md"));
+            assert!(fk.entries["main:intro.md"]
+                .0
+                .edit_url
+                .contains("/edit/main/"));
+        }
+        // Nothing moved: one conditional request per ref, nothing written.
+        let before = f.borrow().requests.len();
+        let b = budget(&f);
+        let report = run(&mut Wrap(&f), &c, None, b).unwrap();
+        assert!(report.up_to_date, "{report:?}");
+        assert_eq!(f.borrow().requests.len() - before, 2);
+        // Only the other ref moves: the sync runs again.
+        const SHA3: &str = "3333333333333333333333333333333333333333";
+        let mut files = f.borrow().commits[SHA2].clone();
+        files.insert("docs/newer.md".into(), "# Newer\n".into());
+        f.borrow_mut().commits.insert(SHA3.to_owned(), files);
+        f.borrow_mut()
+            .refs
+            .insert("dev".to_owned(), SHA3.to_owned());
+        let b = budget(&f);
+        let report = run(&mut Wrap(&f), &c, None, b).unwrap();
+        assert!(!report.up_to_date && report.finished, "{report:?}");
+        assert!(f.borrow().entries.contains_key("v:next:newer.md"));
     }
 
     #[test]
