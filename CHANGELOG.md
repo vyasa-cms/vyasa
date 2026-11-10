@@ -7,8 +7,14 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-10
+
 ### Added
 
+- A theme can place the "Made with Vyasa" credit itself: `"credit": "theme"` in
+  `layout.json` plus `{{ vyasa.credit_html | safe }}` in its footer template.
+  The engine then skips its own line (no duplicate) but still adds it if the
+  rendered page has none. See docs/THEMES.md.
 - Media storage is configurable from the admin: Settings → Delivery →
   Media storage takes an S3-compatible bucket (R2, S3, MinIO), tests the
   connection, and switches new uploads to it without a restart. The keys

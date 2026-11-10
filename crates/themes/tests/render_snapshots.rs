@@ -537,6 +537,7 @@ fn regions_extra_overrides_layout_content() {
         search: vec![lb("f-search", "search-box")],
         not_found: vec![lb("f-nf", "content")],
         types: std::collections::BTreeMap::new(),
+        credit: vyasa_themes::Credit::default(),
     };
 
     let page = PageContext {

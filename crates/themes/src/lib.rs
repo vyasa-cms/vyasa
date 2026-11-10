@@ -36,7 +36,7 @@ pub use dynblocks::{
 pub use engine::{Engine, EngineError};
 pub use layout::{
     canonical_layout_json, merge_layouts, page_sections, validate_layout, validate_sections,
-    Layout, MapSettings, Screen, Section, TemplateType, STATIC_REGIONS,
+    Credit, Layout, MapSettings, Screen, Section, TemplateType, STATIC_REGIONS,
 };
 pub use render::{render_page, PageContext, PostCard, RenderRequest, SiteMeta, TermLink};
 pub use renderer::blocks::RESOLVED_ATTR as PLUGIN_BLOCK_RESOLVED_ATTR;
