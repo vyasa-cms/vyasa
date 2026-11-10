@@ -277,6 +277,19 @@ fn esc(raw: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// Escapes like [`esc`], then restores the bare tags `em`, `strong` and `br`
+/// (no attributes), so a heading can mark one clause. Nothing else passes.
+pub(super) fn inline(raw: &str) -> String {
+    let mut out = esc(raw);
+    for tag in ["em", "strong"] {
+        out = out
+            .replace(&format!("&lt;{tag}&gt;"), &format!("<{tag}>"))
+            .replace(&format!("&lt;/{tag}&gt;"), &format!("</{tag}>"));
+    }
+    out.replace("&lt;br&gt;", "<br>")
+        .replace("&lt;br/&gt;", "<br>")
+}
+
 fn button(label: Option<String>, url: Option<String>, class: &str) -> String {
     match (label, url) {
         (Some(l), Some(u)) if !l.trim().is_empty() && safe_url(&u) => {
@@ -360,7 +373,7 @@ fn render_hero(s: &MapSettings, editor: bool) -> String {
     let copy = format!(
         "{eyebrow}<h1 class=\"vy-hero-title\"{}>{}</h1>{subhead}{actions}",
         edit_marker(editor, "headline"),
-        esc(&headline)
+        inline(&headline)
     );
     let align = if text(s, "align").as_deref() == Some("center") {
         " vy-hero--center"
@@ -386,7 +399,7 @@ fn render_items(s: &MapSettings, kind: &str) -> String {
     let columns = uint(s, "columns", 1, 4, 3).unwrap_or(3);
     let heading = text(s, "heading")
         .filter(|v| !v.trim().is_empty())
-        .map(|v| format!("<h2 class=\"vy-section-title\">{}</h2>", esc(&v)))
+        .map(|v| format!("<h2 class=\"vy-section-title\">{}</h2>", inline(&v)))
         .unwrap_or_default();
     let intro = text(s, "intro")
         .filter(|v| !v.trim().is_empty())
@@ -468,7 +481,7 @@ fn render_cta(s: &MapSettings, editor: bool) -> String {
     format!(
         "<div class=\"vy-cta\"><h2 class=\"vy-cta-title\"{}>{}</h2>{subhead}<p class=\"vy-actions\">{}</p></div>",
         edit_marker(editor, "headline"),
-        esc(&headline),
+        inline(&headline),
         button(text(s, "label"), text(s, "url"), "vy-btn-primary")
     )
 }
@@ -476,7 +489,7 @@ fn render_cta(s: &MapSettings, editor: bool) -> String {
 fn render_faq(s: &MapSettings) -> String {
     let heading = text(s, "heading")
         .filter(|v| !v.trim().is_empty())
-        .map(|v| format!("<h2 class=\"vy-section-title\">{}</h2>", esc(&v)))
+        .map(|v| format!("<h2 class=\"vy-section-title\">{}</h2>", inline(&v)))
         .unwrap_or_default();
     let empty = Vec::new();
     let items = s
@@ -553,7 +566,7 @@ fn render_signup(s: &MapSettings) -> String {
     let form = text(s, "form").unwrap_or_else(|| mode.to_owned());
     let heading = text(s, "heading")
         .filter(|v| !v.trim().is_empty())
-        .map(|v| format!("<h2 class=\"vy-section-title\">{}</h2>", esc(&v)))
+        .map(|v| format!("<h2 class=\"vy-section-title\">{}</h2>", inline(&v)))
         .unwrap_or_default();
     let subhead = text(s, "subhead")
         .filter(|v| !v.trim().is_empty())
@@ -1130,6 +1143,17 @@ mod modern_tests {
         assert!(html.contains("q.sql"));
         settings.set("image", json!("/a.png"));
         assert!(!check_hero(&settings).is_empty());
+    }
+
+    #[test]
+    fn headings_allow_only_bare_em_strong_and_br() {
+        assert_eq!(
+            inline("Run <em>everywhere</em>.<br>Now <strong>fast</strong> <script>x</script> <em onclick=\"a\">"),
+            "Run <em>everywhere</em>.<br>Now <strong>fast</strong> &lt;script&gt;x&lt;/script&gt; &lt;em onclick=&quot;a&quot;&gt;"
+        );
+        let s: MapSettings =
+            serde_json::from_value(json!({"headline": "A <em>B</em>"})).expect("s");
+        assert!(render_hero(&s, false).contains("<em>B</em>"));
     }
 
     #[test]

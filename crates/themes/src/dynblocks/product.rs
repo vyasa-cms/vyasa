@@ -95,7 +95,11 @@ pub fn render(kind: &str, s: &MapSettings) -> String {
     let intro = s.get("intro").and_then(Value::as_str).unwrap_or("");
     let mut out = format!("<div class=\"vy-product vy-{kind}\">");
     if !heading.is_empty() {
-        let _ = write!(out, "<h2 class=\"vy-section-title\">{}</h2>", esc(heading));
+        let _ = write!(
+            out,
+            "<h2 class=\"vy-section-title\">{}</h2>",
+            super::sections::inline(heading)
+        );
     }
     if !intro.is_empty() {
         let _ = write!(out, "<p class=\"vy-section-intro\">{}</p>", esc(intro));
