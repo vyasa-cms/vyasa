@@ -274,6 +274,12 @@ still the `single`/`archive` tree. Template names are validated by shape
 (`studio::is_template_name`), so a template for a type that never exists
 is dead weight, not an error.
 
+**Per-entry templates.** On a single entry the renderer first tries
+`<template>-<slug>.html` (`page-engine.html` for the page whose slug is
+`engine`, `single-hello.html` for the post `hello`), then the per-type file,
+then the plain template. It needs no content type: a theme can give one page
+its own markup. A slug with no matching file changes nothing.
+
 ## Content types and fields (phase 99)
 
 An administrator creates content types (Products, Events, Team members…)

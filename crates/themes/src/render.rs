@@ -102,6 +102,10 @@ pub struct PageContext {
     /// archive, so `single-book.html` can override `single.html` the way
     /// WordPress's hierarchy would. `None` everywhere else.
     pub post_type_slug: Option<String>,
+    /// The entry's own slug on a single page, so `page-engine.html` can
+    /// override `page.html` for the page `/engine` alone. Wins over the
+    /// type-named template. `None` on listings.
+    pub entry_slug: Option<String>,
     /// The entry on a single page, as templates read it: `entry.id`,
     /// `entry.title`, `entry.type` and `entry.fields.<key>` (custom field
     /// values, prepared by the caller for display). Autoescaped like every
@@ -233,7 +237,7 @@ impl<'a> RenderRequest<'a> {
 /// code (it is a few hundred generated rules).
 fn page_base_css(tokens: &TokenSet, layout: &Layout, page: &PageContext) -> String {
     format!(
-        "{}{}{}{}",
+        "{}{}{}{}{}",
         crate::base_css::base_css(tokens),
         crate::sections::sections_css(tokens),
         crate::css::scopes_css(layout, &page.sections, tokens),
@@ -245,6 +249,15 @@ fn page_base_css(tokens: &TokenSet, layout: &Layout, page: &PageContext) -> Stri
             crate::renderer::highlight::highlight_css()
         } else {
             ""
+        },
+        if page
+            .regions_extra
+            .iter()
+            .any(|(_, html)| html.contains("vy-hl-"))
+        {
+            crate::css::code_palette_css(tokens)
+        } else {
+            String::new()
         }
     )
 }
@@ -287,11 +300,15 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
         TemplateType::Search => "search.html",
         TemplateType::NotFound => "not-found.html",
     };
+    let by_slug = slug_template(page, default_name);
     let specific = type_template(page, default_name);
-    let template_name: &str = match &specific {
-        Some(name) if engine.template_names().contains(&name.as_str()) => name,
-        _ => default_name,
-    };
+    let template_name: &str = [&by_slug, &specific]
+        .into_iter()
+        .flatten()
+        .map(String::as_str)
+        .find(|name| engine.template_names().contains(name))
+        .unwrap_or(default_name);
+
     // A composed entry (its own tree, or its type's) must show its tree
     // even when the theme's template for this slot never prints `sections`.
     // A template named for the type (`single-doc.html`) is the theme saying
@@ -299,6 +316,7 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
     let composed_fallback = !page.sections.is_empty()
         && template == TemplateType::Single
         && specific.as_deref() != Some(template_name)
+        && by_slug.as_deref() != Some(template_name)
         && !engine.prints_sections(template_name)
         && engine.template_names().contains(&"composed.html");
     let template_name: &str = if composed_fallback {
@@ -695,6 +713,15 @@ fn composed_body(
 fn type_template(page: &PageContext, default_name: &str) -> Option<String> {
     page.post_type_slug
         .as_deref()
+        .map(|slug| format!("{}-{slug}.html", default_name.trim_end_matches(".html")))
+}
+
+/// Per-entry overrides: `page-engine.html` wins over `page.html` (and over
+/// `page-<type>.html`) for the entry whose slug is `engine`.
+fn slug_template(page: &PageContext, default_name: &str) -> Option<String> {
+    page.entry_slug
+        .as_deref()
+        .filter(|slug| !slug.is_empty())
         .map(|slug| format!("{}-{slug}.html", default_name.trim_end_matches(".html")))
 }
 
