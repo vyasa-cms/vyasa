@@ -5733,6 +5733,7 @@ dependencies = [
  "image",
  "infer",
  "mime_guess",
+ "quick-xml 0.42.0",
  "rand 0.8.8",
  "serde",
  "serde_json",
