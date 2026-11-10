@@ -233,7 +233,7 @@ impl<'a> RenderRequest<'a> {
 /// code (it is a few hundred generated rules).
 fn page_base_css(tokens: &TokenSet, layout: &Layout, page: &PageContext) -> String {
     format!(
-        "{}{}{}{}",
+        "{}{}{}{}{}",
         crate::base_css::base_css(tokens),
         crate::sections::sections_css(tokens),
         crate::css::scopes_css(layout, &page.sections, tokens),
@@ -245,6 +245,15 @@ fn page_base_css(tokens: &TokenSet, layout: &Layout, page: &PageContext) -> Stri
             crate::renderer::highlight::highlight_css()
         } else {
             ""
+        },
+        if page
+            .regions_extra
+            .iter()
+            .any(|(_, html)| html.contains("vy-hl-"))
+        {
+            crate::css::code_palette_css(tokens)
+        } else {
+            String::new()
         }
     )
 }
