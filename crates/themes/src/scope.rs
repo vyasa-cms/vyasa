@@ -83,6 +83,12 @@ pub fn role_slot<'a>(tokens: &'a TokenSet, role: &str) -> Option<&'a ColorSlot> 
         "border" => Some(&c.border),
         "primary" => Some(&c.primary),
         "on-primary" | "on_primary" => Some(&c.on_primary),
+        "bg-subtle" | "bg_subtle" => c.bg_subtle.as_ref(),
+        "surface-2" | "surface_2" => c.surface_2.as_ref(),
+        "border-strong" | "border_strong" => c.border_strong.as_ref(),
+        "success" => c.success.as_ref(),
+        "warning" => c.warning.as_ref(),
+        "danger" => c.danger.as_ref(),
         _ => None,
     }
 }
