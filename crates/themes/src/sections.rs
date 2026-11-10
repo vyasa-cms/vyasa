@@ -495,3 +495,21 @@ mod tests {
         assert!(composes(&[group]));
     }
 }
+
+#[cfg(test)]
+mod components_js_tests {
+    use super::COMPONENTS_JS;
+
+    #[test]
+    fn the_in_view_hook_is_shipped_and_balanced() {
+        assert!(COMPONENTS_JS.contains("[data-vy-reveal]"));
+        assert!(COMPONENTS_JS.contains("vy-in-view"));
+        for (open, close) in [('{', '}'), ('(', ')')] {
+            assert_eq!(
+                COMPONENTS_JS.matches(open).count(),
+                COMPONENTS_JS.matches(close).count(),
+                "unbalanced {open}{close}"
+            );
+        }
+    }
+}
