@@ -174,9 +174,15 @@ share, so a working site needs the image and a Postgres and nothing else.
   `/tmp` the image runs with Docker's `--read-only` and Kubernetes'
   `readOnlyRootFilesystem: true`; `scripts/smoke-readonly.sh` proves it
   on every CI run.
-- **Media in object storage.** `VYASA_STORAGE__PROVIDER=s3` with the
-  bucket, endpoint and keys (R2, S3, MinIO, any S3 API) removes the need
-  for a media volume; `VYASA_MEDIA_DIR` is then scratch only.
+- **Media in object storage.** An S3-compatible bucket (R2, S3, MinIO,
+  any S3 API) removes the need for a media volume; `VYASA_MEDIA_DIR` is
+  then scratch only. Configure it either in the admin (Settings →
+  Delivery → Media storage: test, save, and the switch applies without a
+  restart; the keys are sealed with `VYASA_SECRET_KEY`) or in the
+  environment (`VYASA_STORAGE__PROVIDER=s3` with the bucket, endpoint and
+  keys), which makes the admin page read-only. Files uploaded before a
+  switch keep serving from where they are; "Move existing files" copies
+  them across as a background job.
 - **The search index rebuilds itself.** When the index on disk does not
   match the database — empty after a restart on ephemeral disk, or stale —
   the boot rebuilds it in the background from Postgres, logging start and
