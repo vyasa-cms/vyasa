@@ -56,6 +56,21 @@ Relative links between pages work; links to other files in the repository
 become links to GitHub at the synced commit. Images need the repository to
 be public.
 
+### Products with versions
+
+A section slug may have two parts, `product/version`:
+
+```text
+engine = Krishiv Engine | docs
+engine/0.2 = Engine 0.2 | docs @ v0.2.0
+engine/next = Engine next | docs @ main
+```
+
+`engine/0.2` is served at `/docs/engine/0.2/` with its own sidebar and
+search scope; `/docs/engine/` is the first line (the latest). When no section
+named `engine` is configured, a hidden root page `engine` is made for the
+versions to hang under.
+
 ### Components
 
 Seven tags, at the start of a line, are understood; everything else is

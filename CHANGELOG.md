@@ -7,6 +7,9 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Added
+- Docs plugin 0.1.4: a section slug may be `product/version` (`engine/0.2`), served at `/docs/engine/0.2/` with its own sidebar and search scope; a hidden `product` root is generated when no section of that name exists.
+
 ## [0.4.1] - 2026-11-10
 
 ### Fixed

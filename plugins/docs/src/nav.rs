@@ -141,12 +141,13 @@ impl Page {
 
     /// The doc section this page lives under, if any.
     fn section_root(&self) -> Option<&Node> {
-        let top = self
-            .ancestors
-            .first()
+        // The deepest section root on the way down: `engine/0.2` wins over its parent `engine`.
+        self.ancestors
+            .iter()
             .map(String::as_str)
-            .or(Some(self.id.as_str()))?;
-        self.node(top).filter(|n| n.section_root)
+            .chain(std::iter::once(self.id.as_str()))
+            .filter_map(|id| self.node(id))
+            .rfind(|n| n.section_root)
     }
 
     /// The nodes the sidebar lists at its top level.
@@ -431,7 +432,10 @@ pub fn search(page: &Page, latest_version: &str, placeholder: &str) -> String {
     if let Some(sec) = page.section_root() {
         return search_form(
             page,
-            &format!("doc-section:{}", crate::plan::slugify(&sec.slug)),
+            &format!(
+                "doc-section:{}",
+                crate::plan::slugify(sec.url.trim_start_matches("/docs/")).replace('/', "-")
+            ),
             placeholder,
         );
     }
