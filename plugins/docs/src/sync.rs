@@ -690,7 +690,7 @@ fn make_plan(
             .or_default()
             .push((f, scan));
     }
-    let mut entries = Vec::new();
+    let mut entries: Vec<PlannedEntry> = Vec::new();
     let mut warnings = Vec::new();
     let mut known = BTreeMap::new();
     let mut order: Vec<String> = Vec::new();
@@ -725,13 +725,43 @@ fn make_plan(
             Some(slug) => format!("@section/{slug}"),
             None => format!("@version/{version}"),
         };
+        // A section slug may be `product/version`: the root hangs under `product`, which is
+        // generated when no section of that name is configured.
+        let (seg_parent, seg_leaf) = match seg.split_once('/') {
+            Some((p, l)) => (Some(p.to_owned()), l.to_owned()),
+            None => (None, seg.clone()),
+        };
+        let parent_root_key = seg_parent.as_ref().map(|p| format!("@section/{p}"));
+        if let (Some(p), Some(pk)) = (&seg_parent, &parent_root_key) {
+            let configured = cfg.sections.iter().any(|d| &d.slug == p);
+            if !configured && !entries.iter().any(|e| &e.planned.key == pk) {
+                roots_made += 1;
+                entries.push(PlannedEntry {
+                    planned: Planned {
+                        key: pk.clone(),
+                        parent_key: None,
+                        slug: p.clone(),
+                        title: p.clone(),
+                        position: 1000 + roots_made * 10,
+                        hide: true,
+                        section: None,
+                        kind: Kind::Group,
+                        site_path: format!("/{BASE}/{p}"),
+                    },
+                    source: Source::Generated,
+                    version: version.clone(),
+                    kind_version_root: false,
+                    kind_section_root: true,
+                });
+            }
+        }
         if !is_latest {
             roots_made += 1;
             entries.push(PlannedEntry {
                 planned: Planned {
                     key: root_key.clone(),
-                    parent_key: None,
-                    slug: seg.clone(),
+                    parent_key: parent_root_key.clone(),
+                    slug: seg_leaf.clone(),
                     title: shown.clone(),
                     position: 1000 + roots_made * 10,
                     hide: true,
@@ -782,7 +812,7 @@ fn make_plan(
             prefix: if is_latest {
                 Vec::new()
             } else {
-                vec![seg.clone()]
+                seg.split('/').map(str::to_owned).collect()
             },
             parent_key: if is_latest {
                 None
@@ -792,7 +822,7 @@ fn make_plan(
             tree: if is_latest {
                 "main".to_owned()
             } else {
-                seg.clone()
+                seg.replace('/', "-")
             },
         };
         let (planned, w) = plan::plan_tree(&infos_for, &vmetas, &root);
@@ -907,7 +937,7 @@ fn doc_fields(
 
 fn terms_for(version: &str) -> Vec<String> {
     if let Some(slug) = version.strip_prefix(SECTION_PREFIX) {
-        vec![format!("{SECTION_TAXONOMY}:{slug}")]
+        vec![format!("{SECTION_TAXONOMY}:{}", plan::slugify(slug))]
     } else if version.is_empty() {
         Vec::new()
     } else {
@@ -1656,6 +1686,33 @@ mod tests {
         assert_eq!(calls.terms, ["doc-section:api"]);
         assert_eq!(calls.parent_key.as_deref(), Some("@section/api"));
         assert!(!calls.seo_json.contains("canonical"));
+    }
+
+    #[test]
+    fn a_product_version_section_hangs_under_a_generated_product_root() {
+        let mut files = repo_one();
+        files.insert("api/index.md".into(), "# API\n".into());
+        files.insert("api/calls.md".into(), "# Calls\n".into());
+        let f = fake_with(files);
+        let mut c = cfg();
+        c.sections = vec![crate::settings::SectionDef {
+            slug: "engine/0.2".into(),
+            title: "Engine 0.2".into(),
+            folder: vec!["api".into()],
+            git_ref: None,
+        }];
+        let b = budget(&f);
+        assert!(run(&mut Wrap(&f), &c, None, b).unwrap().finished);
+        let fk = f.borrow();
+        let product = &fk.entries["@section/engine"].0;
+        assert_eq!(product.slug, "engine");
+        assert!(product.parent_key.is_none());
+        let root = &fk.entries["@section/engine/0.2"].0;
+        assert_eq!(root.slug, "0.2");
+        assert_eq!(root.parent_key.as_deref(), Some("@section/engine"));
+        let calls = &fk.entries["s:engine/0.2:calls.md"].0;
+        assert_eq!(calls.parent_key.as_deref(), Some("@section/engine/0.2"));
+        assert_eq!(calls.terms, ["doc-section:engine-0-2"]);
     }
 
     #[test]

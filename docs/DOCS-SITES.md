@@ -56,6 +56,21 @@ Relative links between pages work; links to other files in the repository
 become links to GitHub at the synced commit. Images need the repository to
 be public.
 
+### Products with versions
+
+A section slug may have two parts, `product/version`:
+
+```text
+app = The App | docs
+app/2.0 = The App 2.0 | docs @ v2.0.0
+app/next = The App next | docs @ main
+```
+
+`app/2.0` is served at `/docs/app/2.0/` with its own sidebar and
+search scope; `/docs/app/` is the first line (the latest). When no section
+named `app` is configured, a hidden root page `app` is made for the
+versions to hang under.
+
 ### Components
 
 Seven tags, at the start of a line, are understood; everything else is

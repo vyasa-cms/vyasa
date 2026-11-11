@@ -259,14 +259,20 @@ pub fn parse_sections(text: &str) -> Result<Vec<SectionDef>, String> {
         let (slug, rest) = line.split_once('=').ok_or_else(bad)?;
         let (title, folder) = rest.split_once('|').ok_or_else(bad)?;
         let slug = slug.trim();
-        if slug.is_empty()
-            || slug.len() > 40
-            || !slug
-                .chars()
-                .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        // One or two segments (`engine` or `engine/0.2`): a product and one of its versions.
+        let segments: Vec<&str> = slug.split('/').collect();
+        if slug.len() > 40
+            || segments.len() > 2
+            || segments.iter().any(|seg| {
+                seg.is_empty()
+                    || seg.starts_with('.')
+                    || !seg.chars().all(|c| {
+                        c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-' || c == '.'
+                    })
+            })
         {
             return Err(format!(
-                "Sections: `{slug}` is not a usable slug (lowercase letters, digits, -)"
+                "Sections: `{slug}` is not a usable slug (lowercase letters, digits, - and ., at most one `/`)"
             ));
         }
         let title = title.trim();
@@ -317,7 +323,7 @@ pub fn admin_form() -> Value {
             {"key": "latest_version", "label": "Latest version label", "type": "text", "help": "Leave empty for unversioned docs. Pages without a version belong to this one and are served at /docs."},
             {"key": "latest_label", "label": "Name for the latest version", "type": "text", "default": "Latest"},
             {"key": "versions", "label": "Older versions", "type": "textarea", "help": "One per line: `v1 = docs-v1` (label = folder in the same repository), or `next = docs @ main` to read a version from another branch or tag. They are served at /docs/<label>/ and carry a notice pointing to the latest."},
-            {"key": "sections", "label": "Sections", "type": "textarea", "help": "One per line: `sql = SQL reference | reference/sql` (slug = title | folder in the repository), optionally `| folder @ branch-or-tag`. Each is served at /docs/<slug> with its own sidebar. At most 8."},
+            {"key": "sections", "label": "Sections", "type": "textarea", "help": "One per line: `sql = SQL reference | reference/sql` (slug = title | folder in the repository), optionally `| folder @ branch-or-tag`. Each is served at /docs/<slug> with its own sidebar; a slug may be `product/version` (`engine/0.2`), served at /docs/engine/0.2. At most 8."},
             {"key": "unreleased_versions", "label": "Unreleased versions", "type": "text", "help": "Labels from the list above, separated by commas, that document unreleased code (for example `next`). The switcher marks them and their notice says so."},
             {"key": "docs_title", "label": "Breadcrumb root", "type": "text", "default": "Docs"},
             {"key": "search_placeholder", "label": "Search placeholder", "type": "text", "default": "Search the docs"}
@@ -347,7 +353,13 @@ mod tests {
         assert_eq!(v[0].slug, "sql");
         assert_eq!(v[0].folder, ["reference", "sql"]);
         assert_eq!(v[1].git_ref.as_deref(), Some("main"));
+        let nested = parse_sections("engine/0.2 = Engine 0.2 | docs @ v0.2.0").unwrap();
+        assert_eq!(nested[0].slug, "engine/0.2");
         for bad in [
+            "a/b/c = T | x",
+            "a//b = T | x",
+            "/a = T | x",
+            ".a = T | x",
             "sql SQL | x",
             "sql = SQL x",
             "SQL = T | x",
