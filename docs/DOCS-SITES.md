@@ -61,14 +61,14 @@ be public.
 A section slug may have two parts, `product/version`:
 
 ```text
-engine = Krishiv Engine | docs
-engine/0.2 = Engine 0.2 | docs @ v0.2.0
-engine/next = Engine next | docs @ main
+app = The App | docs
+app/2.0 = The App 2.0 | docs @ v2.0.0
+app/next = The App next | docs @ main
 ```
 
-`engine/0.2` is served at `/docs/engine/0.2/` with its own sidebar and
-search scope; `/docs/engine/` is the first line (the latest). When no section
-named `engine` is configured, a hidden root page `engine` is made for the
+`app/2.0` is served at `/docs/app/2.0/` with its own sidebar and
+search scope; `/docs/app/` is the first line (the latest). When no section
+named `app` is configured, a hidden root page `app` is made for the
 versions to hang under.
 
 ### Components
