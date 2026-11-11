@@ -60,6 +60,27 @@ pub const SITE_OPTION_KEYS: &[&str] = &[
     "registration_default_role",
     // The small "Made with Vyasa" line under the footer; on unless set false.
     "footer_credit",
+    // Staging sites: serve `Disallow: /` and `X-Robots-Tag: noindex` everywhere.
+    "discourage_indexing",
+    // Default colour scheme: "system" (OS), "light" or "dark"; a visitor's toggle wins.
+    "color_scheme",
+];
+
+/// Option rows the media-storage settings own (`/api/v1/media/storage`).
+/// They are not site options: the generic read returns every site option
+/// to any `manage_options` holder, the generic write skips the probe and
+/// the sealing, and export/import would carry one site's bucket into
+/// another. They live in the same table, written by the storage module
+/// through the repository.
+pub const STORAGE_OPTION_KEYS: &[&str] = &[
+    "storage_provider",
+    "storage_bucket",
+    "storage_region",
+    "storage_endpoint",
+    "storage_path_style",
+    "storage_access_key_id",
+    "storage_secret_access_key",
+    "storage_migration",
 ];
 
 /// Options that decide where the site's mail goes and which address its
@@ -561,6 +582,16 @@ impl OptionsService {
             "footer_credit" if !value.is_boolean() => {
                 return Err(AppError::validation("footer_credit must be true or false"));
             }
+            "discourage_indexing" if !value.is_boolean() => {
+                return Err(AppError::validation(
+                    "discourage_indexing must be true or false",
+                ));
+            }
+            "color_scheme" if !matches!(value.as_str(), Some("system" | "light" | "dark")) => {
+                return Err(AppError::validation(
+                    "color_scheme must be \"system\", \"light\" or \"dark\"",
+                ));
+            }
             "newsletter_enabled" if !value.is_boolean() => {
                 return Err(AppError::validation(
                     "newsletter_enabled must be true or false",
@@ -699,7 +730,25 @@ impl OptionsService {
                 .await?
                 .and_then(|v| v.as_bool())
                 .unwrap_or(true),
+            color_scheme: self
+                .raw("color_scheme")
+                .await?
+                .and_then(|v| v.as_str().map(str::to_owned))
+                .unwrap_or_else(|| "system".to_owned()),
         })
+    }
+
+    /// Whether the site asks search engines to stay away (`robots.txt`
+    /// `Disallow: /` and `X-Robots-Tag: noindex`); off unless set. For
+    /// staging sites. A read failure counts as off, so a broken options
+    /// store never hides a live site.
+    pub async fn discourage_indexing(&self) -> bool {
+        self.raw("discourage_indexing")
+            .await
+            .ok()
+            .flatten()
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false)
     }
 
     /// Absolute public base URL with no trailing slash, e.g.
@@ -833,6 +882,8 @@ pub struct SiteIdentity {
     pub favicon_media_id: Option<i64>,
     /// Whether the footer carries the "Made with Vyasa" line (default on).
     pub footer_credit: bool,
+    /// Default colour scheme: `system`, `light` or `dark`.
+    pub color_scheme: String,
 }
 
 impl Default for SiteIdentity {
@@ -843,6 +894,7 @@ impl Default for SiteIdentity {
             logo_media_id: None,
             favicon_media_id: None,
             footer_credit: true,
+            color_scheme: "system".to_owned(),
         }
     }
 }

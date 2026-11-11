@@ -3,5 +3,5 @@
 mod draft;
 mod service;
 
-pub use draft::{MenuDraft, MenuDraftItem, MAX_MENU_ITEMS};
+pub use draft::{extras_problem as item_extras_problem, MenuDraft, MenuDraftItem, MAX_MENU_ITEMS};
 pub use service::MenuService;

@@ -33,9 +33,9 @@ fn validate(s: &MapSettings, kind: &str) -> Vec<String> {
         errors.push("provide between 1 and 12 items".into());
     }
     let fields: &[&str] = if kind == "code-tabs" {
-        &["title", "language", "code"]
+        &["title", "language", "filename", "code"]
     } else if kind == "status-cards" {
-        &["title", "body", "status"]
+        &["title", "body", "status", "status_label"]
     } else {
         &["title", "body", "label"]
     };
@@ -59,11 +59,17 @@ fn validate(s: &MapSettings, kind: &str) -> Vec<String> {
             errors.push(format!("items[{index}].code is required"));
         }
         if kind == "status-cards"
-            && !["available", "preview", "experimental", "coming-soon"]
-                .contains(&field(item, "status"))
+            && ![
+                "available",
+                "preview",
+                "experimental",
+                "early-access",
+                "coming-soon",
+            ]
+            .contains(&field(item, "status"))
         {
             errors.push(format!(
-                "items[{index}].status must be available, preview, experimental, or coming-soon"
+                "items[{index}].status must be available, preview, experimental, early-access, or coming-soon"
             ));
         }
     }
@@ -79,6 +85,15 @@ fn check_status(s: &MapSettings) -> Vec<String> {
     validate(s, "status-cards")
 }
 
+fn filename_html(item: &Value) -> String {
+    let name = field(item, "filename").trim();
+    if name.is_empty() {
+        String::new()
+    } else {
+        format!("<span class=\"vy-code-filename\">{}</span>", esc(name))
+    }
+}
+
 /// Render static content. All examples remain readable when JavaScript is disabled.
 #[must_use]
 pub fn render(kind: &str, s: &MapSettings) -> String {
@@ -86,7 +101,11 @@ pub fn render(kind: &str, s: &MapSettings) -> String {
     let intro = s.get("intro").and_then(Value::as_str).unwrap_or("");
     let mut out = format!("<div class=\"vy-product vy-{kind}\">");
     if !heading.is_empty() {
-        let _ = write!(out, "<h2 class=\"vy-section-title\">{}</h2>", esc(heading));
+        let _ = write!(
+            out,
+            "<h2 class=\"vy-section-title\">{}</h2>",
+            super::sections::inline(heading)
+        );
     }
     if !intro.is_empty() {
         let _ = write!(out, "<p class=\"vy-section-intro\">{}</p>", esc(intro));
@@ -105,7 +124,7 @@ pub fn render(kind: &str, s: &MapSettings) -> String {
     {
         let title = esc(field(item, "title"));
         if kind == "code-tabs" {
-            let _ = write!(out, "<section class=\"vy-code-example\"><h3>{title}</h3><span class=\"vy-code-language\">{}</span><pre tabindex=\"0\"><code>{}</code></pre></section>", esc(field(item, "language")), esc(field(item, "code")));
+            let _ = write!(out, "<section class=\"vy-code-example\"><h3>{title}</h3>{}<span class=\"vy-code-language\">{}</span><pre tabindex=\"0\"><code>{}</code></pre></section>", filename_html(item), esc(field(item, "language")), esc(field(item, "code")));
         } else {
             let _ = write!(
                 out,
@@ -118,9 +137,21 @@ pub fn render(kind: &str, s: &MapSettings) -> String {
                     "available" => "Available",
                     "preview" => "Preview",
                     "experimental" => "Experimental",
+                    "early-access" => "Early access",
                     _ => "Coming soon",
                 };
-                let _ = write!(out, "<span class=\"vy-status\">{label}</span>");
+                // A theme names its own maturity words ("In progress",
+                // "Planned"); the status still drives the styling class.
+                let custom = field(item, "status_label").trim();
+                let label = if custom.is_empty() {
+                    label.to_owned()
+                } else {
+                    esc(custom)
+                };
+                let _ = write!(
+                    out,
+                    "<span class=\"vy-status vy-status-{status}\">{label}</span>"
+                );
             } else {
                 let _ = write!(
                     out,
@@ -170,7 +201,7 @@ pub(super) fn kinds() -> Vec<Builtin> {
             kind: "code-tabs",
             description: "Keyboard-accessible code examples with language tabs and copy buttons",
             schema: schema(
-                &json!({"title":{"type":"string","maxLength":4000},"language":{"type":"string","maxLength":4000},"code":{"type":"string","format":"multiline","maxLength":16000}}),
+                &json!({"title":{"type":"string","maxLength":4000},"language":{"type":"string","maxLength":4000},"filename":{"type":"string","maxLength":4000},"code":{"type":"string","format":"multiline","maxLength":16000}}),
                 &["title", "code"],
             ),
             check: check_code,
@@ -192,7 +223,7 @@ pub(super) fn kinds() -> Vec<Builtin> {
             kind: "status-cards",
             description: "Product capabilities with explicit maturity labels",
             schema: schema(
-                &json!({"title":{"type":"string","maxLength":4000},"body":{"type":"string","format":"multiline","maxLength":4000},"status":{"type":"string","enum":["available","preview","experimental","coming-soon"]}}),
+                &json!({"title":{"type":"string","maxLength":4000},"body":{"type":"string","format":"multiline","maxLength":4000},"status":{"type":"string","enum":["available","preview","experimental","early-access","coming-soon"]},"status_label":{"type":"string","maxLength":40}}),
                 &["title", "status"],
             ),
             check: check_status,
@@ -224,6 +255,16 @@ mod tests {
         assert!(html.contains("tabindex=\"0\""));
     }
     #[test]
+    fn a_tab_shows_its_escaped_filename_only_when_given() {
+        let s = serde_json::from_value(json!({"items":[
+            {"title":"a","code":"x","filename":"<main>.rs"},{"title":"b","code":"y"}]}))
+        .expect("settings");
+        assert!(check_code(&s).is_empty());
+        let html = render("code-tabs", &s);
+        assert!(html.contains("<span class=\"vy-code-filename\">&lt;main&gt;.rs</span>"));
+        assert_eq!(html.matches("vy-code-filename").count(), 1);
+    }
+    #[test]
     fn malformed_or_unbounded_items_are_rejected() {
         for value in [
             json!({"items":[]}),
@@ -235,5 +276,23 @@ mod tests {
             let s = serde_json::from_value(value).expect("settings");
             assert!(!check_status(&s).is_empty());
         }
+    }
+    #[test]
+    fn status_cards_take_early_access_and_a_theme_label() {
+        let s = serde_json::from_value(json!({"items":[
+            {"title":"a","status":"early-access"},
+            {"title":"b","status":"preview","status_label":"In <progress>"}
+        ]}))
+        .expect("settings");
+        assert!(check_status(&s).is_empty());
+        let html = render("status-cards", &s);
+        assert!(
+            html.contains("vy-status-early-access\">Early access<"),
+            "{html}"
+        );
+        assert!(
+            html.contains("vy-status-preview\">In &lt;progress&gt;<"),
+            "{html}"
+        );
     }
 }

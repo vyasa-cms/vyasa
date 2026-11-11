@@ -29,6 +29,9 @@ pub struct SiteMeta {
     pub asset_head: String,
     /// Whether to add the "Made with Vyasa" line to the footer.
     pub footer_credit: bool,
+    /// The site's default colour scheme: `system` (follow the visitor's OS),
+    /// `light` or `dark`. A visitor's own toggle still wins.
+    pub color_scheme: String,
 }
 
 impl Default for SiteMeta {
@@ -40,6 +43,7 @@ impl Default for SiteMeta {
             logo_url: None,
             asset_head: String::new(),
             footer_credit: true,
+            color_scheme: "system".to_owned(),
         }
     }
 }
@@ -98,6 +102,10 @@ pub struct PageContext {
     /// archive, so `single-book.html` can override `single.html` the way
     /// WordPress's hierarchy would. `None` everywhere else.
     pub post_type_slug: Option<String>,
+    /// The entry's own slug on a single page, so `page-engine.html` can
+    /// override `page.html` for the page `/engine` alone. Wins over the
+    /// type-named template. `None` on listings.
+    pub entry_slug: Option<String>,
     /// The entry on a single page, as templates read it: `entry.id`,
     /// `entry.title`, `entry.type` and `entry.fields.<key>` (custom field
     /// values, prepared by the caller for display). Autoescaped like every
@@ -229,7 +237,7 @@ impl<'a> RenderRequest<'a> {
 /// code (it is a few hundred generated rules).
 fn page_base_css(tokens: &TokenSet, layout: &Layout, page: &PageContext) -> String {
     format!(
-        "{}{}{}{}",
+        "{}{}{}{}{}",
         crate::base_css::base_css(tokens),
         crate::sections::sections_css(tokens),
         crate::css::scopes_css(layout, &page.sections, tokens),
@@ -241,6 +249,15 @@ fn page_base_css(tokens: &TokenSet, layout: &Layout, page: &PageContext) -> Stri
             crate::renderer::highlight::highlight_css()
         } else {
             ""
+        },
+        if page
+            .regions_extra
+            .iter()
+            .any(|(_, html)| html.contains("vy-hl-"))
+        {
+            crate::css::code_palette_css(tokens)
+        } else {
+            String::new()
         }
     )
 }
@@ -283,11 +300,15 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
         TemplateType::Search => "search.html",
         TemplateType::NotFound => "not-found.html",
     };
+    let by_slug = slug_template(page, default_name);
     let specific = type_template(page, default_name);
-    let template_name: &str = match &specific {
-        Some(name) if engine.template_names().contains(&name.as_str()) => name,
-        _ => default_name,
-    };
+    let template_name: &str = [&by_slug, &specific]
+        .into_iter()
+        .flatten()
+        .map(String::as_str)
+        .find(|name| engine.template_names().contains(name))
+        .unwrap_or(default_name);
+
     // A composed entry (its own tree, or its type's) must show its tree
     // even when the theme's template for this slot never prints `sections`.
     // A template named for the type (`single-doc.html`) is the theme saying
@@ -295,6 +316,7 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
     let composed_fallback = !page.sections.is_empty()
         && template == TemplateType::Single
         && specific.as_deref() != Some(template_name)
+        && by_slug.as_deref() != Some(template_name)
         && !engine.prints_sections(template_name)
         && engine.template_names().contains(&"composed.html");
     let template_name: &str = if composed_fallback {
@@ -314,6 +336,9 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
 
     let mut ctx = serde_json::json!({
         "site": { "name": site.name, "tagline": site.tagline, "lang": site.lang },
+        // `credit_html` is what a theme with `"credit": "theme"` prints in
+        // its own footer. Empty when the site turned the credit off.
+        "vyasa": { "credit_html": if site.footer_credit { FOOTER_CREDIT } else { "" } },
         "page": {
             "title": page.title,
             "direction": tokens.direction.css_value(),
@@ -387,16 +412,29 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
     );
     fill_field_refs(&mut ctx, &engine.field_refs(template_name));
     let html = engine.render_json(template_name, &ctx)?;
-    Ok(if site.footer_credit {
+    // A theme that places the credit itself keeps it only if it really did:
+    // the credit is the price of the engine, so a page without it still gets
+    // the engine's own line.
+    let placed = layout.credit == crate::layout::Credit::Theme && has_credit(&html);
+    let html = if site.footer_credit && !placed {
         add_footer_credit(html)
     } else {
         html
-    })
+    };
+    Ok(add_theme_toggle(add_default_scheme(
+        html,
+        &site.color_scheme,
+    )))
 }
 
 /// The "Made with Vyasa" line.
 pub const FOOTER_CREDIT: &str =
     "<p class=\"vy-credit\">Made with <a href=\"https://vyasa.site\" rel=\"noopener\">Vyasa</a></p>";
+
+/// Whether the page already carries the credit link.
+fn has_credit(html: &str) -> bool {
+    html.contains("class=\"vy-credit\"") && html.contains("https://vyasa.site")
+}
 
 /// Puts [`FOOTER_CREDIT`] at the end of the page's footer.
 ///
@@ -408,6 +446,61 @@ fn add_footer_credit(mut html: String) -> String {
     if let Some(at) = html.rfind("</footer>") {
         html.insert_str(at, FOOTER_CREDIT);
     }
+    html
+}
+
+/// The tag that loads the colour-scheme toggle. The URL carries a hash of
+/// the script, so the response can be cached for good and a changed script
+/// still reaches visitors.
+#[must_use]
+pub fn theme_toggle_tag() -> String {
+    use std::sync::OnceLock;
+    static VERSION: OnceLock<u64> = OnceLock::new();
+    // FNV-1a: fixed by definition, so the URL (and the page snapshots) do
+    // not move with the Rust toolchain.
+    let version = VERSION.get_or_init(|| {
+        crate::sections::THEME_TOGGLE_JS
+            .bytes()
+            .fold(0xcbf2_9ce4_8422_2325_u64, |h, b| {
+                (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3)
+            })
+    });
+    format!("<script src=\"/theme-assets/theme-toggle.js?v={version:x}\"></script>")
+}
+
+/// Links the toggle script at the end of `<head>`. It is blocking on
+/// purpose: it applies a stored choice before first paint, so a returning
+/// visitor sees no flash. A page with no `</head>` gets none, and a page
+/// that already links it is left alone.
+fn add_theme_toggle(mut html: String) -> String {
+    if let Some(at) = html.find("</head>") {
+        if !html[..at].contains("/theme-assets/theme-toggle.js") {
+            html.insert_str(at, &theme_toggle_tag());
+        }
+    }
+    html
+}
+
+/// Sets the site's default colour scheme on the `<html>` tag as
+/// `data-theme`, which the generated CSS already honours over the OS
+/// setting. `system` (or anything unknown) adds nothing, so the OS decides;
+/// a tag that already carries `data-theme` is left alone, and a theme's own
+/// toggle that sets the attribute afterwards still wins.
+fn add_default_scheme(html: String, scheme: &str) -> String {
+    if scheme != "light" && scheme != "dark" {
+        return html;
+    }
+    let Some(at) = html.find("<html") else {
+        return html;
+    };
+    let Some(end) = html[at..].find('>') else {
+        return html;
+    };
+    if html[at..at + end].contains("data-theme") {
+        return html;
+    }
+    let mut html = html;
+    html.insert_str(at + "<html".len(), &format!(" data-theme=\"{scheme}\""));
     html
 }
 
@@ -632,6 +725,15 @@ fn composed_body(
 fn type_template(page: &PageContext, default_name: &str) -> Option<String> {
     page.post_type_slug
         .as_deref()
+        .map(|slug| format!("{}-{slug}.html", default_name.trim_end_matches(".html")))
+}
+
+/// Per-entry overrides: `page-engine.html` wins over `page.html` (and over
+/// `page-<type>.html`) for the entry whose slug is `engine`.
+fn slug_template(page: &PageContext, default_name: &str) -> Option<String> {
+    page.entry_slug
+        .as_deref()
+        .filter(|slug| !slug.is_empty())
         .map(|slug| format!("{}-{slug}.html", default_name.trim_end_matches(".html")))
 }
 

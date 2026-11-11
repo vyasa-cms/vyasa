@@ -68,6 +68,8 @@ pub struct TokenSet {
     pub layout: LayoutMetrics,
     /// Text direction for the whole site.
     pub direction: Direction,
+    /// Syntax-highlighting colors; unset tokens keep the bundled palette.
+    pub code: CodeColors,
 }
 
 impl Default for TokenSet {
@@ -81,6 +83,7 @@ impl Default for TokenSet {
             shadow: ShadowLevel::Small,
             layout: LayoutMetrics::default(),
             direction: Direction::Ltr,
+            code: CodeColors::default(),
         }
     }
 }
@@ -101,6 +104,62 @@ impl ColorSlot {
     #[must_use]
     pub const fn light_only(light: HexColor) -> Self {
         Self { light, dark: None }
+    }
+}
+
+/// Token-level palette for highlighted code. Every token is optional: one
+/// left out keeps the bundled highlighter color, so a theme sets only what
+/// its brand needs.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, JsonSchema)]
+#[serde(deny_unknown_fields, default)]
+pub struct CodeColors {
+    /// Keywords (`SELECT`, `fn`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub keyword: Option<ColorSlot>,
+    /// String literals.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub string: Option<ColorSlot>,
+    /// Comments.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub comment: Option<ColorSlot>,
+    /// Numeric literals.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub number: Option<ColorSlot>,
+    /// Function names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub function: Option<ColorSlot>,
+    /// Type and class names.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub type_name: Option<ColorSlot>,
+    /// Other constants (`true`, `NULL`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub constant: Option<ColorSlot>,
+    /// Operators.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub operator: Option<ColorSlot>,
+}
+
+impl CodeColors {
+    /// Token name, its slot, and the highlighter selectors it colors.
+    pub(crate) fn entries(&self) -> [(&'static str, Option<&ColorSlot>, &'static str); 8] {
+        [
+            ("keyword", self.keyword.as_ref(), ".vy-hl-keyword"),
+            ("string", self.string.as_ref(), ".vy-hl-string"),
+            ("comment", self.comment.as_ref(), ".vy-hl-comment"),
+            ("number", self.number.as_ref(), ".vy-hl-constant.vy-hl-numeric"),
+            (
+                "function",
+                self.function.as_ref(),
+                ".vy-hl-entity.vy-hl-name.vy-hl-function, .vy-hl-support.vy-hl-function",
+            ),
+            (
+                "type",
+                self.type_name.as_ref(),
+                ".vy-hl-storage.vy-hl-type, .vy-hl-entity.vy-hl-name.vy-hl-class, .vy-hl-support.vy-hl-type",
+            ),
+            ("constant", self.constant.as_ref(), ".vy-hl-constant"),
+            ("operator", self.operator.as_ref(), ".vy-hl-keyword.vy-hl-operator"),
+        ]
     }
 }
 
@@ -125,6 +184,39 @@ pub struct ColorPalette {
     pub primary: ColorSlot,
     /// Text placed on top of `primary`.
     pub on_primary: ColorSlot,
+    /// Optional band background between `bg` and `surface`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub bg_subtle: Option<ColorSlot>,
+    /// Optional second raised level (hovered cards, nested panels).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub surface_2: Option<ColorSlot>,
+    /// Optional stronger hairline (hovered borders, focus rings).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub border_strong: Option<ColorSlot>,
+    /// Optional status colour: success / available.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub success: Option<ColorSlot>,
+    /// Optional status colour: warning / in progress.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<ColorSlot>,
+    /// Optional status colour: danger / error.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub danger: Option<ColorSlot>,
+}
+
+impl ColorPalette {
+    /// The optional roles (kebab-case CSS name, slot) that this palette sets.
+    #[must_use]
+    pub fn extra_roles(&self) -> [(&'static str, Option<&ColorSlot>); 6] {
+        [
+            ("bg-subtle", self.bg_subtle.as_ref()),
+            ("surface-2", self.surface_2.as_ref()),
+            ("border-strong", self.border_strong.as_ref()),
+            ("success", self.success.as_ref()),
+            ("warning", self.warning.as_ref()),
+            ("danger", self.danger.as_ref()),
+        ]
+    }
 }
 
 fn hex(raw: &str) -> HexColor {
@@ -162,6 +254,12 @@ impl Default for ColorPalette {
                 light: hex("#ffffff"),
                 dark: Some(hex("#0b1220")),
             },
+            bg_subtle: None,
+            surface_2: None,
+            border_strong: None,
+            success: None,
+            warning: None,
+            danger: None,
         }
     }
 }

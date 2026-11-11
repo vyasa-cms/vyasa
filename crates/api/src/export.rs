@@ -188,12 +188,17 @@ pub struct ArchiveMenu {
 pub struct ArchiveMenuItem {
     pub label: String,
     pub url: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub badge: String,
     #[serde(default)]
     pub children: Vec<ArchiveMenuItem>,
 }
 
-/// Options that never leave the site: secrets, progress, keys.
-const PRIVATE_OPTIONS: &[&str] = &["smtp_password", "setup_progress"];
+/// Options that never leave the site: secrets, progress, keys, and the
+/// indexing switch (an import must not hide or expose another site).
+const PRIVATE_OPTIONS: &[&str] = &["smtp_password", "setup_progress", "discourage_indexing"];
 
 /// Builds the archive from the live database.
 ///
@@ -336,6 +341,8 @@ pub async fn build(state: &AppState, site_url: &str) -> Result<Archive, AppError
                 .map(|i| ArchiveMenuItem {
                     label: i.label,
                     url: i.url,
+                    description: i.description,
+                    badge: i.badge,
                     children: lift(i.children),
                 })
                 .collect()
@@ -1180,6 +1187,8 @@ pub async fn import(
                 .map(|i| vyasa_core::menu::MenuDraftItem {
                     label: i.label.clone(),
                     url: i.url.clone(),
+                    description: i.description.clone(),
+                    badge: i.badge.clone(),
                     children: lower(&i.children),
                 })
                 .collect()

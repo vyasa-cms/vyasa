@@ -140,11 +140,11 @@ pub fn render(payload: &str, settings: &Settings) -> String {
         };
     };
     let html = match kind {
-        "docs/sidebar" => nav::sidebar(&page, &settings.latest_label),
+        "docs/sidebar" => nav::sidebar(&page, &settings.latest_label, &settings.unreleased()),
         "docs/toc" => nav::toc(&page),
         "docs/pager" => nav::pager(&page),
         "docs/breadcrumbs" => nav::breadcrumbs(&page, &settings.docs_title),
-        "docs/version-banner" => nav::banner(&page, &settings.latest_label),
+        "docs/version-banner" => nav::banner(&page, &settings.latest_label, &settings.unreleased()),
         _ => {
             let placeholder = req["settings"]["placeholder"]
                 .as_str()

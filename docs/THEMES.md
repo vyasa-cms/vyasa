@@ -171,6 +171,15 @@ template. A theme styles it through `.vy-credit`, which by default is small,
 muted and inherits the theme's tokens. A theme must keep a `<footer>`
 element, or there is nowhere to put it.
 
+A theme that wants the credit somewhere specific, or already prints its own,
+sets `"credit": "theme"` at the top level of `layout.json` and prints
+`{{ vyasa.credit_html | safe }}` in its own footer. The engine then adds
+nothing, so the credit appears once. It still checks the result: if the
+rendered page has no `vy-credit` link (the theme set the option but left the
+tag out), the engine adds its own line as usual. The site's `footer_credit`
+option still wins: when it is off, `credit_html` is empty and nothing is
+added. A child theme inherits the setting and may override it.
+
 ### A page that composes itself
 
 A page may carry its own section tree in `posts.layout`, in which case it
@@ -273,6 +282,12 @@ one per entry". Only the file resolves per type; the layout *tree* is
 still the `single`/`archive` tree. Template names are validated by shape
 (`studio::is_template_name`), so a template for a type that never exists
 is dead weight, not an error.
+
+**Per-entry templates.** On a single entry the renderer first tries
+`<template>-<slug>.html` (`page-engine.html` for the page whose slug is
+`engine`, `single-hello.html` for the post `hello`), then the per-type file,
+then the plain template. It needs no content type: a theme can give one page
+its own markup. A slug with no matching file changes nothing.
 
 ## Content types and fields (phase 99)
 

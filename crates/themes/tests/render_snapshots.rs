@@ -537,6 +537,7 @@ fn regions_extra_overrides_layout_content() {
         search: vec![lb("f-search", "search-box")],
         not_found: vec![lb("f-nf", "content")],
         types: std::collections::BTreeMap::new(),
+        credit: vyasa_themes::Credit::default(),
     };
 
     let page = PageContext {
@@ -951,6 +952,56 @@ fn footer_credit_shows_by_default_and_follows_the_option() {
         "no credit when off"
     );
     assert!(off.contains("vy-footer-inner"), "footer itself stays");
+}
+
+#[test]
+fn the_default_colour_scheme_sets_data_theme_on_html() {
+    let engine = Engine::builtin().expect("engine");
+    let mut layout = Layout::default();
+    *layout.for_template_mut(TemplateType::Single) = vec![lb("body", "content")];
+    let render = |scheme: &str| {
+        let site = SiteMeta {
+            color_scheme: scheme.to_owned(),
+            ..SiteMeta::default()
+        };
+        futures::executor::block_on(render_page(vyasa_themes::RenderRequest {
+            engine: &engine,
+            layout: &layout,
+            registry: &builtin_registry(),
+            tokens: &TokenSet::default(),
+            template: TemplateType::Single,
+            site: &site,
+            page: &PageContext::default(),
+            queries: fake_queries::FakeQueries::shared(),
+            post_id: None,
+            content_blocks: None,
+            reply_to: None,
+            editor: false,
+        }))
+        .expect("renders")
+    };
+    let tag = |h: String| {
+        h[h.find("<html").unwrap()..]
+            .split('>')
+            .next()
+            .unwrap()
+            .to_owned()
+    };
+    assert!(
+        !tag(render("system")).contains("data-theme"),
+        "system adds nothing"
+    );
+    assert!(
+        !tag(render("bogus")).contains("data-theme"),
+        "unknown adds nothing"
+    );
+    assert!(render("dark").contains("<html data-theme=\"dark\" lang="));
+    assert!(render("light").contains("<html data-theme=\"light\" lang="));
+    // The toggle script loads once, in <head>, before the body paints.
+    let page = render("system");
+    assert_eq!(page.matches("/theme-assets/theme-toggle.js?v=").count(), 1);
+    assert!(page.find("theme-toggle.js").unwrap() < page.find("</head>").unwrap());
+    assert!(page.find("</head>").unwrap() < page.find("<body").unwrap());
 }
 
 #[test]

@@ -125,8 +125,27 @@ fn check_hero(s: &MapSettings) -> Vec<String> {
             "image",
             "image_alt",
             "image_position",
+            "aside_code",
+            "aside_language",
+            "aside_filename",
         ],
     );
+    if text(s, "aside_code").is_some_and(|c| !c.trim().is_empty())
+        && text(s, "image").is_some_and(|i| !i.trim().is_empty())
+    {
+        out.push("set image or aside_code, not both".to_owned());
+    }
+    for (key, max) in [
+        ("aside_code", 16000),
+        ("aside_language", 100),
+        ("aside_filename", 200),
+    ] {
+        if s.get(key)
+            .is_some_and(|v| v.as_str().is_none_or(|v| v.len() > max))
+        {
+            out.push(format!("{key} must be text of at most {max} bytes"));
+        }
+    }
     if text(s, "headline").is_none_or(|h| h.trim().is_empty()) {
         out.push("headline is required".to_owned());
     }
@@ -258,6 +277,19 @@ fn esc(raw: &str) -> String {
         .replace('"', "&quot;")
 }
 
+/// Escapes like [`esc`], then restores the bare tags `em`, `strong` and `br`
+/// (no attributes), so a heading can mark one clause. Nothing else passes.
+pub(super) fn inline(raw: &str) -> String {
+    let mut out = esc(raw);
+    for tag in ["em", "strong"] {
+        out = out
+            .replace(&format!("&lt;{tag}&gt;"), &format!("<{tag}>"))
+            .replace(&format!("&lt;/{tag}&gt;"), &format!("</{tag}>"));
+    }
+    out.replace("&lt;br&gt;", "<br>")
+        .replace("&lt;br/&gt;", "<br>")
+}
+
 fn button(label: Option<String>, url: Option<String>, class: &str) -> String {
     match (label, url) {
         (Some(l), Some(u)) if !l.trim().is_empty() && safe_url(&u) => {
@@ -322,10 +354,26 @@ fn render_hero(s: &MapSettings, editor: bool) -> String {
                 crate::renderer::blocks::responsive_attrs(&src)
             )
         });
+    let media = media.or_else(|| {
+        text(s, "aside_code")
+            .filter(|c| !c.trim().is_empty())
+            .map(|code| {
+                let name = text(s, "aside_filename")
+                    .filter(|n| !n.trim().is_empty())
+                    .map(|n| format!("<figcaption class=\"vy-code-filename\">{}</figcaption>", esc(&n)))
+                    .unwrap_or_default();
+                let lang = text(s, "aside_language").unwrap_or_default();
+                format!(
+                    "<figure class=\"vy-hero-media vy-hero-aside\">{name}<pre tabindex=\"0\"><code class=\"language-{}\">{}</code></pre></figure>",
+                    esc(&lang),
+                    esc(&code)
+                )
+            })
+    });
     let copy = format!(
         "{eyebrow}<h1 class=\"vy-hero-title\"{}>{}</h1>{subhead}{actions}",
         edit_marker(editor, "headline"),
-        esc(&headline)
+        inline(&headline)
     );
     let align = if text(s, "align").as_deref() == Some("center") {
         " vy-hero--center"
@@ -351,7 +399,7 @@ fn render_items(s: &MapSettings, kind: &str) -> String {
     let columns = uint(s, "columns", 1, 4, 3).unwrap_or(3);
     let heading = text(s, "heading")
         .filter(|v| !v.trim().is_empty())
-        .map(|v| format!("<h2 class=\"vy-section-title\">{}</h2>", esc(&v)))
+        .map(|v| format!("<h2 class=\"vy-section-title\">{}</h2>", inline(&v)))
         .unwrap_or_default();
     let intro = text(s, "intro")
         .filter(|v| !v.trim().is_empty())
@@ -433,7 +481,7 @@ fn render_cta(s: &MapSettings, editor: bool) -> String {
     format!(
         "<div class=\"vy-cta\"><h2 class=\"vy-cta-title\"{}>{}</h2>{subhead}<p class=\"vy-actions\">{}</p></div>",
         edit_marker(editor, "headline"),
-        esc(&headline),
+        inline(&headline),
         button(text(s, "label"), text(s, "url"), "vy-btn-primary")
     )
 }
@@ -441,7 +489,7 @@ fn render_cta(s: &MapSettings, editor: bool) -> String {
 fn render_faq(s: &MapSettings) -> String {
     let heading = text(s, "heading")
         .filter(|v| !v.trim().is_empty())
-        .map(|v| format!("<h2 class=\"vy-section-title\">{}</h2>", esc(&v)))
+        .map(|v| format!("<h2 class=\"vy-section-title\">{}</h2>", inline(&v)))
         .unwrap_or_default();
     let empty = Vec::new();
     let items = s
@@ -518,7 +566,7 @@ fn render_signup(s: &MapSettings) -> String {
     let form = text(s, "form").unwrap_or_else(|| mode.to_owned());
     let heading = text(s, "heading")
         .filter(|v| !v.trim().is_empty())
-        .map(|v| format!("<h2 class=\"vy-section-title\">{}</h2>", esc(&v)))
+        .map(|v| format!("<h2 class=\"vy-section-title\">{}</h2>", inline(&v)))
         .unwrap_or_default();
     let subhead = text(s, "subhead")
         .filter(|v| !v.trim().is_empty())
@@ -875,7 +923,10 @@ fn marketing() -> Vec<Builtin> {
                     "align": {"type": "string", "enum": ["start", "center"]},
                     "image": {"type": "string", "description": "Picture beside the copy; the hero splits when set"},
                     "image_alt": {"type": "string"},
-                    "image_position": {"type": "string", "enum": ["start", "end"], "description": "Side of the hero artwork on desktop; stacks on mobile"}
+                    "image_position": {"type": "string", "enum": ["start", "end"], "description": "Side of the hero artwork on desktop; stacks on mobile"},
+                    "aside_code": {"type": "string", "format": "multiline", "maxLength": 16000, "description": "Code panel beside the copy instead of an image; the hero splits when set"},
+                    "aside_language": {"type": "string", "maxLength": 100},
+                    "aside_filename": {"type": "string", "maxLength": 200, "description": "Caption above the aside code"}
                 },
                 "required": ["headline"],
                 "additionalProperties": false
@@ -1076,6 +1127,33 @@ mod modern_tests {
         assert!(html.contains("data-vy-edit"));
         settings.set("align", json!("sideways"));
         assert!(!check_hero(&settings).is_empty());
+    }
+
+    #[test]
+    fn a_hero_aside_code_panel_splits_the_hero_and_escapes() {
+        let mut settings: MapSettings = serde_json::from_value(json!({
+            "headline": "h", "aside_code": "</code><b>x", "aside_language": "sql",
+            "aside_filename": "q.sql"
+        }))
+        .expect("settings");
+        assert!(check_hero(&settings).is_empty());
+        let html = render_hero(&settings, false);
+        assert!(html.contains("vy-hero--split") && html.contains("vy-hero-aside"));
+        assert!(html.contains("&lt;/code&gt;&lt;b&gt;x") && !html.contains("<b>"));
+        assert!(html.contains("q.sql"));
+        settings.set("image", json!("/a.png"));
+        assert!(!check_hero(&settings).is_empty());
+    }
+
+    #[test]
+    fn headings_allow_only_bare_em_strong_and_br() {
+        assert_eq!(
+            inline("Run <em>everywhere</em>.<br>Now <strong>fast</strong> <script>x</script> <em onclick=\"a\">"),
+            "Run <em>everywhere</em>.<br>Now <strong>fast</strong> &lt;script&gt;x&lt;/script&gt; &lt;em onclick=&quot;a&quot;&gt;"
+        );
+        let s: MapSettings =
+            serde_json::from_value(json!({"headline": "A <em>B</em>"})).expect("s");
+        assert!(render_hero(&s, false).contains("<em>B</em>"));
     }
 
     #[test]

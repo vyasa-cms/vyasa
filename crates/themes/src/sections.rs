@@ -364,7 +364,19 @@ const SECTIONS_CSS: &str = r"
 .vy-nav-check { position: absolute; opacity: 0; width: 1px; height: 1px; pointer-events: none; }
 .vy-nav .vy-menu { display: flex; flex-wrap: wrap; gap: 1.4rem; list-style: none; padding: 0; margin: 0; }
 .vy-nav .vy-menu a { text-decoration: none; color: var(--vy-color-text); font-weight: 500; }
-.vy-nav .vy-menu .vy-menu { display: none; }
+/* A submenu opens under its parent on hover or keyboard focus, with no script. */
+.vy-nav .vy-menu > li { position: relative; }
+.vy-nav .vy-menu .vy-menu { display: none; position: absolute; top: 100%; left: 0; z-index: 20;
+  flex-direction: column; gap: .2rem; min-width: 16rem; padding: .5rem;
+  background: var(--vy-color-surface); border: 1px solid var(--vy-color-border);
+  border-radius: var(--vy-radius); }
+.vy-nav .vy-menu > li:hover > .vy-menu,
+.vy-nav .vy-menu > li:focus-within > .vy-menu { display: flex; }
+.vy-menu-badge { display: inline-block; margin-left: .4rem; padding: 0 .45rem; font-size: .72em;
+  font-weight: 600; line-height: 1.6; border: 1px solid var(--vy-color-border);
+  border-radius: 999px; color: var(--vy-color-text-muted); vertical-align: middle; }
+.vy-menu-desc { display: block; font-size: .85em; font-weight: 400;
+  color: var(--vy-color-text-muted); }
 .vy-collection { display: grid; gap: 1.2rem; margin-top: 1.2rem;
   grid-template-columns: repeat(var(--vy-cols, 3), minmax(0, 1fr)); }
 .vy-collection .vy-post-card { background: var(--vy-color-surface);
@@ -413,11 +425,18 @@ const SECTIONS_CSS: &str = r"
   .vy-nav-toggle::after { content: 'Menu'; }
   .vy-nav .vy-menu { flex-direction: column; gap: .3rem; padding: .5rem 0; flex-basis: 100%; }
   .vy-nav .vy-menu a { display: block; padding: .45rem .2rem; }
+  /* In the drawer a submenu is part of the list, indented under its parent. */
+  .vy-nav .vy-menu .vy-menu { display: flex; position: static; min-width: 0; padding: 0 0 0 1rem;
+    border: 0; background: transparent; }
 }
 ";
 
 /// Built-in interaction runtime shared by all themes.
 pub const COMPONENTS_JS: &str = include_str!("components.js");
+
+/// The colour-scheme toggle script, served at `/theme-assets/theme-toggle.js`
+/// and linked in every page's `<head>` (see `render::add_theme_toggle`).
+pub const THEME_TOGGLE_JS: &str = include_str!("theme-toggle.js");
 
 #[cfg(test)]
 mod tests {
@@ -474,5 +493,23 @@ mod tests {
         let mut group = leaf("g", "group");
         group.children = vec![leaf("x", "header")];
         assert!(composes(&[group]));
+    }
+}
+
+#[cfg(test)]
+mod components_js_tests {
+    use super::COMPONENTS_JS;
+
+    #[test]
+    fn the_in_view_hook_is_shipped_and_balanced() {
+        assert!(COMPONENTS_JS.contains("[data-vy-reveal]"));
+        assert!(COMPONENTS_JS.contains("vy-in-view"));
+        for (open, close) in [('{', '}'), ('(', ')')] {
+            assert_eq!(
+                COMPONENTS_JS.matches(open).count(),
+                COMPONENTS_JS.matches(close).count(),
+                "unbalanced {open}{close}"
+            );
+        }
     }
 }

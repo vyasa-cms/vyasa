@@ -61,6 +61,9 @@ pub enum Delivery {
         /// The commit the branch points at.
         sha: String,
     },
+    /// A push to another branch or tag a version is read from: sync, with no
+    /// commit hint.
+    Refresh,
     /// GitHub's "ping" on creating the hook.
     Ping,
     /// Anything else: acknowledged and ignored.
@@ -69,14 +72,20 @@ pub enum Delivery {
 
 /// Interprets a verified delivery.
 #[must_use]
-pub fn interpret(event: &str, body: &str, branch: &str) -> Delivery {
+pub fn interpret(event: &str, body: &str, branch: &str, others: &[String]) -> Delivery {
     match event {
         "ping" => Delivery::Ping,
         "push" => {
             let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
                 return Delivery::Ignored;
             };
-            let on_branch = v["ref"].as_str() == Some(&format!("refs/heads/{branch}"));
+            let pushed = v["ref"].as_str().unwrap_or("");
+            let named =
+                |r: &str| pushed == format!("refs/heads/{r}") || pushed == format!("refs/tags/{r}");
+            if others.iter().any(|r| named(r)) && !named(branch) {
+                return Delivery::Refresh;
+            }
+            let on_branch = pushed == format!("refs/heads/{branch}");
             match (on_branch, v["after"].as_str()) {
                 (true, Some(sha))
                     if sha.len() >= 7
@@ -139,17 +148,33 @@ mod tests {
         let body =
             r#"{"ref":"refs/heads/main","after":"0123456789abcdef0123456789abcdef01234567"}"#;
         assert_eq!(
-            interpret("push", body, "main"),
+            interpret("push", body, "main", &[]),
             Delivery::Push {
                 sha: "0123456789abcdef0123456789abcdef01234567".into()
             }
         );
-        assert_eq!(interpret("push", body, "dev"), Delivery::Ignored);
-        assert_eq!(interpret("ping", "{}", "main"), Delivery::Ping);
-        assert_eq!(interpret("issues", "{}", "main"), Delivery::Ignored);
+        assert_eq!(interpret("push", body, "dev", &[]), Delivery::Ignored);
+        assert_eq!(interpret("ping", "{}", "main", &[]), Delivery::Ping);
+        assert_eq!(interpret("issues", "{}", "main", &[]), Delivery::Ignored);
         let deleted =
             r#"{"ref":"refs/heads/main","after":"0000000000000000000000000000000000000000"}"#;
-        assert_eq!(interpret("push", deleted, "main"), Delivery::Ignored);
-        assert_eq!(interpret("push", "not json", "main"), Delivery::Ignored);
+        assert_eq!(interpret("push", deleted, "main", &[]), Delivery::Ignored);
+        assert_eq!(
+            interpret("push", "not json", "main", &[]),
+            Delivery::Ignored
+        );
+    }
+
+    #[test]
+    fn a_push_to_a_ref_a_version_reads_queues_a_sync_without_a_hint() {
+        let body = r#"{"ref":"refs/heads/dev","after":"0123456789abcdef0123456789abcdef01234567"}"#;
+        let others = ["dev".to_owned()];
+        assert_eq!(interpret("push", body, "main", &others), Delivery::Refresh);
+        let tag = r#"{"ref":"refs/tags/v2","after":"0123456789abcdef0123456789abcdef01234567"}"#;
+        assert_eq!(
+            interpret("push", tag, "main", &["v2".to_owned()]),
+            Delivery::Refresh
+        );
+        assert_eq!(interpret("push", body, "main", &[]), Delivery::Ignored);
     }
 }

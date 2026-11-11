@@ -13,6 +13,45 @@ follows [semantic versioning](https://semver.org) as described in
   inbox, the CSV and the unread counts, the owner is mailed only after the click, and the confirmation mail
   carries a link that deletes the entry. The links open a page with a button, so a mail scanner that fetches them changes nothing. The owner mail after a confirmation names the form only (`/form/confirm`, `/form/delete`). The mail names the form, the count of confirmed entries and an admin link. A `consent` field kind (required, stored with its time, optional privacy link), `?held=true` on the submissions listing, and a forms docs page. A form's email check now also refuses lists and angle brackets, newsletter sign-up included.
 
+## [0.4.1] - 2026-11-10
+
+### Fixed
+
+- The release workflow builds the macOS arm64 binary on `macos-15`; GitHub
+  retired the `macos-14` runner image, so the 0.4.0 binaries and GitHub
+  release were never published. 0.4.1 has the same code as 0.4.0.
+
+## [0.4.0] - 2026-11-10
+
+### Added
+
+- A theme can place the "Made with Vyasa" credit itself: `"credit": "theme"` in
+  `layout.json` plus `{{ vyasa.credit_html | safe }}` in its footer template.
+  The engine then skips its own line (no duplicate) but still adds it if the
+  rendered page has none. See docs/THEMES.md.
+- Media storage is configurable from the admin: Settings → Delivery →
+  Media storage takes an S3-compatible bucket (R2, S3, MinIO), tests the
+  connection, and switches new uploads to it without a restart. The keys
+  are sealed with `VYASA_SECRET_KEY`; `VYASA_STORAGE__*` in the
+  environment still wins and makes the page read-only. Files uploaded
+  before a switch keep serving from where they are; "Move existing
+  files" copies them across as a resumable background job. New routes:
+  `GET`/`PUT /api/v1/media/storage`, `POST /api/v1/media/storage/test`,
+  `POST /api/v1/media/storage/migrate`.
+- The Cloudflare package passes the R2 keys only when both secrets are
+  set, so a site can start on the container's disk and move to R2 from
+  the admin.
+- vyasa-docs: a version can be read from another branch or tag
+  (`next = docs @ main`), so the unreleased docs can be served at
+  `/docs/next/` beside the latest release. The webhook accepts pushes to
+  those refs.
+- `discourage_indexing` site option (Settings > Advanced) for staging sites:
+  `robots.txt` answers `Disallow: /` and every response carries
+  `X-Robots-Tag: noindex, nofollow`. Off by default.
+- SVG uploads (logos, icons) in the media library. Each file is rewritten through an allow-list sanitiser before it is stored: scripts, `foreignObject`, styles, images, animation, event handlers and every reference that leaves the file are removed, and a file with a DOCTYPE or a root other than `<svg>` is refused. `.svgz` stays refused. SVGs are served with `Content-Security-Policy: default-src 'none'; sandbox` and `nosniff`.
+- `color_scheme` site option (`system`, `light`, `dark`; Settings > Advanced): the scheme first-time visitors see. `light`/`dark` set `data-theme` on `<html>`; a visitor's own toggle still wins, and `system` (default) follows the device.
+- Built-in colour-scheme toggle: every page links `/theme-assets/theme-toggle.js` in `<head>`. It applies the visitor's stored choice before first paint (no flash), and any element with `data-vy-theme-toggle` switches light/dark and remembers it (`localStorage` key `vy-theme`). Works under `script-src 'self'`; themes only add the button.
+
 ## [0.3.5] - 2026-10-24
 
 ### Changed
