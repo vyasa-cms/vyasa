@@ -146,10 +146,16 @@ pub fn is_code_free_theme(bytes: &[u8]) -> bool {
     !has_js && !parsed.templates.values().any(|t| template_has_script(t))
 }
 
+/// The built-in base template's own script tag. A theme that overrides
+/// `base.html` may keep it: it loads the engine's shipped file, not code
+/// from the package. Only this exact tag is exempt; any other script, or
+/// this tag with another attribute, still needs a signature.
+const BUILTIN_COMPONENTS_TAG: &str = "<script src=\"/theme-assets/components.js\" defer></script>";
+
 /// A conservative scan: false positives cost an unsigned theme its
 /// install, false negatives would cost a visitor.
 fn template_has_script(src: &str) -> bool {
-    let lower = src.to_ascii_lowercase();
+    let lower = src.to_ascii_lowercase().replace(BUILTIN_COMPONENTS_TAG, "");
     if lower.contains("<script") || lower.contains("javascript:") {
         return true;
     }
@@ -333,6 +339,21 @@ mod tests {
             "https://registry.example/p.vytheme",
         )
         .is_ok());
+    }
+
+    #[test]
+    fn the_builtin_components_tag_is_not_code_but_nothing_beside_it_is_exempt() {
+        let tag = "<script src=\"/theme-assets/components.js\" defer></script>";
+        assert!(!super::template_has_script(&format!("<head>{tag}</head>")));
+        assert!(!super::template_has_script(&tag.to_uppercase()));
+        for bad in [
+            format!("{tag}<script>alert(1)</script>"),
+            "<script src=\"/theme-assets/components.js\" defer onload=\"x()\"></script>".to_owned(),
+            "<script src=\"/theme-assets/other.js\" defer></script>".to_owned(),
+            "<script src=\"https://evil.example/components.js\" defer></script>".to_owned(),
+        ] {
+            assert!(super::template_has_script(&bad), "{bad}");
+        }
     }
 
     #[test]

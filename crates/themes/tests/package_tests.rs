@@ -168,6 +168,30 @@ fn invalid_layout_is_rejected() {
 }
 
 #[test]
+fn a_template_may_include_a_sibling_template_of_the_same_package() {
+    let with_include = |include: &str, ship_card: bool| {
+        let mut entries = blog_entries();
+        for e in &mut entries {
+            if e.0 == "templates/single.tera" {
+                e.1 = format!(
+                    r#"{{% extends "base.html" %}}{{% block body %}}{{% include "{include}" %}}{{% endblock body %}}"#
+                )
+                .into_bytes();
+            }
+        }
+        if ship_card {
+            entries.push(("templates/card.tera".into(), b"<div>card</div>".to_vec()));
+        }
+        parse_vytheme(&zip_files(&entries))
+    };
+    let parsed = with_include("card.html", true).expect("sibling include installs");
+    assert!(parsed.templates.contains_key("card.html"));
+    // Still refused when the package does not ship what it includes.
+    let err = with_include("card.html", false).expect_err("unknown include");
+    assert!(err.to_string().contains("unknown template"), "{err}");
+}
+
+#[test]
 fn broken_tera_is_rejected_at_install() {
     let mut entries = blog_entries();
     for e in &mut entries {

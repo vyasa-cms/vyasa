@@ -288,6 +288,15 @@ pub fn parse_vytheme(bytes: &[u8]) -> Result<ParsedTheme, PackageError> {
     // Pass 3: optional Tera overrides (validated against the builtin engine
     // so extends/include targets must exist there or under partials/).
     let engine = Engine::builtin().map_err(|e| err(e.to_string()))?;
+    // The registered names of every template in the package: one may
+    // include or extend another, as install allows.
+    let siblings: Vec<String> = names
+        .iter()
+        .filter_map(|n| n.strip_prefix("templates/"))
+        .filter_map(|rest| rest.strip_suffix(".tera"))
+        .map(|stem| format!("{stem}.html"))
+        .collect();
+    let sibling_refs: Vec<&str> = siblings.iter().map(String::as_str).collect();
     let mut templates = BTreeMap::new();
     for name in &names {
         let Some(rest) = name.strip_prefix("templates/") else {
@@ -311,7 +320,7 @@ pub fn parse_vytheme(bytes: &[u8]) -> Result<ParsedTheme, PackageError> {
             .strip_suffix(".tera")
             .map_or_else(|| rest.to_owned(), |s| format!("{s}.html"));
         engine
-            .validate_theme_source(&target, &src)
+            .validate_theme_source_with(&target, &src, &sibling_refs)
             .map_err(|e| package_engine_error(name, &e))?;
         templates.insert(target.clone(), src);
     }

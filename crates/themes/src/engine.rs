@@ -386,10 +386,28 @@ impl Engine {
     /// # Errors
     /// Same as [`Self::install_theme_templates`] but nothing is mutated.
     pub fn validate_theme_source(&self, name: &str, src: &str) -> Result<(), EngineError> {
+        self.validate_theme_source_with(name, src, &[])
+    }
+
+    /// Like [`Self::validate_theme_source`], for a template of a package
+    /// whose other templates are `siblings` (registered names such as
+    /// `card.html`): a template may include or extend them, as
+    /// [`Self::install_theme_templates`] allows at install.
+    ///
+    /// # Errors
+    /// Returns [`EngineError`] with a message suitable for showing to the
+    /// theme author.
+    pub fn validate_theme_source_with(
+        &self,
+        name: &str,
+        src: &str,
+        siblings: &[&str],
+    ) -> Result<(), EngineError> {
         scan_source(name, src)?;
         for reference in referenced_templates(src) {
-            let known =
-                self.tera.templates.contains_key(&reference) || reference.starts_with("partials/");
+            let known = self.tera.templates.contains_key(&reference)
+                || siblings.contains(&reference.as_str())
+                || reference.starts_with("partials/");
             if !known {
                 return Err(EngineError(format!(
                     "template \"{name}\": references unknown template \"{reference}\" \
