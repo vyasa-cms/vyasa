@@ -26,6 +26,101 @@ pub const MAX_PAGE_BYTES: u64 = 512 * 1024;
 const MAX_KEPT_BODIES: usize = 8 * 1024 * 1024;
 /// Most pages one site may import.
 pub const MAX_PAGES: usize = 2000;
+/// Key prefix of the packed scan cache. The broker allows 600 key-value
+/// reads a minute even in an extended task, so a site of a thousand pages
+/// cannot keep one key per page: the cache is a few packs of ~40 KB.
+const PACK_PREFIX: &str = "scanpack/";
+/// Largest serialized pack (the key-value store refuses 64 KiB).
+const PACK_MAX_BYTES: usize = 40_000;
+/// Largest single cached text; a bigger one is read again next time.
+const PACK_MAX_ENTRY: usize = 20_000;
+/// Old one-key-per-page cache entries removed per finished sync.
+const LEGACY_SCAN_DELETES: usize = 100;
+
+/// Blob sha to cached scan (or `_meta.json` text), loaded in a few reads.
+struct ScanCache {
+    map: BTreeMap<String, String>,
+    /// Pack keys that existed when loaded.
+    packs: Vec<String>,
+    dirty: bool,
+}
+
+impl ScanCache {
+    fn load<E: Env>(env: &mut E) -> Self {
+        let mut packs = env.kv_list(PACK_PREFIX);
+        packs.sort();
+        let mut map = BTreeMap::new();
+        for k in &packs {
+            let parsed = env
+                .kv_get(k)
+                .and_then(|v| serde_json::from_str::<BTreeMap<String, String>>(&v).ok());
+            if let Some(m) = parsed {
+                map.extend(m);
+            }
+        }
+        Self {
+            map,
+            packs,
+            dirty: false,
+        }
+    }
+
+    fn insert(&mut self, sha: &str, text: &str) {
+        if text.len() <= PACK_MAX_ENTRY && self.map.get(sha).map(String::as_str) != Some(text) {
+            self.map.insert(sha.to_owned(), text.to_owned());
+            self.dirty = true;
+        }
+    }
+
+    fn retain_live(&mut self, live: &BTreeSet<&str>) {
+        let before = self.map.len();
+        self.map.retain(|k, _| live.contains(k.as_str()));
+        if self.map.len() != before {
+            self.dirty = true;
+        }
+    }
+
+    /// Writes the packs back (a handful of writes); best effort, a full
+    /// quota only makes the next run read some pages again.
+    fn flush<E: Env>(&mut self, env: &mut E) {
+        if !self.dirty {
+            return;
+        }
+        let mut chunks: Vec<BTreeMap<&str, &str>> = vec![BTreeMap::new()];
+        let mut size = 2usize;
+        for (k, v) in &self.map {
+            let cost = k.len() + v.len() * 2 + 8;
+            if size + cost > PACK_MAX_BYTES && !chunks.last().is_some_and(BTreeMap::is_empty) {
+                chunks.push(BTreeMap::new());
+                size = 2;
+            }
+            size += cost;
+            if let Some(c) = chunks.last_mut() {
+                c.insert(k, v);
+            }
+        }
+        let mut keys = Vec::new();
+        for (i, c) in chunks.iter().enumerate() {
+            if c.is_empty() {
+                continue;
+            }
+            let key = format!("{PACK_PREFIX}{i:03}");
+            let json = serde_json::to_string(c).unwrap_or_default();
+            if env.kv_set(&key, &json).is_err() {
+                return;
+            }
+            keys.push(key);
+        }
+        for old in &self.packs {
+            if !keys.contains(old) {
+                env.kv_delete(old);
+            }
+        }
+        self.packs = keys;
+        self.dirty = false;
+    }
+}
+
 /// The post type written.
 pub const POST_TYPE: &str = "doc";
 /// The URL base of the type.
@@ -418,50 +513,53 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
     let mut bodies: BTreeMap<String, String> = BTreeMap::new();
     let mut bodies_bytes = 0usize;
     let mut metas: BTreeMap<(String, String), Meta> = BTreeMap::new();
-    for f in &files {
-        let is_meta = f.path == "_meta.json" || f.path.ends_with("/_meta.json");
-        let text_key = format!("scan/{}", f.sha);
-        let cached = cx.env.kv_get(&text_key);
-        let text = if let Some(c) = &cached {
-            c.clone()
-        } else {
-            let url = github::raw_url(
-                &cx.cfg.repo,
-                &f.tree.commit,
-                &join_repo_path(&f.tree.folder, &f.path),
-            );
-            let body = cx.get(&url, "text/plain", None)?.body;
-            if is_meta {
-                // `_meta.json` is cached as it is; a value the key-value
-                // store would refuse (64 KiB) is simply read again next time.
-                if body.len() <= 60_000 {
-                    let _ = cx.env.kv_set(&text_key, &body);
-                }
-                body
+    // The cache is read once (a few packs), kept in memory, and written back
+    // when this phase ends, however it ends, so a run cut short by the
+    // request budget resumes where it stopped.
+    let mut cache = ScanCache::load(cx.env);
+    let scanned: Result<(), Stop> = (|| {
+        for f in &files {
+            let is_meta = f.path == "_meta.json" || f.path.ends_with("/_meta.json");
+            let text = if let Some(c) = cache.map.get(&f.sha) {
+                c.clone()
             } else {
-                let scan = scan_page(&body);
-                let json = scan.to_json();
-                // Best effort: a full quota only makes the next run re-read this page.
-                let _ = cx.env.kv_set(&text_key, &json);
-                if bodies_bytes + body.len() <= MAX_KEPT_BODIES {
-                    bodies_bytes += body.len();
-                    bodies.insert(f.sha.clone(), body);
+                let url = github::raw_url(
+                    &cx.cfg.repo,
+                    &f.tree.commit,
+                    &join_repo_path(&f.tree.folder, &f.path),
+                );
+                let body = cx.get(&url, "text/plain", None)?.body;
+                if is_meta {
+                    // `_meta.json` is cached as it is; a text too big for a
+                    // pack is simply read again next time.
+                    cache.insert(&f.sha, &body);
+                    body
+                } else {
+                    let json = scan_page(&body).to_json();
+                    cache.insert(&f.sha, &json);
+                    if bodies_bytes + body.len() <= MAX_KEPT_BODIES {
+                        bodies_bytes += body.len();
+                        bodies.insert(f.sha.clone(), body);
+                    }
+                    json
                 }
-                json
+            };
+            if is_meta {
+                let dir = f.path.rsplit_once('/').map_or("", |(d, _)| d).to_owned();
+                metas.insert((f.tree.tag.clone(), dir), plan::parse_meta(&text));
+            } else {
+                infos.insert(
+                    file_key(f),
+                    Scan::from_json(&text).ok_or_else(|| {
+                        Stop::Fail(format!("cache entry for {} is unreadable", f.path))
+                    })?,
+                );
             }
-        };
-        if is_meta {
-            let dir = f.path.rsplit_once('/').map_or("", |(d, _)| d).to_owned();
-            metas.insert((f.tree.tag.clone(), dir), plan::parse_meta(&text));
-        } else {
-            infos.insert(
-                file_key(f),
-                Scan::from_json(&text).ok_or_else(|| {
-                    Stop::Fail(format!("cache entry for {} is unreadable", f.path))
-                })?,
-            );
         }
-    }
+        Ok(())
+    })();
+    cache.flush(cx.env);
+    scanned?;
 
     // 4. Plan.
     let p = make_plan(cx.cfg, &files, &infos, &metas);
@@ -533,11 +631,17 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
     // 7. Done: remember it, and forget what is no longer in the repository.
     // The per-blob scans stay: they are what lets the next run plan without
     // reading a page that has not changed.
-    let live: BTreeSet<String> = files.iter().map(|f| format!("scan/{}", f.sha)).collect();
-    for k in cx.env.kv_list("scan/") {
-        if !live.contains(&k) {
-            cx.env.kv_delete(&k);
-        }
+    let live: BTreeSet<&str> = files.iter().map(|f| f.sha.as_str()).collect();
+    cache.retain_live(&live);
+    cache.flush(cx.env);
+    // Importers before 0.1.5 kept one key per page; drop those a few at a time.
+    for k in cx
+        .env
+        .kv_list("scan/")
+        .into_iter()
+        .take(LEGACY_SCAN_DELETES)
+    {
+        cx.env.kv_delete(&k);
     }
     for i in 0..refs.len() {
         let key = if i == 0 {
@@ -1124,6 +1228,8 @@ mod tests {
         etag_seen: Vec<Option<String>>,
         fail_status: Option<u16>,
         step_ms: u64,
+        /// Key-value reads (`kv_get` and `kv_list`): the broker allows 600 a minute.
+        kv_reads: std::cell::Cell<u32>,
     }
 
     fn blob_sha(content: &str) -> String {
@@ -1258,7 +1364,10 @@ mod tests {
             self.0.borrow().now
         }
         fn kv_get(&mut self, key: &str) -> Option<String> {
-            self.0.borrow().kv.borrow().get(key).cloned()
+            let f = self.0.borrow();
+            f.kv_reads.set(f.kv_reads.get() + 1);
+            let v = f.kv.borrow().get(key).cloned();
+            v
         }
         fn kv_set(&mut self, key: &str, value: &str) -> Result<(), String> {
             self.0
@@ -1272,14 +1381,16 @@ mod tests {
             self.0.borrow().kv.borrow_mut().remove(key);
         }
         fn kv_list(&mut self, prefix: &str) -> Vec<String> {
-            self.0
-                .borrow()
+            let f = self.0.borrow();
+            f.kv_reads.set(f.kv_reads.get() + 1);
+            let keys: Vec<String> = f
                 .kv
                 .borrow()
                 .keys()
                 .filter(|k| k.starts_with(prefix))
                 .cloned()
-                .collect()
+                .collect();
+            keys
         }
         fn put_entry(&mut self, e: &Entry) -> Result<Put, String> {
             let mut f = self.0.borrow_mut();
@@ -1359,6 +1470,20 @@ mod tests {
             step_ms: 1,
             ..Fake::default()
         })
+    }
+
+    /// Pages and `_meta.json` files in the packed scan cache.
+    fn cached_scans(f: &RefCell<Fake>) -> usize {
+        let fk = f.borrow();
+        let kv = fk.kv.borrow();
+        kv.iter()
+            .filter(|(k, _)| k.starts_with("scanpack/"))
+            .map(|(_, v)| {
+                serde_json::from_str::<BTreeMap<String, String>>(v)
+                    .unwrap()
+                    .len()
+            })
+            .sum()
     }
 
     fn budget(f: &RefCell<Fake>) -> Budget {
@@ -1503,14 +1628,7 @@ mod tests {
         let f = fake_with(repo_one());
         let b = budget(&f);
         run(&mut Wrap(&f), &cfg(), None, b).unwrap();
-        let count = |f: &RefCell<Fake>| {
-            f.borrow()
-                .kv
-                .borrow()
-                .keys()
-                .filter(|k| k.starts_with("scan/"))
-                .count()
-        };
+        let count = |f: &RefCell<Fake>| cached_scans(f);
         assert_eq!(
             count(&f),
             3,
@@ -1596,18 +1714,86 @@ mod tests {
         };
         let first = run(&mut Wrap(&f), &cfg(), None, tiny).unwrap();
         assert!(!first.finished);
-        let cached = f
-            .borrow()
-            .kv
-            .borrow()
-            .keys()
-            .filter(|k| k.starts_with("scan/"))
-            .count();
+        let cached = cached_scans(&f);
         assert!(cached >= 1, "pages read so far are remembered");
         let b = budget(&f);
         let second = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
         assert!(second.finished, "{second:?}");
         assert_eq!(f.borrow().entries.len(), 3);
+    }
+
+    /// The broker allows 600 key-value reads a minute, extended task or not.
+    /// A site the size of krishiv-engine's docs (two sections of ~620 pages,
+    /// one folder each) must sync inside that, on the first run, on a run that
+    /// changes a page, and on a run that changes none.
+    #[test]
+    fn a_site_of_over_a_thousand_pages_syncs_within_the_key_value_read_quota() {
+        let mut files = Files::new();
+        for i in 0..620 {
+            files.insert(
+                format!("docs/area{}/page{i}.md", i % 25),
+                format!("---\ntitle: Page {i}\n---\n# Page {i}\n\nBody {i}.\n"),
+            );
+        }
+        let f = fake_with(files);
+        let mut c = cfg();
+        c.sections = vec![
+            crate::settings::SectionDef {
+                slug: "engine/0.2".into(),
+                title: "Engine 0.2".into(),
+                folder: vec!["docs".into()],
+                git_ref: None,
+            },
+            crate::settings::SectionDef {
+                slug: "engine/next".into(),
+                title: "Engine next".into(),
+                folder: vec!["docs".into()],
+                git_ref: None,
+            },
+        ];
+        let reads = |f: &RefCell<Fake>| f.borrow().kv_reads.replace(0);
+        let big = |f: &RefCell<Fake>| Budget {
+            deadline_ms: f.borrow().now + 60_000,
+            max_requests: 5000,
+            max_writes: 5000,
+        };
+        let b = big(&f);
+        let first = run(&mut Wrap(&f), &c, None, b).unwrap();
+        assert!(first.finished, "{first:?}");
+        assert!(reads(&f) < 100, "first run read too much");
+        // A page changes: a new commit.
+        {
+            let mut fk = f.borrow_mut();
+            let mut files = fk.commits[SHA1].clone();
+            files.insert("docs/area0/page0.md".into(), "# Changed\n".into());
+            fk.commits.insert(SHA2.into(), files);
+            fk.head = SHA2.into();
+        }
+        let b = big(&f);
+        let second = run(&mut Wrap(&f), &c, None, b).unwrap();
+        assert!(second.finished, "{second:?}");
+        assert!(reads(&f) < 100, "a run after a commit read too much");
+        // Cut short by the request budget, then resumed: still few reads.
+        f.borrow().kv.borrow_mut().retain(|k, _| !k.starts_with("scanpack/") && !k.starts_with("sync/"));
+        let tiny = Budget {
+            deadline_ms: f.borrow().now + 60_000,
+            max_requests: 100,
+            max_writes: 5000,
+        };
+        let cut = run(&mut Wrap(&f), &c, None, tiny).unwrap();
+        assert!(!cut.finished);
+        assert!(reads(&f) < 100);
+        let mut done = false;
+        for _ in 0..20 {
+            let b = big(&f);
+            let r = run(&mut Wrap(&f), &c, None, b).unwrap();
+            assert!(reads(&f) < 100, "a resumed run read too much");
+            if r.finished {
+                done = true;
+                break;
+            }
+        }
+        assert!(done);
     }
 
     #[test]

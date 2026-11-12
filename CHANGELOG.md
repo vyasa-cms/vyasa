@@ -7,6 +7,9 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Fixed
+- Docs plugin 0.1.5: a site of over 600 pages synced never finished, because the importer read one key-value entry per page and the host allows 600 reads a minute even in an extended task. The scan cache is now a few packed entries (about ten reads a run) and is saved however a run ends, so a cut-short run resumes.
+
 ### Added
 - Docs plugin 0.1.4: a section slug may be `product/version` (`app/2.0`), served at `/docs/app/2.0/` with its own sidebar and search scope; a hidden `product` root is generated when no section of that name exists.
 
