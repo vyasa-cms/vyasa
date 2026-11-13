@@ -1207,7 +1207,25 @@ pub async fn custom_entry(
             if rest == "search" {
                 return found(&search_address(&decl.slug, &params));
             }
+            // One canonical address: no trailing slash.
+            if let Some(to) = canonical_entry_path(&first, &rest) {
+                if to != format!("/{first}/{rest}") {
+                    return moved(&to);
+                }
+            }
             let Ok(post) = state.posts.get_by_path(post_type, &rest).await else {
+                // A dot in a path segment (a version, `engine/0.2`) is a
+                // hyphen in the stored slug; send the dotted address there.
+                if let Some(to) = canonical_entry_path(&first, &rest) {
+                    let to_rest = to
+                        .trim_start_matches('/')
+                        .trim_start_matches(first.as_str());
+                    let to_rest = to_rest.trim_start_matches('/');
+                    if to_rest != rest && state.posts.get_by_path(post_type, to_rest).await.is_ok()
+                    {
+                        return moved(&to);
+                    }
+                }
                 return missing(&state).await;
             };
             return Box::pin(render_single(state, post, headers, params)).await;
@@ -1244,6 +1262,24 @@ pub async fn custom_entry(
         return archive_impl(state, tax.as_str(), rest, params.page.unwrap_or(1), headers).await;
     }
     missing(&state).await
+}
+
+/// The canonical address of `/{base}/{rest}` for a hierarchical type: no
+/// trailing slash, and each path segment as stored (a dot, as in a version
+/// `0.2`, is a hyphen in a slug). `None` when `rest` is empty.
+fn canonical_entry_path(base: &str, rest: &str) -> Option<String> {
+    let segs: Vec<String> = rest
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .map(|s| {
+            if s.contains('.') && !s.ends_with(".md") {
+                vyasa_common::slugify(s)
+            } else {
+                s.to_owned()
+            }
+        })
+        .collect();
+    (!segs.is_empty()).then(|| format!("/{base}/{}", segs.join("/")))
 }
 
 /// A `302` to `to`.
@@ -2602,4 +2638,33 @@ pub async fn theme_asset(
         asset.body,
     )
         .into_response()
+}
+
+#[cfg(test)]
+mod canonical_entry_path_tests {
+    use super::canonical_entry_path;
+
+    #[test]
+    fn a_trailing_slash_is_dropped() {
+        assert_eq!(
+            canonical_entry_path("docs", "engine/next/").as_deref(),
+            Some("/docs/engine/next")
+        );
+    }
+
+    #[test]
+    fn a_dotted_version_segment_becomes_its_stored_slug() {
+        assert_eq!(
+            canonical_entry_path("docs", "engine/0.2/sql/functions").as_deref(),
+            Some("/docs/engine/0-2/sql/functions")
+        );
+    }
+
+    #[test]
+    fn a_canonical_path_is_unchanged() {
+        assert_eq!(
+            canonical_entry_path("docs", "engine/next").as_deref(),
+            Some("/docs/engine/next")
+        );
+    }
 }
