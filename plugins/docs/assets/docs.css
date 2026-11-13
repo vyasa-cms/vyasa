@@ -24,8 +24,15 @@
   margin-inline: auto;
 }
 .vy-section.vy-columns[data-section="docs-layout"] > * { min-width: 0; margin-inline: 0; }
-[data-section="docs-side"], [data-section="docs-aside"] { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; }
-@media (max-width: 64rem) {
+/* A theme with a sticky header sets --docs-sticky-top to its height plus a gap. */
+[data-section="docs-side"], [data-section="docs-aside"] { position: sticky; top: var(--docs-sticky-top, 1rem); max-height: calc(100vh - var(--docs-sticky-top, 1rem) - 1rem); overflow: auto; }
+/* Tablet: sidebar beside the page, "On this page" as a drawer. */
+@media (min-width: 48.01rem) and (max-width: 64rem) {
+  .vy-section.vy-columns[data-section="docs-layout"] { grid-template-columns: minmax(0, 14rem) minmax(0, 1fr); }
+  [data-section="docs-aside"] { grid-column: 2; position: static; max-height: none; overflow: visible; order: -1; }
+  [data-section="docs-side"] { grid-row: 1 / span 2; }
+}
+@media (max-width: 48rem) {
   .vy-section.vy-columns[data-section="docs-layout"] { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
   [data-section="docs-side"], [data-section="docs-aside"] { position: static; max-height: none; overflow: visible; }
   /* On a phone: search and the menu, then "On this page", then the page. */
@@ -39,6 +46,12 @@
 .vy-section.vy-columns[data-section="docs-layout"] { padding-block: 1.5rem; }
 [data-section="docs-layout"] .vy-section { padding-block: 0; margin-block: 0; }
 [data-section="docs-layout"] .vy-section > * { padding-inline: 0; max-width: none; }
+/* ...but the reset must not strip what a block needs for itself. */
+[data-section="docs-layout"] pre.vy-code, [data-section="docs-layout"] .vy-section > pre { padding-inline: 1.25rem; }
+[data-section="docs-main"] :is(ul, ol):not([class]) { padding-left: 1.5rem; }
+[data-section="docs-main"] :is(ul, ol):not([class]) :is(ul, ol):not([class]) { padding-left: 1.25rem; }
+/* Code in a table cell keeps its token whole; the table scrolls instead. */
+[data-section="docs-layout"] :is(td, th) code { overflow-wrap: normal; word-break: keep-all; white-space: nowrap; }
 [data-section="docs-layout"] > .vy-group { margin-block: 0; }
 [data-section="docs-layout"] .vy-group > * + * { margin-top: 1rem; }
 [data-section="docs-layout"] .vy-table, [data-section="docs-layout"] pre { max-width: 100%; overflow-x: auto; }
@@ -58,7 +71,12 @@
 @media (min-width: 64.01rem) {
   .docs-drawer > summary, .docs-toc__drawer > summary { display: none; }
 }
-.docs-toc__drawer > summary { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--docs-muted); }
+.docs-drawer > summary::after, .docs-toc__drawer > summary::after { content: ""; float: right; width: .5rem; height: .5rem; margin-top: .3rem; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); }
+.docs-drawer[open] > summary::after, .docs-toc__drawer[open] > summary::after { transform: rotate(-135deg); margin-top: .5rem; }
+/* An opened drawer scrolls inside itself; a whole function reference is not
+   a thing to scroll past on a phone. */
+.docs-drawer[open] > .docs-nav, .docs-toc__drawer[open] > .docs-toc { max-height: 60vh; overflow: auto; }
+.docs-toc a { overflow-wrap: anywhere; }
 
 /* Sidebar */
 .docs-nav__list { list-style: none; margin: 0; padding-left: 0; }
@@ -120,3 +138,23 @@
 .docs-tree__note { color: var(--docs-muted); }
 .docs-copy { position: absolute; top: .4rem; right: .4rem; padding: .15rem .5rem; font-size: .75rem; border: 1px solid var(--docs-border); border-radius: var(--docs-radius); background: var(--vy-color-bg, #fff); cursor: pointer; }
 .docs-placeholder { padding: .75rem 1rem; border: 1px dashed var(--docs-border); border-radius: var(--docs-radius); color: var(--docs-muted); font-size: .85rem; }
+
+/* Tables: full width, scrolling sideways; status words as pills. */
+.docs-table { overflow-x: auto; margin: 1.5rem 0; -webkit-overflow-scrolling: touch; }
+.docs-table table { width: 100%; min-width: 32rem; border-collapse: collapse; font-size: 14px; }
+.docs-table th, .docs-table td { padding: 12px 16px; text-align: left; border-bottom: 1px solid var(--docs-line, rgba(127, 127, 127, 0.25)); vertical-align: top; }
+.docs-table thead th { background: var(--docs-tint, rgba(127, 127, 127, 0.1)); font-weight: 600; }
+.docs-table td:first-child { font-weight: 600; }
+.docs-pill { display: inline-block; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; line-height: 20px; white-space: nowrap; }
+.docs-pill--ok { background: rgba(34, 160, 90, 0.16); color: #1f7a4a; }
+.docs-pill--partial { background: rgba(50, 110, 220, 0.16); color: #2b5cc4; }
+.docs-pill--soon { background: rgba(230, 150, 20, 0.18); color: #a56300; }
+.docs-pill--no, .docs-pill--na { background: rgba(200, 60, 60, 0.15); color: #b03030; }
+@media (prefers-color-scheme: dark) {
+  .docs-pill--ok { color: #6fd9a0; } .docs-pill--partial { color: #8fb4ff; }
+  .docs-pill--soon { color: #f0b84a; } .docs-pill--no, .docs-pill--na { color: #ff9a9a; }
+}
+:root[data-theme="dark"] .docs-pill--ok { color: #6fd9a0; }
+:root[data-theme="dark"] .docs-pill--partial { color: #8fb4ff; }
+:root[data-theme="dark"] .docs-pill--soon { color: #f0b84a; }
+:root[data-theme="dark"] .docs-pill--no, :root[data-theme="dark"] .docs-pill--na { color: #ff9a9a; }
