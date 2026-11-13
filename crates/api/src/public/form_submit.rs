@@ -21,6 +21,36 @@ const MAX_BODY_BYTES: usize = 16 * 1024;
 /// Longest accepted message; enough for a real note, hostile for spam.
 const MAX_MESSAGE: usize = 4000;
 
+/// Most extra fields kept from one contact submission.
+const MAX_EXTRA_FIELDS: usize = 20;
+/// Longest extra field name and value kept.
+const MAX_EXTRA_KEY: usize = 60;
+const MAX_EXTRA_VALUE: usize = 1000;
+/// Fields the handler reads itself or that steer it; never stored as extras.
+const RESERVED: [&str; 8] = [
+    "form", "mode", "website", "consent", "name", "email", "message", "path",
+];
+
+/// The non-reserved fields of a contact submission (`company`, `role`, a
+/// `wants_contact` checkbox ...), as a JSON object for
+/// `form_submissions.data`. Capped in count and length; the first value of
+/// a repeated name wins.
+fn extra_fields(fields: &[(String, String)]) -> serde_json::Value {
+    let mut out = serde_json::Map::new();
+    for (k, v) in fields {
+        let key: String = k.trim().chars().take(MAX_EXTRA_KEY).collect();
+        if key.is_empty() || RESERVED.contains(&key.as_str()) || out.contains_key(&key) {
+            continue;
+        }
+        if out.len() >= MAX_EXTRA_FIELDS {
+            break;
+        }
+        let value: String = v.trim().chars().take(MAX_EXTRA_VALUE).collect();
+        out.insert(key, serde_json::Value::String(value));
+    }
+    serde_json::Value::Object(out)
+}
+
 /// A plausible-enough email: something@something.something. Real
 /// validation is the confirm click.
 fn email_ok(email: &str) -> bool {
@@ -125,7 +155,7 @@ pub async fn submit(State(state): State<AppState>, body: String) -> Response {
     let message: String = get("message").chars().take(MAX_MESSAGE).collect();
     match state
         .audience
-        .add_submission(&form, &name, &email, &message, "")
+        .add_submission_with(&form, &name, &email, &message, "", &extra_fields(&fields))
         .await
     {
         Ok(_) => thanks_page(&site, "Thanks — your message has been received."),
@@ -241,7 +271,50 @@ async fn flip(state: &AppState, token: &str, status: &str, done: &str) -> Respon
 
 #[cfg(test)]
 mod tests {
-    use super::email_ok;
+    use super::{email_ok, extra_fields};
+
+    fn pairs(v: &[(&str, &str)]) -> Vec<(String, String)> {
+        v.iter()
+            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn extras_keep_other_fields_and_skip_reserved_ones() {
+        let got = extra_fields(&pairs(&[
+            ("form", "early-access"),
+            ("mode", "contact"),
+            ("website", ""),
+            ("consent", "on"),
+            ("name", "Ada"),
+            ("email", "a@b.co"),
+            ("message", "hi"),
+            ("company", " Acme "),
+            ("role", "CTO"),
+            ("wants_contact", "yes"),
+            ("company", "second ignored"),
+        ]));
+        assert_eq!(
+            got,
+            serde_json::json!({"company": "Acme", "role": "CTO", "wants_contact": "yes"})
+        );
+    }
+
+    #[test]
+    fn extras_are_capped_in_count_and_length() {
+        let many: Vec<(String, String)> = (0..50)
+            .map(|i| (format!("f{i}"), "x".repeat(5000)))
+            .collect();
+        let got = extra_fields(&many);
+        let obj = got.as_object().unwrap();
+        assert_eq!(obj.len(), 20);
+        assert!(obj.values().all(|v| v.as_str().unwrap().len() == 1000));
+        let long_key = extra_fields(&pairs(&[(&"k".repeat(200), "v")]));
+        assert_eq!(
+            long_key.as_object().unwrap().keys().next().unwrap().len(),
+            60
+        );
+    }
 
     #[test]
     fn email_shapes() {
