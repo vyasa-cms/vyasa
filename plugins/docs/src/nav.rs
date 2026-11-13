@@ -349,14 +349,25 @@ pub fn breadcrumbs(page: &Page, home_label: &str) -> String {
     let Some(cur) = page.current() else {
         return String::new();
     };
+    // A section (`Engine 0.2`) is the trail's first entry: its own title and
+    // address replace the generic "Docs" and every group above it, so the
+    // trail reads "Engine 0.2 › Concepts" and repeats nothing.
+    let section = page.section_root();
+    let (home_url, home_text) = match section {
+        Some(sec) => (sec.url.clone(), sec.title.clone()),
+        None => (format!("/{}", page.base()), home_label.to_owned()),
+    };
     let mut out = format!(
-        "<nav class=\"docs-crumbs\" aria-label=\"Breadcrumb\"><ol><li><a href=\"/{}\">{}</a></li>",
-        esc(&page.base()),
-        esc(home_label)
+        "<nav class=\"docs-crumbs\" aria-label=\"Breadcrumb\"><ol><li><a href=\"{}\">{}</a></li>",
+        esc(&home_url),
+        esc(&home_text)
     );
-    for id in &page.ancestors {
+    let start = section
+        .and_then(|sec| page.ancestors.iter().position(|id| *id == sec.id))
+        .map_or(0, |i| i + 1);
+    for id in page.ancestors.iter().skip(start) {
         if let Some(n) = page.node(id) {
-            if n.version_root {
+            if n.version_root || n.section_root {
                 continue;
             }
             out.push_str(&format!(
@@ -597,6 +608,20 @@ mod tests {
         assert!(!html.contains(">v1<"));
         assert!(html.contains("aria-current=\"page\">Old install"));
         assert!(html.ends_with("<h1 class=\"docs-title\">Old install</h1>"));
+    }
+
+    #[test]
+    fn a_section_page_starts_its_trail_at_the_section_and_repeats_nothing() {
+        let mut v = payload("10", &["9"]);
+        for node in v["context"]["tree"].as_array_mut().unwrap() {
+            if node["id"] == "9" {
+                node["fields"]["section_root"] = json!(true);
+                node["title"] = json!("Engine 0.2");
+            }
+        }
+        let html = breadcrumbs(&parse(&v).unwrap(), "Docs");
+        assert!(!html.contains(">Docs<"), "{html}");
+        assert_eq!(html.matches("Engine 0.2").count(), 1, "{html}");
     }
 
     #[test]
