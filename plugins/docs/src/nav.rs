@@ -311,11 +311,20 @@ pub fn toc(page: &Page) -> String {
             "<li class=\"docs-toc__l{}\"><a href=\"{}\">{}</a></li>",
             t.level,
             esc(&t.anchor),
-            esc(&t.text)
+            toc_text(&t.text)
         ));
     }
     out.push_str("</ol></nav></details>");
     out
+}
+
+/// A heading's text for the contents list: escaped, except that a
+/// literal `<code>…</code>` pair (the heading's inline code, which arrives
+/// as text) is drawn as code rather than shown as tags.
+fn toc_text(text: &str) -> String {
+    esc(text)
+        .replace("&lt;code&gt;", "<code>")
+        .replace("&lt;/code&gt;", "</code>")
 }
 
 /// Previous and next page in reading order.
@@ -622,6 +631,14 @@ mod tests {
         let html = breadcrumbs(&parse(&v).unwrap(), "Docs");
         assert!(!html.contains(">Docs<"), "{html}");
         assert_eq!(html.matches("Engine 0.2").count(), 1, "{html}");
+    }
+
+    #[test]
+    fn a_literal_code_pair_in_a_heading_is_drawn_as_code_in_the_contents() {
+        assert_eq!(
+            toc_text("<code>agg</code> and <b>x</b>"),
+            "<code>agg</code> and &lt;b&gt;x&lt;/b&gt;"
+        );
     }
 
     #[test]

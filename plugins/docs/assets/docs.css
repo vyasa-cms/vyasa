@@ -24,8 +24,15 @@
   margin-inline: auto;
 }
 .vy-section.vy-columns[data-section="docs-layout"] > * { min-width: 0; margin-inline: 0; }
-[data-section="docs-side"], [data-section="docs-aside"] { position: sticky; top: 1rem; max-height: calc(100vh - 2rem); overflow: auto; }
-@media (max-width: 64rem) {
+/* A theme with a sticky header sets --docs-sticky-top to its height plus a gap. */
+[data-section="docs-side"], [data-section="docs-aside"] { position: sticky; top: var(--docs-sticky-top, 1rem); max-height: calc(100vh - var(--docs-sticky-top, 1rem) - 1rem); overflow: auto; }
+/* Tablet: sidebar beside the page, "On this page" as a drawer. */
+@media (min-width: 48.01rem) and (max-width: 64rem) {
+  .vy-section.vy-columns[data-section="docs-layout"] { grid-template-columns: minmax(0, 14rem) minmax(0, 1fr); }
+  [data-section="docs-aside"] { grid-column: 2; position: static; max-height: none; overflow: visible; order: -1; }
+  [data-section="docs-side"] { grid-row: 1 / span 2; }
+}
+@media (max-width: 48rem) {
   .vy-section.vy-columns[data-section="docs-layout"] { grid-template-columns: minmax(0, 1fr); gap: 1rem; }
   [data-section="docs-side"], [data-section="docs-aside"] { position: static; max-height: none; overflow: visible; }
   /* On a phone: search and the menu, then "On this page", then the page. */
@@ -39,6 +46,12 @@
 .vy-section.vy-columns[data-section="docs-layout"] { padding-block: 1.5rem; }
 [data-section="docs-layout"] .vy-section { padding-block: 0; margin-block: 0; }
 [data-section="docs-layout"] .vy-section > * { padding-inline: 0; max-width: none; }
+/* ...but the reset must not strip what a block needs for itself. */
+[data-section="docs-layout"] pre.vy-code, [data-section="docs-layout"] .vy-section > pre { padding-inline: 1.25rem; }
+[data-section="docs-main"] :is(ul, ol):not([class]) { padding-left: 1.5rem; }
+[data-section="docs-main"] :is(ul, ol):not([class]) :is(ul, ol):not([class]) { padding-left: 1.25rem; }
+/* Code in a table cell keeps its token whole; the table scrolls instead. */
+[data-section="docs-layout"] :is(td, th) code { overflow-wrap: normal; word-break: keep-all; white-space: nowrap; }
 [data-section="docs-layout"] > .vy-group { margin-block: 0; }
 [data-section="docs-layout"] .vy-group > * + * { margin-top: 1rem; }
 [data-section="docs-layout"] .vy-table, [data-section="docs-layout"] pre { max-width: 100%; overflow-x: auto; }
@@ -58,7 +71,12 @@
 @media (min-width: 64.01rem) {
   .docs-drawer > summary, .docs-toc__drawer > summary { display: none; }
 }
-.docs-toc__drawer > summary { font-size: .8rem; text-transform: uppercase; letter-spacing: .04em; color: var(--docs-muted); }
+.docs-drawer > summary::after, .docs-toc__drawer > summary::after { content: ""; float: right; width: .5rem; height: .5rem; margin-top: .3rem; border-right: 2px solid currentColor; border-bottom: 2px solid currentColor; transform: rotate(45deg); }
+.docs-drawer[open] > summary::after, .docs-toc__drawer[open] > summary::after { transform: rotate(-135deg); margin-top: .5rem; }
+/* An opened drawer scrolls inside itself; a whole function reference is not
+   a thing to scroll past on a phone. */
+.docs-drawer[open] > .docs-nav, .docs-toc__drawer[open] > .docs-toc { max-height: 60vh; overflow: auto; }
+.docs-toc a { overflow-wrap: anywhere; }
 
 /* Sidebar */
 .docs-nav__list { list-style: none; margin: 0; padding-left: 0; }
