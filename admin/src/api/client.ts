@@ -1261,6 +1261,7 @@ export const api = {
       name: string;
       email: string;
       message: string;
+      data: Record<string, unknown>;
       created_at: string;
     }[]
   > {

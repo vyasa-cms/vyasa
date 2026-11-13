@@ -22,6 +22,8 @@ pub struct SubmissionResponse {
     pub email: String,
     /// Message.
     pub message: String,
+    /// Extra fields the form posted (company, role ...), name to value.
+    pub data: serde_json::Value,
     /// When it arrived.
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
@@ -65,6 +67,7 @@ pub async fn submissions(
                 name: r.name,
                 email: r.email,
                 message: r.message,
+                data: r.data,
                 created_at: r.created_at,
             })
             .collect(),
