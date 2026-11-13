@@ -8,6 +8,7 @@ follows [semantic versioning](https://semver.org) as described in
 ## [Unreleased]
 
 ### Fixed
+- Docs plugin 0.1.6: re-applying unchanged settings (every site deploy) no longer writes the settings key, and a refused write with settings already stored no longer fails `init`. A deploy right after a sync used to hit the per-minute write quota and leave the plugin errored.
 - Docs plugin 0.1.5: a site of over 600 pages synced never finished, because the importer read one key-value entry per page and the host allows 600 reads a minute even in an extended task. The scan cache is now a few packed entries (about ten reads a run) and is saved however a run ends, so a cut-short run resumes.
 
 ### Added

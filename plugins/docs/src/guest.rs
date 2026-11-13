@@ -119,7 +119,22 @@ impl Guest for Docs {
         // Each call is a fresh instance, so the settings live in `kv`.
         let s = Settings::from_json(&config_json);
         let json = s.to_json();
-        host::kv_set(SETTINGS_KEY, &json)?;
+        // Write only on a change: every deploy re-applies the settings, and
+        // an unconditional write spent the per-minute write quota that a
+        // sync had just used up, which the host then read as a refusal.
+        if kv_text(SETTINGS_KEY).as_deref() != Some(json.as_str()) {
+            if let Err(e) = host::kv_set(SETTINGS_KEY, &json) {
+                // Quota or not, stored settings still serve the plugin; none
+                // at all is the only real failure.
+                if kv_text(SETTINGS_KEY).is_none() {
+                    return Err(e);
+                }
+                return Ok(PluginInfo {
+                    name: "vyasa-docs".to_owned(),
+                    version: env!("CARGO_PKG_VERSION").to_owned(),
+                });
+            }
+        }
         // New settings (another repository, branch or folder) mean the next
         // check must not be answered with "nothing changed".
         let sig: String = Sha256::digest(json.as_bytes())
