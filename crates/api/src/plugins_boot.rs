@@ -131,6 +131,28 @@ pub async fn activate(
             // no longer permanent damage on the admin page.
             repo.set_status_reason(row.id, "loaded", "").await.ok();
         }
+        Ok(Err(reject))
+            if state
+                .broker
+                .quota_refused_within(row.id, std::time::Duration::from_secs(90)) =>
+        {
+            // A per-minute quota refusal is transient: the plugin keeps
+            // running on its previous settings and the next apply (a
+            // deploy, an enable, the next boot) tries again. Marking it
+            // errored turned one busy minute into a permanent outage.
+            tracing::warn!(
+                "plugin {} could not apply its settings now (quota): {reject}",
+                row.name
+            );
+            repo.set_status_reason(
+                row.id,
+                "degraded",
+                &format!("settings not applied: a per-minute quota was hit ({reject}); it retries on the next apply"),
+            )
+            .await
+            .ok();
+            return Ok(false);
+        }
         Ok(Err(reject)) => {
             tracing::warn!("plugin {} rejected config: {reject}", row.name);
             repo.set_status_reason(
