@@ -157,7 +157,7 @@ fn stem_of(file: &str) -> &str {
     file.rsplit_once('.').map_or(file, |(s, _)| s)
 }
 
-fn is_index(file: &str) -> bool {
+pub(crate) fn is_index(file: &str) -> bool {
     matches!(
         stem_of(file).to_ascii_lowercase().as_str(),
         "index" | "readme"

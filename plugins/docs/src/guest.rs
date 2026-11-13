@@ -287,7 +287,8 @@ impl Guest for Docs {
                 {"key": "edit_url", "label": "Edit URL", "kind": "url", "help": "Where readers can edit this page (set by the importer for synced pages)."},
                 {"key": "last_updated", "label": "Last updated", "kind": "date"},
                 {"key": "version_root", "label": "Version entry", "kind": "boolean", "help": "Marks the entry an older version's pages hang under."},
-                {"key": "section_root", "label": "Section entry", "kind": "boolean", "help": "Marks the entry a doc section's pages hang under."}
+                {"key": "section_root", "label": "Section entry", "kind": "boolean", "help": "Marks the entry a doc section's pages hang under."},
+                {"key": "cards", "label": "Card list", "kind": "boolean", "help": "The page is a generated list of its children (set by the importer)."}
             ]
         }])
         .to_string()
