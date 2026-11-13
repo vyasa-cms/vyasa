@@ -151,8 +151,19 @@ impl PluginsRepo {
         // the capabilities of the version it replaced: one that dropped a
         // capability kept being granted it, and one that added a
         // capability could never use it.
+        //
+        // An errored mark belongs to the bytes that earned it. The host
+        // refuses to load an errored plugin, so keeping it across an upgrade
+        // meant the new version could never run `init`, and installing the
+        // fix for a crash could not repair the plugin. The mark is cleared
+        // here; whether the plugin is on stays the administrator's choice.
         let updated = sqlx::query(
-            "UPDATE plugins SET version = $2, wasm_sha256 = $3, capabilities = $4 WHERE id = $1",
+            "UPDATE plugins SET version = $2, wasm_sha256 = $3, capabilities = $4,
+                    status_reason = CASE WHEN status = 'errored' THEN '' ELSE status_reason END,
+                    status = CASE WHEN status = 'errored'
+                                  THEN CASE WHEN enabled THEN 'loaded' ELSE 'disabled' END
+                                  ELSE status END
+             WHERE id = $1",
         )
         .bind(plugin_id)
         .bind(version)
