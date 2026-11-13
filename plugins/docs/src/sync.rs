@@ -1383,13 +1383,12 @@ mod tests {
         fn kv_list(&mut self, prefix: &str) -> Vec<String> {
             let f = self.0.borrow();
             f.kv_reads.set(f.kv_reads.get() + 1);
-            let keys: Vec<String> = f
-                .kv
-                .borrow()
-                .keys()
-                .filter(|k| k.starts_with(prefix))
-                .cloned()
-                .collect();
+            let keys: Vec<String> =
+                f.kv.borrow()
+                    .keys()
+                    .filter(|k| k.starts_with(prefix))
+                    .cloned()
+                    .collect();
             keys
         }
         fn put_entry(&mut self, e: &Entry) -> Result<Put, String> {
@@ -1723,8 +1722,8 @@ mod tests {
     }
 
     /// The broker allows 600 key-value reads a minute, extended task or not.
-    /// A site the size of krishiv-engine's docs (two sections of ~620 pages,
-    /// one folder each) must sync inside that, on the first run, on a run that
+    /// A site with two sections of about 620 pages each (one folder each)
+    /// must sync inside that, on the first run, on a run that
     /// changes a page, and on a run that changes none.
     #[test]
     fn a_site_of_over_a_thousand_pages_syncs_within_the_key_value_read_quota() {
@@ -1774,7 +1773,10 @@ mod tests {
         assert!(second.finished, "{second:?}");
         assert!(reads(&f) < 100, "a run after a commit read too much");
         // Cut short by the request budget, then resumed: still few reads.
-        f.borrow().kv.borrow_mut().retain(|k, _| !k.starts_with("scanpack/") && !k.starts_with("sync/"));
+        f.borrow()
+            .kv
+            .borrow_mut()
+            .retain(|k, _| !k.starts_with("scanpack/") && !k.starts_with("sync/"));
         let tiny = Budget {
             deadline_ms: f.borrow().now + 60_000,
             max_requests: 100,
