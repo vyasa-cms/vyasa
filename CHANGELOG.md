@@ -7,11 +7,17 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.4.2] - 2026-11-13
+
 ### Fixed
+- An upgrade clears a plugin's errored status, and a per-minute quota refusal while applying its settings leaves the plugin degraded instead of errored (#115).
+- A docs entry has one canonical address: a trailing slash or a dotted version segment (`/docs/app/0.2/`) answers with a 301 to the stored address (#117).
+- `ammonia` 4.2.5 and `quinn-udp` 0.5.16, for RUSTSEC-2026-0533 and RUSTSEC-2026-0538 (#118).
 - Docs plugin 0.1.6: re-applying unchanged settings (every site deploy) no longer writes the settings key, and a refused write with settings already stored no longer fails `init`. A deploy right after a sync used to hit the per-minute write quota and leave the plugin errored.
 - Docs plugin 0.1.5: a site of over 600 pages synced never finished, because the importer read one key-value entry per page and the host allows 600 reads a minute even in an extended task. The scan cache is now a few packed entries (about ten reads a run) and is saved however a run ends, so a cut-short run resumes.
 
 ### Added
+- The contact path of `POST /form` keeps every other posted field (`company`, `role`, a `wants_contact` checkbox ...) in the submission, at most 20 fields of 1000 characters, and Admin submissions lists them; `GET /api/v1/audience/submissions` returns them as `data` (#119).
 - Docs plugin 0.1.4: a section slug may be `product/version` (`app/2.0`), served at `/docs/app/2.0/` with its own sidebar and search scope; a hidden `product` root is generated when no section of that name exists.
 
 ## [0.4.1] - 2026-11-10
