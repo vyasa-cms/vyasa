@@ -1272,7 +1272,7 @@ fn canonical_entry_path(base: &str, rest: &str) -> Option<String> {
         .split('/')
         .filter(|s| !s.is_empty())
         .map(|s| {
-            if s.contains('.') && !s.ends_with(".md") {
+            if s.contains('.') && s.strip_suffix(".md").is_none() {
                 vyasa_common::slugify(s)
             } else {
                 s.to_owned()
