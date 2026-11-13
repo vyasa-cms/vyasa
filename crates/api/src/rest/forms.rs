@@ -1,6 +1,6 @@
 //! `/api/v1/forms`: definitions and their submissions.
 
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::Json;
 use serde::{Deserialize, Serialize};
@@ -89,15 +89,28 @@ pub struct Submission {
     pub created_at: chrono::DateTime<chrono::Utc>,
 }
 
+/// Which entries a submissions listing returns.
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct SubmissionsQuery {
+    /// `true` lists the entries still waiting for their sender to confirm by email, instead of
+    /// the ones that count.
+    #[serde(default)]
+    pub held: bool,
+}
+
 /// `GET /api/v1/forms/{id}/submissions`
-#[utoipa::path(get, path = "/api/v1/forms/{id}/submissions", tag = "content",
+#[utoipa::path(get, path = "/api/v1/forms/{id}/submissions", tag = "content", params(SubmissionsQuery),
     responses((status = 200, description = "Newest first", body = [Submission])))]
 pub async fn submissions(
     State(state): State<AppState>,
     Path(id): Path<i64>,
+    Query(q): Query<SubmissionsQuery>,
 ) -> ApiResult<Json<Vec<Submission>>> {
     let form = forms::get(&state, id).await?;
-    let rows = state.audience.submissions_for(&form.slug, 500).await?;
+    let rows = state
+        .audience
+        .submissions_for(&form.slug, 500, q.held)
+        .await?;
     Ok(Json(
         rows.into_iter()
             .map(|r| Submission {
@@ -115,33 +128,47 @@ pub async fn submissions(
 }
 
 /// `GET /api/v1/forms/{id}/submissions.csv`
-#[utoipa::path(get, path = "/api/v1/forms/{id}/submissions.csv", tag = "content",
+#[utoipa::path(get, path = "/api/v1/forms/{id}/submissions.csv", tag = "content", params(SubmissionsQuery),
     responses((status = 200, description = "A spreadsheet")))]
 pub async fn submissions_csv(
     State(state): State<AppState>,
     Path(id): Path<i64>,
+    Query(q): Query<SubmissionsQuery>,
 ) -> ApiResult<(axum::http::HeaderMap, String)> {
     let form = forms::get(&state, id).await?;
     let fields: Vec<forms::Field> = serde_json::from_value(form.fields.clone()).unwrap_or_default();
-    let rows = state.audience.submissions_for(&form.slug, 10_000).await?;
-    let mut out = String::new();
-    out.push_str("received,page,");
-    out.push_str(
-        &fields
-            .iter()
-            .map(|f| cell(&f.label))
-            .collect::<Vec<_>>()
-            .join(","),
-    );
+    let rows = state
+        .audience
+        .submissions_for(&form.slug, 10_000, q.held)
+        .await?;
+    // One column per field; a consent field also gets the time the box was ticked.
+    let columns: Vec<(String, String)> = fields
+        .iter()
+        .flat_map(|f| {
+            let mut c = vec![(f.label.clone(), f.key.clone())];
+            if f.kind == "consent" {
+                c.push((
+                    format!("{} (given at)", f.label),
+                    format!("{}_consent_at", f.key),
+                ));
+            }
+            c
+        })
+        .collect();
+    let mut out = String::from("received,page");
+    for (header, _) in &columns {
+        out.push(',');
+        out.push_str(&cell(header));
+    }
     out.push('\n');
     for r in rows {
         out.push_str(&cell(&r.created_at.to_rfc3339()));
         out.push(',');
         out.push_str(&cell(&r.path));
-        for f in &fields {
+        for (_, key) in &columns {
             out.push(',');
             out.push_str(&cell(
-                r.data.get(&f.key).and_then(|v| v.as_str()).unwrap_or(""),
+                r.data.get(key).and_then(|v| v.as_str()).unwrap_or(""),
             ));
         }
         out.push('\n');

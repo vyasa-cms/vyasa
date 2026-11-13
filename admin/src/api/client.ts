@@ -196,7 +196,7 @@ export interface AuditEntry {
 export interface FormField {
   key: string;
   label: string;
-  kind: "text" | "email" | "textarea" | "number" | "select" | "checkbox";
+  kind: "text" | "email" | "textarea" | "number" | "select" | "checkbox" | "consent";
   required: boolean;
   options: string[];
 }
@@ -208,6 +208,7 @@ export interface FormDef {
   notify_email: string;
   success_message: string;
   enabled: boolean;
+  confirm: boolean;
   unread: number;
   created_at: string;
   updated_at: string;
@@ -218,6 +219,7 @@ export interface FormInput {
   notify_email: string;
   success_message: string;
   enabled: boolean;
+  confirm?: boolean;
 }
 export interface FormSubmission {
   id: string;

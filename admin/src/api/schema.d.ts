@@ -4554,7 +4554,10 @@ export interface components {
         Field: {
             /** @description The input name; letters, digits, dashes, underscores. */
             key: string;
-            /** @description `text`, `email`, `textarea`, `number`, `select`, `checkbox`. */
+            /**
+             * @description `text`, `email`, `textarea`, `number`, `select`, `checkbox`, `consent` (a required checkbox
+             *     whose acceptance is stored with its time; `options[0]` may link the privacy page).
+             */
             kind?: string;
             label: string;
             options?: string[];
@@ -4584,6 +4587,8 @@ export interface components {
         };
         /** @description What create and update take. */
         FormInput: {
+            /** @description Hold a submission until its sender confirms by email (needs an email field). */
+            confirm?: boolean;
             enabled?: boolean;
             fields: components["schemas"]["Field"][];
             name: string;
@@ -4592,6 +4597,8 @@ export interface components {
         };
         /** @description A form as stored and returned. */
         FormRow: {
+            /** @description Whether a submission waits for the submitter's email confirmation. */
+            confirm: boolean;
             /** Format: date-time */
             created_at: string;
             enabled: boolean;
@@ -8162,7 +8169,13 @@ export interface operations {
     };
     submissions: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description `true` lists the entries still waiting for their sender to confirm by email, instead of
+                 *     the ones that count.
+                 */
+                held?: boolean;
+            };
             header?: never;
             path: {
                 id: number;
@@ -8184,7 +8197,13 @@ export interface operations {
     };
     submissions_csv: {
         parameters: {
-            query?: never;
+            query?: {
+                /**
+                 * @description `true` lists the entries still waiting for their sender to confirm by email, instead of
+                 *     the ones that count.
+                 */
+                held?: boolean;
+            };
             header?: never;
             path: {
                 id: number;
