@@ -573,6 +573,33 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
         .into_iter()
         .map(|m| (m.key, m.source_hash))
         .collect();
+    // Trash what no current page or section owns FIRST, so pages from an
+    // earlier configuration (before the sections were set) leave the site and
+    // its sitemap now, not when a long import finally ends.
+    let wanted: BTreeSet<&str> = p.entries.iter().map(|e| e.planned.key.as_str()).collect();
+    // Managed rows stay listed after they are trashed, so a cursor (the last
+    // key handled) lets a budget-limited run carry on where the last stopped,
+    // and the plan signature says the whole set was already done.
+    if cx.env.kv_get("sync/pruned").as_deref() != Some(sig.as_str()) {
+        let cursor = cx.env.kv_get("sync/prune-cursor").unwrap_or_default();
+        let mut last: Option<String> = None;
+        for key in managed.keys().filter(|k| k.as_str() > cursor.as_str()) {
+            if wanted.contains(key.as_str()) {
+                continue;
+            }
+            if cx.report.deleted >= cx.budget.max_writes {
+                if let Some(last) = &last {
+                    cx.env.kv_set("sync/prune-cursor", last)?;
+                }
+                return Err(Stop::Budget);
+            }
+            cx.env.delete_entry(key)?;
+            cx.report.deleted += 1;
+            last = Some(key.clone());
+        }
+        cx.env.kv_set("sync/pruned", &sig)?;
+        cx.env.kv_delete("sync/prune-cursor");
+    }
     let today = civil_date(cx.env.now_ms());
     for pe in &p.entries {
         let hash_basis = match &pe.source {
@@ -649,15 +676,6 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
             Put::Created => cx.report.created += 1,
             Put::Updated => cx.report.updated += 1,
             Put::Unchanged => cx.report.unchanged += 1,
-        }
-    }
-
-    // 6. Trash what the repository no longer has.
-    let wanted: BTreeSet<&str> = p.entries.iter().map(|e| e.planned.key.as_str()).collect();
-    for key in managed.keys() {
-        if !wanted.contains(key.as_str()) {
-            cx.env.delete_entry(key)?;
-            cx.report.deleted += 1;
         }
     }
 
@@ -2119,6 +2137,142 @@ mod tests {
         );
         assert!(!root.fields_json.contains("cards"), "{}", root.fields_json);
         assert!(!root.blocks_json.contains("Documentation for"));
+    }
+
+    #[test]
+    fn pages_from_before_the_sections_were_set_go_before_the_new_ones_are_written() {
+        // First import: no sections yet, so the pages are unversioned.
+        let f = fake_with(repo_one());
+        let b = budget(&f);
+        assert!(run(&mut Wrap(&f), &cfg(), None, b).unwrap().finished);
+        assert!(f
+            .borrow()
+            .entries
+            .keys()
+            .any(|k| k.starts_with("s:") || k.starts_with("p:") || !k.starts_with("@section")));
+        let old: Vec<String> = f.borrow().entries.keys().cloned().collect();
+        // Settings now name a section over another folder; a run that can only
+        // write one entry still removes every stale page.
+        let mut files = repo_one();
+        files.insert("api/calls.md".into(), "# Calls\n".into());
+        files.insert("api/more.md".into(), "# More\n".into());
+        files.insert("other/x.md".into(), "# X\n".into());
+        {
+            let mut fk = f.borrow_mut();
+            fk.commits.insert(SHA2.into(), files);
+            fk.head = SHA2.into();
+        }
+        let (_, mut c) = engine_section(repo_one());
+        // The main folder is now another one: its old pages belong to nobody.
+        c.folder = vec!["other".into()];
+        let tight = |f: &RefCell<Fake>| Budget {
+            deadline_ms: f.borrow().now + 60_000,
+            max_requests: 200,
+            max_writes: 2,
+        };
+        let b = tight(&f);
+        let first = run(&mut Wrap(&f), &c, None, b).unwrap();
+        assert_eq!(
+            first.created, 0,
+            "stale pages go before anything new is written: {first:?}"
+        );
+        assert_eq!(first.deleted, 2, "{first:?}");
+        // Later runs resume where the last stopped and finish.
+        for _ in 0..6 {
+            let b = tight(&f);
+            if run(&mut Wrap(&f), &c, None, b).unwrap().finished {
+                break;
+            }
+        }
+        let keys: Vec<String> = f.borrow().entries.keys().cloned().collect();
+        for k in &old {
+            assert!(!keys.contains(k), "stale {k} still there: {keys:?}");
+        }
+        assert!(keys.iter().any(|k| k.ends_with("x.md")), "{keys:?}");
+    }
+
+    /// The sidebar a reader gets from what the importer wrote: every page is a link.
+    fn sidebar_links(f: &RefCell<Fake>, current_key: &str) -> (usize, usize) {
+        let fk = f.borrow();
+        let ids: BTreeMap<&str, usize> = fk
+            .entries
+            .keys()
+            .enumerate()
+            .map(|(i, k)| (k.as_str(), i + 1))
+            .collect();
+        let tree: Vec<serde_json::Value> = fk
+            .entries
+            .iter()
+            .map(|(k, (e, _))| {
+                serde_json::json!({
+                    "id": ids[k.as_str()].to_string(),
+                    "parent_id": e.parent_key.as_deref().and_then(|p| ids.get(p)).map(ToString::to_string),
+                    "position": e.position, "title": e.title, "slug": e.slug,
+                    "url": format!("/docs/{}", e.slug),
+                    "fields": serde_json::from_str::<serde_json::Value>(&e.fields_json).unwrap(),
+                })
+            })
+            .collect();
+        let mut ancestors = Vec::new();
+        let mut cur = fk.entries[current_key].0.parent_key.clone();
+        while let Some(p) = cur {
+            ancestors.push(ids[p.as_str()].to_string());
+            cur = fk.entries[&p].0.parent_key.clone();
+        }
+        ancestors.reverse();
+        let payload = serde_json::json!({"context": {
+            "entry": {"id": ids[current_key].to_string(), "ancestors": ancestors},
+            "tree": tree, "toc": []}});
+        let page = crate::nav::parse(&payload).expect("a page");
+        let html = crate::nav::sidebar(&page, "Latest", &[]);
+        let visible = fk
+            .entries
+            .values()
+            .filter(|(e, _)| {
+                // Only what hangs under the section the page is in.
+                let mut cur = e.parent_key.as_deref();
+                let mut below = false;
+                while let Some(p) = cur {
+                    if p == "@section/engine/0.2" {
+                        below = true;
+                        break;
+                    }
+                    cur = fk.entries.get(p).and_then(|x| x.0.parent_key.as_deref());
+                }
+                below
+            })
+            .filter(|(e, _)| {
+                let f: serde_json::Value = serde_json::from_str(&e.fields_json).unwrap();
+                ["hide", "section_root", "version_root"]
+                    .iter()
+                    .all(|k| f[*k].as_bool() != Some(true))
+            })
+            .count();
+        (html.matches("docs-nav__link").count(), visible)
+    }
+
+    #[test]
+    fn the_sidebar_lists_every_page_of_a_section() {
+        for with_index in [false, true] {
+            let mut files = repo_one();
+            if with_index {
+                files.insert("api/index.md".into(), "# Engine docs\n\nWelcome.\n".into());
+            }
+            files.insert("api/calls.md".into(), "# Calls\n".into());
+            files.insert("api/start/quick.md".into(), "# Quickstart\n\nGo.\n".into());
+            files.insert("api/start/second.md".into(), "# Second\n\nGo.\n".into());
+            files.insert("api/start/deep/third.md".into(), "# Third\n".into());
+            let (f, c) = engine_section(files);
+            let b = budget(&f);
+            assert!(run(&mut Wrap(&f), &c, None, b).unwrap().finished);
+            let key = "s:engine/0.2:calls.md";
+            let (links, visible) = sidebar_links(&f, key);
+            assert!(visible >= 5, "{visible}");
+            assert_eq!(
+                links, visible,
+                "index={with_index}: every page is a sidebar link"
+            );
+        }
     }
 
     #[test]
