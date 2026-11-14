@@ -14,6 +14,7 @@ pub mod render;
 pub mod routes;
 pub mod sections;
 pub mod settings;
+pub mod status;
 pub mod sync;
 pub mod webhook;
 

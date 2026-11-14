@@ -6,6 +6,9 @@ use crate::webhook::{self, Delivery};
 /// The route path, below the plugin's mount point.
 pub const WEBHOOK_PATH: &str = "webhook";
 
+/// The status route (`GET`), answered by the guest from the stored status.
+pub const STATUS_PATH: &str = "status";
+
 /// The request headers the route asks the host to forward.
 pub const WEBHOOK_HEADERS: &[&str] = &["x-hub-signature-256", "x-github-event"];
 
