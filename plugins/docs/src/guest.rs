@@ -10,6 +10,7 @@ use sha2::{Digest, Sha256};
 use vyasa::plugin::host;
 
 use crate::settings::Settings;
+use crate::status::{self, NowAction, Status};
 use crate::sync::{self, Budget, Entry, Env, Managed, Put, Reply};
 use crate::{render, routes, sections};
 
@@ -114,6 +115,14 @@ impl Env for HostEnv {
     }
 }
 
+/// Keeps the status for the settings page; a refused write (quota) is not
+/// worth failing a sync over, and an unchanged status is not rewritten.
+fn record_status(next: &Status, prev: &Status) {
+    if next != prev {
+        let _ = host::kv_set(status::STATUS_KEY, &next.to_json());
+    }
+}
+
 impl Guest for Docs {
     fn init(config_json: String) -> Result<PluginInfo, String> {
         // Each call is a fresh instance, so the settings live in `kv`.
@@ -145,6 +154,18 @@ impl Guest for Docs {
         if kv_text(SIG_KEY).as_deref() != Some(sig.as_str()) {
             host::kv_set(SIG_KEY, &sig)?;
             host::kv_set("sync/complete", "0")?;
+        }
+        // "Sync now": a full import on the next task run, once per ticking.
+        match status::now_action(
+            status::requested(&config_json),
+            kv_text(status::NOW_SEEN_KEY).as_deref(),
+        ) {
+            NowAction::Trigger => {
+                host::kv_set("sync/complete", "0")?;
+                host::kv_set(status::NOW_SEEN_KEY, "1")?;
+            }
+            NowAction::Rearm => host::kv_set(status::NOW_SEEN_KEY, "0")?,
+            NowAction::Nothing => {}
         }
         Ok(PluginInfo {
             name: "vyasa-docs".to_owned(),
@@ -185,10 +206,17 @@ impl Guest for Docs {
     }
 
     fn register_routes() -> String {
-        serde_json::json!([{"method": "POST", "path": routes::WEBHOOK_PATH, "headers": routes::WEBHOOK_HEADERS}]).to_string()
+        serde_json::json!([{"method": "POST", "path": routes::WEBHOOK_PATH, "headers": routes::WEBHOOK_HEADERS}, {"method": "GET", "path": routes::STATUS_PATH, "headers": []}]).to_string()
     }
 
     fn handle_request(req: host::HttpRequest) -> Result<host::HttpResponse, String> {
+        if req.method == "GET" && req.path == routes::STATUS_PATH {
+            return Ok(host::HttpResponse {
+                status: 200,
+                headers: vec![("content-type".to_owned(), "application/json".to_owned())],
+                body: Status::parse(kv_text(status::STATUS_KEY).as_deref()).public_json(),
+            });
+        }
         let outcome = routes::handle(&req.method, &req.path, &req.headers, &req.body, &settings());
         if let Some(sha) = &outcome.pending {
             host::kv_set(PENDING_KEY, sha)?;
@@ -214,8 +242,15 @@ impl Guest for Docs {
         if !s.configured() {
             return Ok(());
         }
-        let cfg = s.sync_config()?;
         let now = host::now_ms();
+        let prev = Status::parse(kv_text(status::STATUS_KEY).as_deref());
+        let cfg = match s.sync_config() {
+            Ok(c) => c,
+            Err(e) => {
+                record_status(&Status::after(&prev, now, Err(&e)), &prev);
+                return Err(e);
+            }
+        };
         let pending = kv_text(PENDING_KEY).filter(|p| !p.is_empty());
         let incomplete = kv_text("sync/complete").as_deref() != Some("1");
         let last: u64 = kv_text("sync/last-run-ms")
@@ -236,7 +271,14 @@ impl Guest for Docs {
             max_requests: if long { 250 } else { 12 },
             max_writes: if long { 500 } else { 30 },
         };
-        let report = sync::run(&mut HostEnv, &cfg, pending.as_deref(), budget)?;
+        let report = match sync::run(&mut HostEnv, &cfg, pending.as_deref(), budget) {
+            Ok(r) => r,
+            Err(e) => {
+                record_status(&Status::after(&prev, now, Err(&e)), &prev);
+                return Err(e);
+            }
+        };
+        record_status(&Status::after(&prev, now, Ok(&report)), &prev);
         if report.finished && pending.is_some() {
             host::kv_delete(PENDING_KEY)?;
         }
@@ -270,7 +312,8 @@ impl Guest for Docs {
     }
 
     fn register_admin() -> String {
-        crate::settings::admin_form().to_string()
+        let line = Status::parse(kv_text(status::STATUS_KEY).as_deref()).line(host::now_ms());
+        crate::settings::admin_form_with(&line).to_string()
     }
 
     fn register_assets() -> String {

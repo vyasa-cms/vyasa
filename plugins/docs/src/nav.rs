@@ -84,17 +84,25 @@ fn node_of(v: &Value) -> Option<Node> {
 pub fn parse(payload: &Value) -> Option<Page> {
     let ctx = payload.get("context")?;
     let entry = ctx.get("entry")?;
+    let mut tree: Vec<Node> = ctx["tree"]
+        .as_array()
+        .map(|a| a.iter().filter_map(node_of).collect())
+        .unwrap_or_default();
+    // The tree is what the host could list; when it lacks the page itself
+    // (a tree read that failed or was cut short), the page still knows its
+    // own title, so its heading and trail do not vanish with it.
+    let id = entry["id"].as_str()?;
+    if !tree.iter().any(|n| n.id == id) {
+        tree.extend(node_of(entry));
+    }
     Some(Page {
-        id: entry["id"].as_str()?.to_owned(),
+        id: id.to_owned(),
         ancestors: entry["ancestors"]
             .as_array()?
             .iter()
             .filter_map(|a| a.as_str().map(str::to_owned))
             .collect(),
-        tree: ctx["tree"]
-            .as_array()
-            .map(|a| a.iter().filter_map(node_of).collect())
-            .unwrap_or_default(),
+        tree,
         toc: ctx["toc"]
             .as_array()
             .map(|a| {
@@ -656,6 +664,19 @@ mod tests {
         let mut v = payload("3", &["2"]);
         v["context"]["tree"][1]["fields"]["cards"] = json!(true);
         assert!(pager(&parse(&v).unwrap()).contains("href=\"/docs/guides\""));
+    }
+
+    #[test]
+    fn a_page_missing_from_the_tree_still_gets_its_heading() {
+        let mut v = payload("3", &["2"]);
+        v["context"]["entry"]["title"] = json!("Lonely");
+        v["context"]["entry"]["url"] = json!("/docs/lonely");
+        v["context"]["tree"] = json!([]);
+        let html = breadcrumbs(&parse(&v).unwrap(), "Docs");
+        assert!(
+            html.ends_with("<h1 class=\"docs-title\">Lonely</h1>"),
+            "{html}"
+        );
     }
 
     #[test]
