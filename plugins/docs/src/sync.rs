@@ -577,7 +577,7 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
     for pe in &p.entries {
         let hash_basis = match &pe.source {
             Source::Page(f) => format!("{FORMAT}:{}:{sig}", f.sha),
-            Source::Generated => format!("{FORMAT}:{}", generated_basis(pe, &p.entries)),
+            Source::Generated => format!("{FORMAT}:{}", generated_basis(pe, &p.entries, &infos)),
         };
         let hash = hex(&Sha256::digest(hash_basis.as_bytes()));
         if managed.get(&pe.planned.key) == Some(&hash) {
@@ -610,7 +610,40 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
                     &infos,
                 )
             }
-            Source::Generated => build_generated_entry(pe, &p, &hash),
+            Source::Generated => {
+                // A root with its own top-level index page shows that page.
+                let overview = match overview_of(pe, &p) {
+                    Some((o, f)) => {
+                        let body = match bodies.get(&f.sha) {
+                            Some(b) => b.clone(),
+                            None => {
+                                let url = github::raw_url(
+                                    &cx.cfg.repo,
+                                    &f.tree.commit,
+                                    &join_repo_path(&f.tree.folder, &f.path),
+                                );
+                                cx.get(&url, "text/plain", None)?.body
+                            }
+                        };
+                        Some(
+                            build_page_entry(
+                                cx.cfg,
+                                &f.tree.commit,
+                                f,
+                                &body,
+                                o,
+                                &p,
+                                &hash,
+                                &today,
+                                &infos,
+                            )
+                            .blocks_json,
+                        )
+                    }
+                    None => None,
+                };
+                build_generated_entry(pe, &p, &hash, &infos, overview)
+            }
         };
         match cx.env.put_entry(&entry)? {
             Put::Created => cx.report.created += 1,
@@ -696,6 +729,8 @@ fn join_repo_path(folder: &[String], path: &str) -> String {
 struct Scan {
     title: String,
     description: String,
+    /// The first paragraph as plain text: the card text when there is no description.
+    lead: String,
     slug: Option<String>,
     position: Option<i64>,
     hide: bool,
@@ -706,10 +741,19 @@ struct Scan {
 
 fn scan_page(src: &str) -> Scan {
     let split = frontmatter::split(src);
-    let h1 = blocks::convert(split.body, &Links::default()).h1;
+    let converted = blocks::convert(split.body, &Links::default());
+    let lead = converted
+        .blocks
+        .iter()
+        .find(|b| b["kind"] == "paragraph")
+        .and_then(|b| b["attrs"]["text"].as_str())
+        .map(plain_text)
+        .unwrap_or_default();
+    let h1 = converted.h1;
     Scan {
         title: split.front.title.clone().or(h1).unwrap_or_default(),
         description: split.front.description.clone().unwrap_or_default(),
+        lead,
         slug: split.front.slug.clone(),
         position: split.front.position,
         hide: split.front.hide,
@@ -722,7 +766,7 @@ fn scan_page(src: &str) -> Scan {
 impl Scan {
     fn to_json(&self) -> String {
         serde_json::json!({
-            "title": self.title, "description": self.description, "slug": self.slug, "position": self.position,
+            "title": self.title, "description": self.description, "lead": self.lead, "slug": self.slug, "position": self.position,
             "hide": self.hide, "version": self.version, "section": self.section, "updated": self.updated,
         })
         .to_string()
@@ -734,6 +778,7 @@ impl Scan {
         Some(Self {
             title: v["title"].as_str()?.to_owned(),
             description: opt("description").unwrap_or_default(),
+            lead: opt("lead").unwrap_or_default(),
             slug: opt("slug"),
             position: v["position"].as_i64(),
             hide: v["hide"].as_bool().unwrap_or(false),
@@ -968,9 +1013,13 @@ fn plan_signature(entries: &[PlannedEntry]) -> String {
     hex(&h.finalize())[..16].to_owned()
 }
 
-fn generated_basis(pe: &PlannedEntry, all: &[PlannedEntry]) -> String {
+fn generated_basis(
+    pe: &PlannedEntry,
+    all: &[PlannedEntry],
+    infos: &BTreeMap<String, Scan>,
+) -> String {
     let mut s = format!(
-        "{}|{}|{}|{}|{}",
+        "cards2|{}|{}|{}|{}|{}",
         pe.planned.key,
         pe.planned.slug,
         pe.planned.title,
@@ -981,7 +1030,18 @@ fn generated_basis(pe: &PlannedEntry, all: &[PlannedEntry]) -> String {
         .iter()
         .filter(|c| c.planned.parent_key.as_deref() == Some(pe.planned.key.as_str()))
     {
-        s.push_str(&format!("|{}={}", c.planned.site_path, c.planned.title));
+        s.push_str(&format!(
+            "|{}={}={}|{}",
+            c.planned.site_path,
+            c.planned.title,
+            card_text(c, infos),
+            c.planned.hide
+        ));
+        if let Source::Page(f) = &c.source {
+            if !f.path.contains('/') && plan::is_index(&f.path) {
+                s.push_str(&format!("|{}", f.sha));
+            }
+        }
     }
     s
 }
@@ -1139,32 +1199,112 @@ fn build_page_entry(
     }
 }
 
-fn build_generated_entry(pe: &PlannedEntry, p: &FullPlan, hash: &str) -> Entry {
-    let mut items = Vec::new();
-    for c in p.entries.iter().filter(|c| {
-        c.planned.parent_key.as_deref() == Some(pe.planned.key.as_str()) && !c.planned.hide
-    }) {
-        items.push(serde_json::json!({"kind": "paragraph", "attrs": {"text": format!("<a href=\"{}\">{}</a>", blocks::esc(&c.planned.site_path), blocks::esc(&c.planned.title))}, "children": []}));
+/// Inline markup removed, entities left escaped, one line: for card text.
+fn plain_text(html: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' if in_tag => in_tag = false,
+            _ if in_tag => {}
+            '\n' | '\r' => out.push(' '),
+            _ => out.push(c),
+        }
     }
-    let intro = if pe.kind_version_root {
-        format!("Documentation for {}.", blocks::esc(&pe.planned.title))
-    } else {
-        format!("In this section: {}.", blocks::esc(&pe.planned.title))
+    let one = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut t: String = one.chars().take(200).collect();
+    if one.chars().count() > 200 {
+        t.push('\u{2026}');
+    }
+    t
+}
+
+/// The text a card shows under a child's title: its front-matter
+/// description, else its first paragraph. Empty for a generated page.
+fn card_text(c: &PlannedEntry, infos: &BTreeMap<String, Scan>) -> String {
+    let Source::Page(f) = &c.source else {
+        return String::new();
     };
-    let mut blocks =
-        vec![serde_json::json!({"kind": "paragraph", "attrs": {"text": intro}, "children": []})];
-    if !items.is_empty() {
-        blocks.push(
-            serde_json::json!({"kind": "list", "attrs": {"ordered": false}, "children": items}),
-        );
+    infos.get(&file_key(f)).map_or(String::new(), |s| {
+        if s.description.trim().is_empty() {
+            s.lead.clone()
+        } else {
+            s.description.trim().chars().take(300).collect()
+        }
+    })
+}
+
+/// A version or section root shows the tree's top-level `index.md` / `README.md`
+/// as its page, when the tree has one.
+fn overview_of<'a>(pe: &PlannedEntry, p: &'a FullPlan) -> Option<(&'a PlannedEntry, &'a SrcFile)> {
+    if !(pe.kind_version_root || pe.kind_section_root) {
+        return None;
     }
+    p.entries.iter().find_map(|c| match &c.source {
+        Source::Page(f)
+            if c.planned.parent_key.as_deref() == Some(pe.planned.key.as_str())
+                && !f.path.contains('/')
+                && plan::is_index(&f.path) =>
+        {
+            Some((c, f))
+        }
+        _ => None,
+    })
+}
+
+/// One list item per visible child: the title as a link, then its description.
+fn card_blocks(
+    pe: &PlannedEntry,
+    p: &FullPlan,
+    infos: &BTreeMap<String, Scan>,
+) -> Vec<serde_json::Value> {
+    let items: Vec<serde_json::Value> = p
+        .entries
+        .iter()
+        .filter(|c| {
+            c.planned.parent_key.as_deref() == Some(pe.planned.key.as_str()) && !c.planned.hide
+        })
+        .map(|c| {
+            let desc = card_text(c, infos);
+            let mut text = format!(
+                "<a href=\"{}\"><strong>{}</strong></a>",
+                blocks::esc(&c.planned.site_path),
+                blocks::esc(&c.planned.title)
+            );
+            if !desc.is_empty() {
+                text.push_str(" \u{2014} ");
+                text.push_str(&blocks::esc(&desc));
+            }
+            serde_json::json!({"kind": "paragraph", "attrs": {"text": text}, "children": []})
+        })
+        .collect();
+    if items.is_empty() {
+        return vec![
+            serde_json::json!({"kind": "paragraph", "attrs": {"text": ""}, "children": []}),
+        ];
+    }
+    vec![serde_json::json!({"kind": "list", "attrs": {"ordered": false}, "children": items})]
+}
+
+/// `overview`: the blocks of the tree's top-level index page, when the root has one.
+fn build_generated_entry(
+    pe: &PlannedEntry,
+    p: &FullPlan,
+    hash: &str,
+    infos: &BTreeMap<String, Scan>,
+    overview: Option<String>,
+) -> Entry {
+    let cards = overview.is_none();
+    let blocks_json =
+        overview.unwrap_or_else(|| serde_json::Value::Array(card_blocks(pe, p, infos)).to_string());
     Entry {
         key: pe.planned.key.clone(),
         parent_key: pe.planned.parent_key.clone(),
         slug: pe.planned.slug.clone(),
         title: pe.planned.title.clone(),
         excerpt: String::new(),
-        blocks_json: serde_json::Value::Array(blocks).to_string(),
+        blocks_json,
         position: pe.planned.position,
         terms: terms_for(&pe.version),
         fields_json: {
@@ -1178,6 +1318,9 @@ fn build_generated_entry(pe: &PlannedEntry, p: &FullPlan, hash: &str) -> Entry {
             .unwrap_or_default();
             if pe.kind_section_root {
                 f["section_root"] = true.into();
+            }
+            if cards {
+                f["cards"] = true.into();
             }
             f.to_string()
         },
@@ -1586,9 +1729,10 @@ mod tests {
         let b = budget(&f);
         let report = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
         assert!(report.finished);
-        assert_eq!(report.updated, 1, "{report:?}");
+        // The page itself, and the generated Guides page that shows its first paragraph.
+        assert_eq!(report.updated, 2, "{report:?}");
         assert_eq!(report.created, 0);
-        assert!(report.unchanged >= 2);
+        assert!(report.unchanged >= 1);
         // intro links to install; its own text did not change, nor did any path.
         assert!(f.borrow().entries["main:guides/install.md"]
             .0
@@ -1901,6 +2045,98 @@ mod tests {
         let calls = &fk.entries["s:engine/0.2:calls.md"].0;
         assert_eq!(calls.parent_key.as_deref(), Some("@section/engine/0.2"));
         assert_eq!(calls.terms, ["doc-section:engine-0-2"]);
+    }
+
+    fn engine_section(files: Files) -> (RefCell<Fake>, Config) {
+        let f = fake_with(files);
+        let mut c = cfg();
+        c.sections = vec![crate::settings::SectionDef {
+            slug: "engine/0.2".into(),
+            title: "Engine 0.2".into(),
+            folder: vec!["api".into()],
+            git_ref: None,
+        }];
+        (f, c)
+    }
+
+    #[test]
+    fn a_root_without_an_index_page_lists_its_children_as_cards() {
+        let mut files = repo_one();
+        files.insert(
+            "api/start/quick.md".into(),
+            "---\ndescription: Run a first query in two minutes.\n---\n# Quickstart\n\nIgnored body.\n".into(),
+        );
+        files.insert(
+            "api/start/second.md".into(),
+            "# Second steps\n\nLoad a *Parquet* file, then <b>query</b> it.\n\nMore.\n".into(),
+        );
+        let (f, c) = engine_section(files);
+        let b = budget(&f);
+        assert!(run(&mut Wrap(&f), &c, None, b).unwrap().finished);
+        let fk = f.borrow();
+        let group = fk
+            .entries
+            .iter()
+            .find(|(k, _)| k.starts_with("@dir/") && k.ends_with("/start"))
+            .map(|(_, v)| &v.0)
+            .expect("the folder gets a generated page");
+        assert!(group.fields_json.contains("\"cards\":true"));
+        let text = &group.blocks_json;
+        assert!(!text.contains("In this section"), "{text}");
+        assert!(text.contains("Quickstart"), "{text}");
+        assert!(text.contains("Run a first query in two minutes."), "{text}");
+        assert!(!text.contains("Ignored body"), "description wins: {text}");
+        assert!(text.contains("Second steps"), "{text}");
+        assert!(
+            text.contains("Load a Parquet file, then query it."),
+            "no description: the first paragraph, as plain text: {text}"
+        );
+        assert!(!text.contains("More."), "{text}");
+        // The root has no index page either: its children are the cards.
+        let root = &fk.entries["@section/engine/0.2"].0;
+        assert!(root.fields_json.contains("\"cards\":true"));
+        assert!(root.blocks_json.contains("Start"), "{}", root.blocks_json);
+        assert!(!root.blocks_json.contains("In this section"));
+    }
+
+    #[test]
+    fn a_root_with_an_index_page_shows_it_and_is_not_a_card_list() {
+        let mut files = repo_one();
+        files.insert(
+            "api/index.md".into(),
+            "# Engine docs\n\nWelcome to the overview text.\n".into(),
+        );
+        files.insert("api/calls.md".into(), "# Calls\n".into());
+        let (f, c) = engine_section(files);
+        let b = budget(&f);
+        assert!(run(&mut Wrap(&f), &c, None, b).unwrap().finished);
+        let fk = f.borrow();
+        let root = &fk.entries["@section/engine/0.2"].0;
+        assert!(
+            root.blocks_json.contains("Welcome to the overview text."),
+            "{}",
+            root.blocks_json
+        );
+        assert!(!root.fields_json.contains("cards"), "{}", root.fields_json);
+        assert!(!root.blocks_json.contains("Documentation for"));
+    }
+
+    #[test]
+    fn a_folder_with_an_index_page_renders_that_page() {
+        let mut files = repo_one();
+        files.insert("api/index.md".into(), "# Top\n".into());
+        files.insert(
+            "api/guides/index.md".into(),
+            "# Guides\n\nThe guides intro text.\n".into(),
+        );
+        files.insert("api/guides/one.md".into(), "# One\n".into());
+        let (f, c) = engine_section(files);
+        let b = budget(&f);
+        assert!(run(&mut Wrap(&f), &c, None, b).unwrap().finished);
+        let fk = f.borrow();
+        let guides = &fk.entries["s:engine/0.2:guides/index.md"].0;
+        assert!(guides.blocks_json.contains("The guides intro text."));
+        assert!(!guides.fields_json.contains("cards"));
     }
 
     #[test]

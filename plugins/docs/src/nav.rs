@@ -34,6 +34,8 @@ pub struct Node {
     pub section_root: bool,
     /// Field `section_label`.
     pub label: String,
+    /// Field `cards`: the page is a generated list of its children.
+    pub cards: bool,
 }
 
 /// One heading of the current page.
@@ -73,6 +75,7 @@ fn node_of(v: &Value) -> Option<Node> {
         version_root: f["version_root"].as_bool().unwrap_or(false),
         section_root: f["section_root"].as_bool().unwrap_or(false),
         label: f["section_label"].as_str().unwrap_or("").to_owned(),
+        cards: f["cards"].as_bool().unwrap_or(false),
     })
 }
 
@@ -148,6 +151,23 @@ impl Page {
             .chain(std::iter::once(self.id.as_str()))
             .filter_map(|id| self.node(id))
             .rfind(|n| n.section_root)
+    }
+
+    /// Whether `n` hangs anywhere under `ancestor`.
+    fn is_below(&self, n: &Node, ancestor: &str) -> bool {
+        let mut cur = n.parent.as_deref();
+        let mut hops = 0;
+        while let Some(id) = cur {
+            if id == ancestor {
+                return true;
+            }
+            hops += 1;
+            if hops > 64 {
+                break;
+            }
+            cur = self.node(id).and_then(|p| p.parent.as_deref());
+        }
+        false
     }
 
     /// The nodes the sidebar lists at its top level.
@@ -341,7 +361,16 @@ pub fn pager(page: &Page) -> String {
         .checked_sub(1)
         .and_then(|p| flat.get(p))
         .map(|n| link(n, "prev", "Previous"));
-    let next = flat.get(i + 1).map(|n| link(n, "next", "Next"));
+    // A page that is only a list of its children (shown as cards) has them
+    // one click away: Next starts at the page after its subtree.
+    let after = if flat[i].cards {
+        flat.iter()
+            .skip(i + 1)
+            .find(|n| !page.is_below(n, &flat[i].id))
+    } else {
+        flat.get(i + 1)
+    };
+    let next = after.map(|n| link(n, "next", "Next"));
     if prev.is_none() && next.is_none() {
         return String::new();
     }
@@ -607,6 +636,26 @@ mod tests {
         );
         let first = parse(&payload("1", &[])).unwrap();
         assert!(!pager(&first).contains("rel=\"prev\""));
+    }
+
+    #[test]
+    fn a_cards_page_pages_on_to_the_page_after_its_children() {
+        // Guides is only a list of Install and Deploy: Next must not be Install.
+        let mut v = payload("2", &[]);
+        v["context"]["tree"][1]["fields"]["cards"] = json!(true);
+        let html = pager(&parse(&v).unwrap());
+        assert!(!html.contains("/docs/guides/install"), "{html}");
+        assert!(
+            !html.contains("rel=\"next\""),
+            "Guides is the last top page: {html}"
+        );
+        // A page that has its own text keeps its children as Next.
+        let plain = pager(&parse(&payload("2", &[])).unwrap());
+        assert!(plain.contains("href=\"/docs/guides/install\""), "{plain}");
+        // The first child still goes back to the cards page.
+        let mut v = payload("3", &["2"]);
+        v["context"]["tree"][1]["fields"]["cards"] = json!(true);
+        assert!(pager(&parse(&v).unwrap()).contains("href=\"/docs/guides\""));
     }
 
     #[test]
