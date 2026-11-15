@@ -244,6 +244,8 @@ Two independent mechanisms, because each covers the other's gap:
 
 - **Rate limiting** — in-process per-client sliding window. Buckets: `auth`
   (10/60s, login and user creation), `write` (60/60s, any mutating method),
+  `api-key` (600/60s, any request with `Authorization: Bearer vy_...`, so a
+  deploy or sync job does not use up a browser's `write` bucket),
   `global` (300/60s), plus the registration and reset buckets below.
   Single-node; a multi-instance deployment needs a shared store.
 - **Lockout** — progressive delay per `(account, IP)`: three free attempts,

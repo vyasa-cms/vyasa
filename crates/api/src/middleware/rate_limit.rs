@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use axum::extract::{ConnectInfo, Request, State};
-use axum::http::{Method, StatusCode};
+use axum::http::{HeaderMap, Method, StatusCode};
 use axum::middleware::Next;
 use axum::response::{IntoResponse, Response};
 
@@ -96,6 +96,12 @@ impl RateLimiter {
 /// Windows kept before expired ones are swept out.
 const SWEEP_ABOVE: usize = 10_000;
 
+/// Requests carrying an API key one client address may make a minute,
+/// whatever the method. Picked by [`bucket_for`] from the header alone, so
+/// a made-up key spends this bucket (not the key's) and is still limited
+/// per address.
+pub const API_KEY: &str = "api-key";
+
 /// Registrations one client address may make an hour (phase 98). Checked
 /// by the handler, which knows a request is a well-formed registration.
 pub const REGISTER: &str = "register";
@@ -180,7 +186,7 @@ impl RateLimiter {
 ///
 /// `(bucket, max requests, window seconds)`. The last four are not picked
 /// by [`bucket_for`]: handlers check them where the key is known.
-pub const DEFAULT_LIMITS: [(&str, u32, u64); 8] = [
+pub const DEFAULT_LIMITS: [(&str, u32, u64); 9] = [
     // Credential endpoints: enough for a person who mistypes, not enough to
     // grind through a password list.
     ("auth", 10, 60),
@@ -190,18 +196,33 @@ pub const DEFAULT_LIMITS: [(&str, u32, u64); 8] = [
     ("write", 60, 60),
     // Everything else, as a backstop against scraping.
     ("global", 300, 60),
+    // Requests that carry an API key (`Authorization: Bearer vy_...`): a
+    // deploy or sync job makes many writes in a burst and must not share
+    // the 60/min `write` bucket with a person's browser.
+    (API_KEY, 600, 60),
     (REGISTER, 5, 3600),
     (REGISTER_RESEND, 5, 3600),
     (CONFIRMATION_MAIL, 3, 3600),
     (RESET_MAIL, 3, 3600),
 ];
 
+/// Whether the request carries an API key (`Authorization: Bearer vy_...`).
+fn has_api_key(headers: &HeaderMap) -> bool {
+    headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .is_some_and(|t| t.starts_with("vy_"))
+}
+
 /// Picks the bucket for a request. Most specific wins.
-fn bucket_for(method: &Method, path: &str) -> &'static str {
+fn bucket_for(method: &Method, path: &str, headers: &HeaderMap) -> &'static str {
     if path.starts_with("/api/v1/auth/login")
         || path.starts_with("/api/v1/users") && method == Method::POST
     {
         "auth"
+    } else if has_api_key(headers) {
+        API_KEY
     } else if path == "/form" && method == Method::POST {
         "form"
     } else if matches!(
@@ -230,7 +251,7 @@ pub async fn rate_limit_middleware(
         .get::<ConnectInfo<std::net::SocketAddr>>()
         .map(|ci| ci.0.ip());
     let ip = crate::client_ip::for_request(&state, peer, req.headers());
-    let bucket = bucket_for(req.method(), req.uri().path());
+    let bucket = bucket_for(req.method(), req.uri().path(), req.headers());
     if !state.rate_limiter.check(bucket, &ip) {
         return too_many_requests();
     }
@@ -415,11 +436,51 @@ mod tests {
 
     #[test]
     fn login_is_bucketed_more_tightly_than_reads() {
-        assert_eq!(bucket_for(&Method::POST, "/api/v1/auth/login"), "auth");
-        assert_eq!(bucket_for(&Method::POST, "/api/v1/posts"), "write");
-        assert_eq!(bucket_for(&Method::DELETE, "/api/v1/posts/1"), "write");
-        assert_eq!(bucket_for(&Method::GET, "/api/v1/posts"), "global");
-        assert_eq!(bucket_for(&Method::GET, "/"), "global");
+        let none = HeaderMap::new();
+        assert_eq!(
+            bucket_for(&Method::POST, "/api/v1/auth/login", &none),
+            "auth"
+        );
+        assert_eq!(bucket_for(&Method::POST, "/api/v1/posts", &none), "write");
+        assert_eq!(
+            bucket_for(&Method::DELETE, "/api/v1/posts/1", &none),
+            "write"
+        );
+        assert_eq!(bucket_for(&Method::GET, "/api/v1/posts", &none), "global");
+        assert_eq!(bucket_for(&Method::GET, "/", &none), "global");
+    }
+
+    fn bearer(token: &str) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        h.insert(
+            axum::http::header::AUTHORIZATION,
+            format!("Bearer {token}").parse().unwrap(),
+        );
+        h
+    }
+
+    #[test]
+    fn a_request_with_an_api_key_has_its_own_bucket() {
+        let key = bearer("vy_abc");
+        assert_eq!(bucket_for(&Method::POST, "/api/v1/posts", &key), API_KEY);
+        assert_eq!(bucket_for(&Method::GET, "/api/v1/posts", &key), API_KEY);
+        // Not an API key: a session or another scheme keeps its bucket.
+        assert_eq!(
+            bucket_for(&Method::POST, "/api/v1/posts", &bearer("eyJ")),
+            "write"
+        );
+        // Credential endpoints stay strict whatever the header says.
+        assert_eq!(
+            bucket_for(&Method::POST, "/api/v1/auth/login", &key),
+            "auth"
+        );
+        // Exhausting the write bucket leaves the key's bucket untouched.
+        let limiter = RateLimiter::new(DEFAULT_LIMITS.to_vec());
+        for _ in 0..60 {
+            assert!(limiter.check("write", "9.9.9.9"));
+        }
+        assert!(!limiter.check("write", "9.9.9.9"));
+        assert!(limiter.check(API_KEY, "9.9.9.9"));
     }
 
     #[test]
