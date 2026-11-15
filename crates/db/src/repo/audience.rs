@@ -377,3 +377,245 @@ impl AudienceRepo {
         Ok(())
     }
 }
+
+/// A server-side redirect (`/go/<name>`).
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct AudienceLink {
+    /// The name after `/go/`.
+    pub name: String,
+    /// Where it sends the visitor.
+    pub url: String,
+    /// Whether a click also counts as a conversion.
+    pub conversion: bool,
+}
+
+/// One day of the traffic chart: views, unique visitors and bot hits.
+#[derive(Debug, Clone, Serialize, sqlx::FromRow)]
+pub struct DayTraffic {
+    /// Calendar day (UTC).
+    pub day: NaiveDate,
+    /// Human page views.
+    pub views: i64,
+    /// Cookieless unique visitors that day.
+    pub visitors: i64,
+    /// Requests counted as bots.
+    pub bots: i64,
+}
+
+/// Dimensions of `audience_counts`. A closed set, so the table's `dim` never holds free text from a request.
+pub mod dim {
+    /// A crawler or tool request (key `""`).
+    pub const BOT: &str = "bot";
+    /// A first visit of the day by a visitor (key `""`).
+    pub const VISITOR: &str = "visitor";
+    /// Device class (`desktop`, `mobile`, `tablet`).
+    pub const DEVICE: &str = "device";
+    /// Browser family.
+    pub const BROWSER: &str = "browser";
+    /// `utm_source`.
+    pub const UTM_SOURCE: &str = "utm_source";
+    /// `utm_medium`.
+    pub const UTM_MEDIUM: &str = "utm_medium";
+    /// `utm_campaign`.
+    pub const UTM_CAMPAIGN: &str = "utm_campaign";
+    /// The first page of a visit (a view with no same-site referrer).
+    pub const ENTRY: &str = "entry";
+    /// A 404: key the path, extra the referrer host.
+    pub const NOT_FOUND: &str = "notfound";
+    /// An internal `/search` term.
+    pub const SEARCH: &str = "search";
+    /// A click through `/go/<name>`.
+    pub const OUTBOUND: &str = "outbound";
+    /// A conversion: a form or newsletter signup, or a `/go/` link marked as one.
+    pub const CONVERSION: &str = "conversion";
+}
+
+impl AudienceRepo {
+    /// Adds `by` to the counter of `dim`/`key`/`extra` for today.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn count(&self, dim: &str, key: &str, extra: &str, by: i64) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO audience_counts (day, dim, key, extra, n)
+             VALUES (CURRENT_DATE, $1, $2, $3, $4)
+             ON CONFLICT (day, dim, key, extra)
+             DO UPDATE SET n = audience_counts.n + EXCLUDED.n",
+        )
+        .bind(dim)
+        .bind(key)
+        .bind(extra)
+        .bind(by)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("count {dim}: {e}")))?;
+        Ok(())
+    }
+
+    /// Notes a visitor hash for today. True when it was new today (the caller counts one unique visitor). Rows of
+    /// earlier days are deleted here, so no hash outlives its day.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn first_visit_today(&self, hash: &[u8]) -> Result<bool, AppError> {
+        sqlx::query("DELETE FROM audience_visitors WHERE day < CURRENT_DATE")
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::db(format!("purge visitors: {e}")))?;
+        let done = sqlx::query(
+            "INSERT INTO audience_visitors (day, hash) VALUES (CURRENT_DATE, $1)
+             ON CONFLICT DO NOTHING",
+        )
+        .bind(hash)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("note visitor: {e}")))?;
+        Ok(done.rows_affected() == 1)
+    }
+
+    /// Daily views, visitors and bot hits for the last `days` days, oldest first.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn daily_traffic(&self, days: i32) -> Result<Vec<DayTraffic>, AppError> {
+        sqlx::query_as(
+            "SELECT d.day,
+                    COALESCE(v.views, 0)::BIGINT    AS views,
+                    COALESCE(c.visitors, 0)::BIGINT AS visitors,
+                    COALESCE(c.bots, 0)::BIGINT     AS bots
+             FROM (SELECT day FROM page_views WHERE day > CURRENT_DATE - $1::INT
+                   UNION SELECT day FROM audience_counts WHERE day > CURRENT_DATE - $1::INT) d
+             LEFT JOIN (SELECT day, sum(views) AS views FROM page_views GROUP BY day) v ON v.day = d.day
+             LEFT JOIN (SELECT day,
+                               sum(n) FILTER (WHERE dim = 'visitor') AS visitors,
+                               sum(n) FILTER (WHERE dim = 'bot')     AS bots
+                        FROM audience_counts GROUP BY day) c ON c.day = d.day
+             ORDER BY d.day",
+        )
+        .bind(days)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("daily traffic: {e}")))
+    }
+
+    /// The most counted keys of one dimension over the last `days` days.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn top_of(
+        &self,
+        dim: &str,
+        days: i32,
+        limit: i64,
+    ) -> Result<Vec<(String, String, i64)>, AppError> {
+        sqlx::query_as(
+            "SELECT key, extra, sum(n)::BIGINT AS total FROM audience_counts
+             WHERE dim = $1 AND day > CURRENT_DATE - $2::INT AND key <> ''
+             GROUP BY key, extra ORDER BY total DESC, key LIMIT $3",
+        )
+        .bind(dim)
+        .bind(days)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("top {dim}: {e}")))
+    }
+
+    /// Views of one path per day over the last `days` days, oldest first.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn page_trend(
+        &self,
+        path: &str,
+        days: i32,
+    ) -> Result<Vec<(NaiveDate, i64)>, AppError> {
+        sqlx::query_as(
+            "SELECT day, sum(views)::BIGINT FROM page_views
+             WHERE path = $1 AND day > CURRENT_DATE - $2::INT
+             GROUP BY day ORDER BY day",
+        )
+        .bind(path)
+        .bind(days)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("page trend: {e}")))
+    }
+
+    /// Per-path views of the last `days` days against the `days` before them: `(path, now, before)`.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn path_trends(
+        &self,
+        days: i32,
+        limit: i64,
+    ) -> Result<Vec<(String, i64, i64)>, AppError> {
+        sqlx::query_as(
+            "SELECT path,
+                    COALESCE(sum(views) FILTER (WHERE day > CURRENT_DATE - $1::INT), 0)::BIGINT AS recent,
+                    COALESCE(sum(views) FILTER (WHERE day <= CURRENT_DATE - $1::INT), 0)::BIGINT AS prior
+             FROM page_views WHERE day > CURRENT_DATE - 2 * $1::INT
+             GROUP BY path ORDER BY recent DESC, path LIMIT $2",
+        )
+        .bind(days)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("path trends: {e}")))
+    }
+
+    /// The redirect named `name`.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn link(&self, name: &str) -> Result<Option<AudienceLink>, AppError> {
+        sqlx::query_as("SELECT name, url, conversion FROM audience_links WHERE name = $1")
+            .bind(name)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AppError::db(format!("link: {e}")))
+    }
+
+    /// Every redirect, by name.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn links(&self) -> Result<Vec<AudienceLink>, AppError> {
+        sqlx::query_as("SELECT name, url, conversion FROM audience_links ORDER BY name")
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| AppError::db(format!("links: {e}")))
+    }
+
+    /// Creates or replaces the redirect `name`.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn set_link(&self, name: &str, url: &str, conversion: bool) -> Result<(), AppError> {
+        sqlx::query(
+            "INSERT INTO audience_links (name, url, conversion) VALUES ($1, $2, $3)
+             ON CONFLICT (name) DO UPDATE SET url = EXCLUDED.url, conversion = EXCLUDED.conversion",
+        )
+        .bind(name)
+        .bind(url)
+        .bind(conversion)
+        .execute(&self.pool)
+        .await
+        .map_err(|e| AppError::db(format!("set link: {e}")))?;
+        Ok(())
+    }
+
+    /// Deletes the redirect `name`.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn delete_link(&self, name: &str) -> Result<(), AppError> {
+        sqlx::query("DELETE FROM audience_links WHERE name = $1")
+            .bind(name)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::db(format!("delete link: {e}")))?;
+        Ok(())
+    }
+}

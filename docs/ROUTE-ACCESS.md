@@ -25,6 +25,9 @@ plugin's own route, public, decided by the plugin.
 | GET | /ai/providers/{provider}/catalog | manage_options |
 | POST | /ai/providers/{provider}/test | manage_options |
 | GET | /ai/usage | manage_options |
+| GET | /analytics/links | edit_others |
+| DELETE | /analytics/links/{name} | manage_options |
+| PUT | /analytics/links/{name} | manage_options |
 | GET | /analytics/summary | edit_others |
 | GET | /api-keys | authenticated |
 | POST | /api-keys | authenticated |

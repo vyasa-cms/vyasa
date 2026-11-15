@@ -847,6 +847,13 @@ fn ai_routes() -> Guarded {
         .at("/analytics/summary", |r| {
             r.get(Cap(EditOthers), analytics::summary)
         })
+        .at("/analytics/links", |r| {
+            r.get(Cap(EditOthers), analytics::links)
+        })
+        .at("/analytics/links/{name}", |r| {
+            r.put(Cap(ManageOptions), analytics::put_link)
+                .delete(Cap(ManageOptions), analytics::delete_link)
+        })
         .at("/audience/submissions", |r| {
             r.get(Cap(EditOthers), audience::submissions)
         })

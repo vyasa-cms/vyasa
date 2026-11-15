@@ -147,6 +147,7 @@ const BLIND_ROUTES: &[(&str, &str)] = &[
     ("/ai/providers/{provider}", "PUT"),
     ("/ai/providers/{provider}/catalog", "GET"),
     ("/ai/providers/{provider}/test", "POST"),
+    ("/analytics/links/{name}", "PUT"),
     ("/api-keys", "POST"),
     ("/api-keys/{id}", "DELETE"),
     ("/audience/submissions/{id}", "DELETE"),
