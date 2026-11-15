@@ -153,6 +153,23 @@ pub async fn activate(
             .ok();
             return Ok(false);
         }
+        Ok(Err(reject)) if matches!(mode, crate::plugin_surface::Collect::Boot) => {
+            // A settings save (and a restart) that the plugin refuses leaves it running on the settings it
+            // had: its `init` keeps them in its own store, and the call that refused changed nothing the next
+            // call needs. `errored` here was sticky: `load` refuses an errored plugin, so no later settings
+            // save could run `init` again, and the docs import of a staging deploy (one save per changed key,
+            // each rewriting the plugin's stored settings) left vyasa-docs dead until an administrator
+            // re-enabled it. Degraded keeps it serving and heals on the next clean `init`.
+            tracing::warn!("plugin {} rejected config: {reject}", row.name);
+            repo.set_status_reason(
+                row.id,
+                "degraded",
+                &format!("settings not applied, running on its previous settings: {reject}"),
+            )
+            .await
+            .ok();
+            return Ok(false);
+        }
         Ok(Err(reject)) => {
             tracing::warn!("plugin {} rejected config: {reject}", row.name);
             repo.set_status_reason(
