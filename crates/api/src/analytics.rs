@@ -13,7 +13,7 @@
 //!   day's first visit arrives. A restart mid-day starts a new secret, so a
 //!   visitor can count twice that day, never twice across days.
 //!
-//! Not counted at all: requests carrying `X-Krishiv-Internal: 1` (link
+//! Not counted at all: requests carrying `X-Vyasa-Internal: 1` (link
 //! checks, staging QA), `DNT: 1` or `Sec-GPC: 1`, and anyone holding a
 //! session cookie (a signed-in author or admin). Bots are filtered by the
 //! user agents they announce; the ones that lie are noise this feature can
@@ -98,7 +98,7 @@ pub(crate) fn opted_out(headers: &HeaderMap) -> bool {
             .and_then(|v| v.to_str().ok())
             .is_some_and(|v| v.trim() == "1")
     };
-    is_one("x-krishiv-internal")
+    is_one("x-vyasa-internal")
         || is_one("dnt")
         || is_one("sec-gpc")
         || headers
@@ -392,7 +392,7 @@ mod tests {
         assert!(!super::opted_out(&h(&[("user-agent", "Mozilla/5.0")])));
         assert!(super::opted_out(&h(&[("dnt", "1")])));
         assert!(super::opted_out(&h(&[("sec-gpc", "1")])));
-        assert!(super::opted_out(&h(&[("x-krishiv-internal", "1")])));
+        assert!(super::opted_out(&h(&[("x-vyasa-internal", "1")])));
         assert!(!super::opted_out(&h(&[("dnt", "0")])));
         let cookie = format!("a=b; {}=token", crate::middleware::SESSION_COOKIE);
         assert!(super::opted_out(&h(&[("cookie", cookie.as_str())])));

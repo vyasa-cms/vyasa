@@ -22,7 +22,7 @@ A `GET` that leaves with an HTML `200` on a public path (not `/admin`, `/api`, `
 
 ## What is never counted
 
-- Requests with `X-Krishiv-Internal: 1` (link checks, staging QA, our own tools).
+- Requests with `X-Vyasa-Internal: 1` (link checks, staging QA, our own tools).
 - Requests with `DNT: 1` or `Sec-GPC: 1`.
 - Anyone holding a session cookie (a signed-in author or admin).
 

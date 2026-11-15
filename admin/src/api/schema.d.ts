@@ -222,6 +222,57 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/analytics/links": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * `GET /api/v1/analytics/links` — the `/go/<name>` redirect table.
+         * @description # Errors
+         *
+         *     401 when unauthenticated; 403 below Editor.
+         */
+        get: operations["links"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/analytics/links/{name}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * `PUT /api/v1/analytics/links/{name}` — create or replace a redirect.
+         * @description # Errors
+         *
+         *     422 for a name outside `a-z0-9-_` or a target that is not an absolute http(s) URL; 403 without
+         *     `ManageOptions`.
+         */
+        put: operations["put_link"];
+        post?: never;
+        /**
+         * `DELETE /api/v1/analytics/links/{name}` — remove a redirect.
+         * @description # Errors
+         *
+         *     403 without `ManageOptions`.
+         */
+        delete: operations["delete_link"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/analytics/summary": {
         parameters: {
             query?: never;
@@ -3886,6 +3937,25 @@ export interface components {
         };
         /** @description Everything the dashboard card needs in one call. */
         AnalyticsSummary: {
+            /**
+             * Format: int64
+             * @description Requests counted as bots over the range; they are not part of `total`.
+             */
+            bots: number;
+            /** @description Browser families. */
+            browsers: components["schemas"]["CountEntry"][];
+            /** @description Conversions (forms, newsletter, `/go/` links marked as one). */
+            conversions: components["schemas"]["CountEntry"][];
+            /** @description Device classes. */
+            devices: components["schemas"]["CountEntry"][];
+            /** @description First pages of visits. */
+            entry_pages: components["schemas"]["CountEntry"][];
+            /** @description 404 paths; `detail` is the referrer host. */
+            not_found: components["schemas"]["CountEntry"][];
+            /** @description Clicks through `/go/<name>`. */
+            outbound: components["schemas"]["CountEntry"][];
+            /** @description Internal search terms. */
+            searches: components["schemas"]["CountEntry"][];
             /** @description Daily series, oldest first. */
             series: components["schemas"]["DayViews"][];
             /**
@@ -3902,6 +3972,21 @@ export interface components {
              * @description Views over the whole range.
              */
             total: number;
+            /** @description Per day: views, cookieless unique visitors and bot hits. */
+            traffic: components["schemas"]["DayTraffic"][];
+            /** @description The busiest paths with the same-length period before, for a trend. */
+            trends: components["schemas"]["PathTrend"][];
+            /** @description `utm_campaign` values. */
+            utm_campaigns: components["schemas"]["CountEntry"][];
+            /** @description `utm_medium` values. */
+            utm_mediums: components["schemas"]["CountEntry"][];
+            /** @description `utm_source` values. */
+            utm_sources: components["schemas"]["CountEntry"][];
+            /**
+             * Format: int64
+             * @description Unique visitors over the range (the sum of each day's count).
+             */
+            visitors: number;
         };
         /** @description Error body returned by every failing endpoint. */
         ApiErrorBody: {
@@ -4302,6 +4387,18 @@ export interface components {
              */
             Set: number;
         };
+        /** @description A counted value of one dimension. */
+        CountEntry: {
+            /**
+             * Format: int64
+             * @description The count.
+             */
+            count: number;
+            /** @description A second part, empty unless the dimension has one (a 404's referrer host). */
+            detail: string;
+            /** @description The value (a device class, a search term, a path ...). */
+            name: string;
+        };
         /** @description Request for submitting a comment (public). */
         CreateCommentRequest: {
             /** @description Email. */
@@ -4462,6 +4559,26 @@ export interface components {
             x: number;
             /** Format: double */
             y: number;
+        };
+        /** @description One day of traffic. */
+        DayTraffic: {
+            /**
+             * Format: int64
+             * @description Bot hits.
+             */
+            bots: number;
+            /** @description Calendar day, `YYYY-MM-DD`. */
+            day: string;
+            /**
+             * Format: int64
+             * @description Human page views.
+             */
+            views: number;
+            /**
+             * Format: int64
+             * @description Cookieless unique visitors.
+             */
+            visitors: number;
         };
         /** @description One day on the chart. */
         DayViews: {
@@ -4729,6 +4846,13 @@ export interface components {
             /** @description Declared language, empty when none. */
             lang: string;
         };
+        /** @description A redirect of the `/go/<name>` table. */
+        LinkBody: {
+            /** @description Whether a click also counts as a conversion. */
+            conversion?: boolean;
+            /** @description Absolute `http` or `https` target. */
+            url: string;
+        };
         /** @description The stored result of the last check. */
         LinkCheck: {
             /** @description Links that did not answer 2xx/3xx. */
@@ -4740,6 +4864,15 @@ export interface components {
              * @description When the links were last fetched.
              */
             checked_at: string;
+        };
+        /** @description One row of the redirect table. */
+        LinkEntry: {
+            /** @description Whether a click counts as a conversion. */
+            conversion: boolean;
+            /** @description The name after `/go/`. */
+            name: string;
+            /** @description The target. */
+            url: string;
         };
         /** @description What the editor sends: the draft as it stands, unsaved included. */
         LinkSuggestRequest: {
@@ -5152,6 +5285,21 @@ export interface components {
              * @description Total matching posts.
              */
             total: number;
+        };
+        /** @description A path's views now against the period before. */
+        PathTrend: {
+            /** @description Site-relative path. */
+            path: string;
+            /**
+             * Format: int64
+             * @description Views over the same number of days before it.
+             */
+            previous: number;
+            /**
+             * Format: int64
+             * @description Views over the range.
+             */
+            views: number;
         };
         /** @description What create and update take. */
         PatternInput: {
@@ -6598,6 +6746,90 @@ export interface operations {
                 content: {
                     "application/json": unknown;
                 };
+            };
+        };
+    };
+    links: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Redirects */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["LinkEntry"][];
+                };
+            };
+            /** @description Not authenticated */
+            401: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    put_link: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Link name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["LinkBody"];
+            };
+        };
+        responses: {
+            /** @description Saved */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Bad name or target */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    delete_link: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Link name */
+                name: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Deleted */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
         };
     };
