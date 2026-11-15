@@ -908,6 +908,14 @@ impl WasmtimeHost {
         let (bytes, sha) = self.repo.wasm_bytes(row.id, &row.version).await?;
         if sha256_hex(&bytes) != sha {
             self.repo.set_status(row.id, "errored").await.ok();
+            self.repo
+                .set_status_reason(
+                    row.id,
+                    "errored",
+                    "the stored artifact does not match its hash",
+                )
+                .await
+                .ok();
             return Err(AppError::validation(format!(
                 "plugin {} artifact hash mismatch",
                 row.name
@@ -918,6 +926,10 @@ impl WasmtimeHost {
             Err(e) => {
                 let msg = format!("component {}: compile failed: {e}", row.name);
                 self.mark_errored(row.id).await;
+                self.repo
+                    .set_status_reason(row.id, "errored", &msg)
+                    .await
+                    .ok();
                 return Err(AppError::internal_msg(msg));
             }
         };
@@ -930,6 +942,10 @@ impl WasmtimeHost {
             Err(e) => {
                 let msg = format!("link {}: {e}", row.name);
                 self.mark_errored(row.id).await;
+                self.repo
+                    .set_status_reason(row.id, "errored", &msg)
+                    .await
+                    .ok();
                 return Err(AppError::internal_msg(msg));
             }
         };
@@ -1077,6 +1093,10 @@ impl WasmtimeHost {
             Err(trap) => {
                 let msg = Self::trap_reason(&trap);
                 self.mark_errored(plugin_id).await;
+                self.repo
+                    .set_status_reason(plugin_id, "errored", &format!("init trapped: {msg}"))
+                    .await
+                    .ok();
                 Err(AppError::internal_msg(format!("init trap: {msg}")))
             }
         }
