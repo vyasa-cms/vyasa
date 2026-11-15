@@ -8,6 +8,7 @@
 
 use std::collections::HashMap;
 use std::sync::Arc;
+use std::time::Duration;
 
 use sha2::{Digest, Sha256};
 use vyasa_common::AppError;
@@ -738,6 +739,40 @@ pub struct WasmtimeHost {
     limits: HostLimits,
     ai: Arc<std::sync::RwLock<Option<Arc<dyn AiBackend>>>>,
     fetch: Arc<std::sync::RwLock<Option<Arc<dyn FetchBackend>>>>,
+    /// Recent resource traps (epoch deadline, fuel) per plugin; see [`TrapStrikes`].
+    strikes: Arc<std::sync::Mutex<HashMap<i64, TrapStrikes>>>,
+}
+
+/// Resource traps within this window count against one plugin.
+const STRIKE_WINDOW: Duration = Duration::from_secs(600);
+/// Resource traps within [`STRIKE_WINDOW`] that disable a plugin. One or two are a slow minute, not a broken plugin.
+const STRIKE_LIMIT: usize = 3;
+
+/// The recent resource traps of one plugin.
+///
+/// The epoch deadline is wall-clock time and a guest parked on a host call is only interrupted once the call returns,
+/// so a busy server (a deploy uploading a theme and publishing pages while a docs sync runs) can trap a healthy plugin
+/// once. Disabling it for good on that one trap turned a slow minute into an outage that only an administrator could
+/// end. A plugin that keeps trapping is still disabled.
+#[derive(Debug, Default)]
+struct TrapStrikes(Vec<std::time::Instant>);
+
+impl TrapStrikes {
+    /// Records a trap at `now`; the number of traps inside the window, this one included.
+    fn record(&mut self, now: std::time::Instant) -> usize {
+        self.0.retain(|t| now.duration_since(*t) < STRIKE_WINDOW);
+        self.0.push(now);
+        self.0.len()
+    }
+}
+
+/// True for a trap that says the call was too slow or too hungry, not that the plugin's code is broken: the epoch
+/// deadline (`Interrupt`) and fuel exhaustion.
+fn is_resource_trap(err: &wasmtime::Error) -> bool {
+    matches!(
+        err.downcast_ref::<wasmtime::Trap>(),
+        Some(wasmtime::Trap::Interrupt | wasmtime::Trap::OutOfFuel)
+    )
 }
 
 impl WasmtimeHost {
@@ -802,6 +837,7 @@ impl WasmtimeHost {
             limits,
             ai: Arc::new(std::sync::RwLock::new(None)),
             fetch: Arc::new(std::sync::RwLock::new(None)),
+            strikes: Arc::new(std::sync::Mutex::new(HashMap::new())),
         })
     }
 
@@ -1084,7 +1120,7 @@ impl WasmtimeHost {
             Ok(out) => InvokeOutcome::Ok(out),
             Err(trap) => {
                 let msg = Self::trap_reason(&trap);
-                self.on_trap(plugin_id, &msg).await;
+                self.on_trap(plugin_id, &trap, &msg).await;
                 InvokeOutcome::Failed(msg)
             }
         }
@@ -1098,9 +1134,37 @@ impl WasmtimeHost {
         self.repo.set_enabled(plugin_id, false).await.ok();
     }
 
-    async fn on_trap(&self, plugin_id: i64, message: &str) {
+    async fn on_trap(&self, plugin_id: i64, trap: &wasmtime::Error, message: &str) {
         tracing::warn!(plugin_id, "plugin trap: {message}");
+        let reason = format!("trapped: {message}");
+        if is_resource_trap(trap) {
+            let strikes = {
+                let mut all = self
+                    .strikes
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                all.entry(plugin_id)
+                    .or_default()
+                    .record(std::time::Instant::now())
+            };
+            if strikes < STRIKE_LIMIT {
+                // Evict so the next call starts clean; the plugin stays enabled.
+                self.evict(plugin_id).await;
+                let reason =
+                    format!("{reason} (call {strikes} of {STRIKE_LIMIT} allowed in ten minutes)");
+                self.repo
+                    .set_status_reason(plugin_id, "degraded", &reason)
+                    .await
+                    .ok();
+                return;
+            }
+        }
         self.mark_errored(plugin_id).await;
+        // The cause on the plugins page: `mark_errored` alone left the reason empty.
+        self.repo
+            .set_status_reason(plugin_id, "errored", &reason)
+            .await
+            .ok();
     }
 
     /// A trap's real reason.
@@ -1118,6 +1182,23 @@ impl WasmtimeHost {
             reason = format!("{reason} (trap: {trap})");
         }
         reason
+    }
+}
+
+#[cfg(test)]
+mod strike_tests {
+    use std::time::{Duration, Instant};
+
+    use super::{TrapStrikes, STRIKE_WINDOW};
+
+    #[test]
+    fn strikes_count_inside_the_window_only() {
+        let t0 = Instant::now();
+        let mut s = TrapStrikes::default();
+        assert_eq!(s.record(t0), 1);
+        assert_eq!(s.record(t0 + Duration::from_secs(5)), 2);
+        // The first two fall out of the window; this is the first of a new run.
+        assert_eq!(s.record(t0 + STRIKE_WINDOW + Duration::from_secs(60)), 1);
     }
 }
 
@@ -1161,7 +1242,7 @@ impl WasmtimeHost {
             Ok(Err(e)) => InvokeOutcome::Failed(e),
             Err(trap) => {
                 let msg = Self::trap_reason(&trap);
-                self.on_trap(plugin_id, &msg).await;
+                self.on_trap(plugin_id, &trap, &msg).await;
                 InvokeOutcome::Failed(msg)
             }
         }
@@ -1278,7 +1359,7 @@ impl WasmtimeHost {
             Ok(Err(message)) => V2Outcome::Failed(message),
             Err(trap) => {
                 let msg = Self::trap_reason(&trap);
-                self.on_trap(plugin_id, &msg).await;
+                self.on_trap(plugin_id, &trap, &msg).await;
                 V2Outcome::Failed(msg)
             }
         }
@@ -1306,7 +1387,7 @@ impl WasmtimeHost {
             Ok(Err(message)) => V2Outcome::Failed(message),
             Err(trap) => {
                 let msg = Self::trap_reason(&trap);
-                self.on_trap(plugin_id, &msg).await;
+                self.on_trap(plugin_id, &trap, &msg).await;
                 V2Outcome::Failed(msg)
             }
         }
@@ -1355,7 +1436,7 @@ impl WasmtimeHost {
             Ok(Err(message)) => V2Outcome::Failed(message),
             Err(trap) => {
                 let msg = Self::trap_reason(&trap);
-                self.on_trap(plugin_id, &msg).await;
+                self.on_trap(plugin_id, &trap, &msg).await;
                 V2Outcome::Failed(msg)
             }
         }
@@ -1387,7 +1468,7 @@ impl WasmtimeHost {
             Ok(json) => V2Outcome::Ok(json),
             Err(trap) => {
                 let msg = format!("{}: {}", which.as_str(), Self::trap_reason(&trap));
-                self.on_trap(plugin_id, &msg).await;
+                self.on_trap(plugin_id, &trap, &msg).await;
                 V2Outcome::Failed(msg)
             }
         }
@@ -1419,7 +1500,7 @@ impl WasmtimeHost {
             Ok(out) => V2Outcome::Ok(out),
             Err(trap) => {
                 let msg = format!("filter-at {point}: {}", Self::trap_reason(&trap));
-                self.on_trap(plugin_id, &msg).await;
+                self.on_trap(plugin_id, &trap, &msg).await;
                 V2Outcome::Failed(msg)
             }
         }
@@ -1443,7 +1524,7 @@ impl WasmtimeHost {
             Ok(Err(message)) => V2Outcome::Failed(message),
             Err(trap) => {
                 let msg = format!("on-event {name}: {}", Self::trap_reason(&trap));
-                self.on_trap(plugin_id, &msg).await;
+                self.on_trap(plugin_id, &trap, &msg).await;
                 V2Outcome::Failed(msg)
             }
         }
