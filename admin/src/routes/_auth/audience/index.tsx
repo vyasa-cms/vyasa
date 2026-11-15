@@ -98,13 +98,70 @@ function AudiencePage() {
                 No views recorded yet — counts begin with the next visitor.
               </p>
             )}
+            <p className="text-sm text-muted-foreground" data-testid="visitors-line">
+              {analytics.data.visitors ?? 0} unique visitors · {analytics.data.bots ?? 0} bot and crawler
+              hits (not in the view count)
+            </p>
             <div className="grid gap-4 sm:grid-cols-2">
               <TopList label="Top content" rows={analytics.data.top_paths} />
               <TopList label="Top referrers" rows={analytics.data.top_referrers} />
             </div>
+            <div className="grid gap-4 sm:grid-cols-2" data-testid="trends">
+              <div>
+                <p className="text-xs font-medium text-muted-foreground">Trend per page (vs the 30 days before)</p>
+                {(analytics.data.trends ?? []).length === 0 ? (
+                  <p className="mt-1 text-sm text-muted-foreground">Nothing yet.</p>
+                ) : (
+                  <ul className="mt-1 space-y-1 text-sm">
+                    {(analytics.data.trends ?? []).slice(0, 6).map((t) => (
+                      <li key={t.path} className="flex items-baseline justify-between gap-2">
+                        <span className="min-w-0 truncate">{t.path}</span>
+                        <span className="text-muted-foreground">
+                          {t.views} {trendArrow(t.views, t.previous)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+              <CountList label="Entry pages" rows={analytics.data.entry_pages} />
+            </div>
           </div>
         )}
       </Panel>
+
+      <Panel title="Sources and visitors">
+        {analytics.data === undefined ? (
+          <p className="p-4 text-sm text-muted-foreground">Analytics unavailable.</p>
+        ) : (
+          <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-3">
+            <CountList label="Campaign source (utm_source)" rows={analytics.data.utm_sources} />
+            <CountList label="Campaign medium (utm_medium)" rows={analytics.data.utm_mediums} />
+            <CountList label="Campaign (utm_campaign)" rows={analytics.data.utm_campaigns} />
+            <CountList label="Devices" rows={analytics.data.devices} />
+            <CountList label="Browsers" rows={analytics.data.browsers} />
+          </div>
+        )}
+      </Panel>
+
+      <Panel title="Behaviour">
+        {analytics.data === undefined ? (
+          <p className="p-4 text-sm text-muted-foreground">Analytics unavailable.</p>
+        ) : (
+          <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-3">
+            <CountList label="Searches on the site" rows={analytics.data.searches} />
+            <CountList label="404s (with the referring site)" rows={analytics.data.not_found} showDetail />
+            <CountList label="Outbound clicks" rows={analytics.data.outbound} />
+            <CountList label="Conversions" rows={analytics.data.conversions} />
+          </div>
+        )}
+        <p className="border-t p-4 text-xs text-muted-foreground">
+          We count visits on our server. No cookies, no tracking scripts, no personal data stored. Visitors who send
+          Do Not Track or Global Privacy Control, signed-in users and our own tools are not counted.
+        </p>
+      </Panel>
+
+      {canDelete ? <LinksPanel /> : null}
 
       <Panel title="Form inbox">
         {submissions.isError ? <ErrorNote title="Couldn't load submissions" error={submissions.error} onRetry={() => void submissions.refetch()} /> : submissions.isLoading ? (
@@ -215,6 +272,137 @@ function AudiencePage() {
         )}
       </Panel>
     </div>
+  );
+}
+
+/** `↑`, `↓` or `→` for a page's views against the period before. */
+function trendArrow(now: number, before: number): string {
+  if (before === 0) return now > 0 ? "new" : "→";
+  const change = Math.round(((now - before) / before) * 100);
+  if (change === 0) return "→";
+  return `${change > 0 ? "↑" : "↓"} ${Math.abs(change)}%`;
+}
+
+function CountList({
+  label,
+  rows,
+  showDetail = false,
+}: {
+  label: string;
+  rows: { name: string; detail: string; count: number }[] | undefined;
+  showDetail?: boolean;
+}) {
+  const list = rows ?? [];
+  return (
+    <div>
+      <p className="text-xs font-medium text-muted-foreground">{label}</p>
+      {list.length === 0 ? (
+        <p className="mt-1 text-sm text-muted-foreground">Nothing yet.</p>
+      ) : (
+        <ul className="mt-1 space-y-1 text-sm">
+          {list.slice(0, 6).map((r) => (
+            <li key={`${r.name}|${r.detail}`} className="flex items-baseline justify-between gap-2">
+              <span className="min-w-0 truncate">
+                {r.name}
+                {showDetail && r.detail !== "" ? (
+                  <span className="text-muted-foreground"> ← {r.detail}</span>
+                ) : null}
+              </span>
+              <span className="text-muted-foreground">{r.count}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+/** The `/go/<name>` redirect table: outbound clicks counted on the server. */
+function LinksPanel() {
+  const queryClient = useQueryClient();
+  const links = useQuery({ queryKey: ["analytics-links"], queryFn: () => api.listAnalyticsLinks() });
+  const [name, setName] = React.useState("");
+  const [url, setUrl] = React.useState("");
+  const [conversion, setConversion] = React.useState(false);
+  const save = useMutation({
+    mutationFn: () => api.putAnalyticsLink(name.trim(), { url: url.trim(), conversion }),
+    onSuccess: () => {
+      setName("");
+      setUrl("");
+      setConversion(false);
+      void queryClient.invalidateQueries({ queryKey: ["analytics-links"] });
+    },
+    onError: (e) => notify.error("Couldn't save the link", e),
+  });
+  const drop = useMutation({
+    mutationFn: (n: string) => api.deleteAnalyticsLink(n),
+    onSuccess: () => void queryClient.invalidateQueries({ queryKey: ["analytics-links"] }),
+    onError: (e) => notify.error("Couldn't delete the link", e),
+  });
+  return (
+    <Panel title="Outbound links (/go/…)">
+      <div className="space-y-3 p-4">
+        <p className="text-xs text-muted-foreground">
+          Point a link on your site at <code>/go/name</code>; the server counts the click, then redirects.
+        </p>
+        {links.isError ? (
+          <ErrorNote title="Couldn't load the links" error={links.error} onRetry={() => void links.refetch()} />
+        ) : (links.data ?? []).length === 0 ? (
+          <p className="text-sm text-muted-foreground">No links yet.</p>
+        ) : (
+          <ul className="divide-y text-sm">
+            {(links.data ?? []).map((l) => (
+              <li key={l.name} className="flex items-center gap-3 py-2">
+                <code className="shrink-0">/go/{l.name}</code>
+                <span className="min-w-0 flex-1 truncate text-muted-foreground">{l.url}</span>
+                {l.conversion ? <Chip tone="neutral" dot={false}>conversion</Chip> : null}
+                <button
+                  type="button"
+                  aria-label={`Delete ${l.name}`}
+                  className="text-muted-foreground hover:text-destructive"
+                  onClick={() => drop.mutate(l.name)}
+                >
+                  <Trash2 className="size-4" />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        <form
+          className="flex flex-wrap items-center gap-2"
+          onSubmit={(e) => {
+            e.preventDefault();
+            save.mutate();
+          }}
+        >
+          <input
+            aria-label="Link name"
+            className="w-32 rounded border bg-background px-2 py-1 text-sm"
+            placeholder="github"
+            value={name}
+            onChange={(e) => setName(e.target.value)}
+          />
+          <input
+            aria-label="Link target"
+            className="min-w-48 flex-1 rounded border bg-background px-2 py-1 text-sm"
+            placeholder="https://github.com/…"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
+          <label className="flex items-center gap-1 text-xs">
+            <input type="checkbox" checked={conversion} onChange={(e) => setConversion(e.target.checked)} />
+            counts as a conversion
+          </label>
+          <button
+            type="submit"
+            className="rounded border px-3 py-1 text-sm"
+            disabled={name.trim() === "" || url.trim() === "" || save.isPending}
+          >
+            Save link
+          </button>
+        </form>
+      </div>
+    </Panel>
   );
 }
 

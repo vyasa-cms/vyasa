@@ -158,7 +158,10 @@ pub async fn submit(State(state): State<AppState>, body: String) -> Response {
         .add_submission_with(&form, &name, &email, &message, "", &extra_fields(&fields))
         .await
     {
-        Ok(_) => thanks_page(&site, "Thanks — your message has been received."),
+        Ok(_) => {
+            convert(&state, &form);
+            thanks_page(&site, "Thanks — your message has been received.")
+        }
         Err(err) => {
             tracing::warn!("form submission failed: {err}");
             thanks_page(
@@ -167,6 +170,20 @@ pub async fn submit(State(state): State<AppState>, body: String) -> Response {
             )
         }
     }
+}
+
+/// Counts one conversion (`newsletter`, or the form's name) in the audience counters. A lost count is not an error.
+fn convert(state: &AppState, name: &str) {
+    let audience = state.audience.clone();
+    let key = name.to_owned();
+    tokio::spawn(async move {
+        if let Err(err) = audience
+            .count(vyasa_db::repo::audience::dim::CONVERSION, &key, "", 1)
+            .await
+        {
+            tracing::debug!("conversion not recorded: {err}");
+        }
+    });
 }
 
 /// Stores a pending subscriber and sends the confirm link. Without a
@@ -205,6 +222,7 @@ async fn subscribe(state: &AppState, site: &str, email: &str) -> Response {
     match queued {
         Ok(_) => {
             state.publisher_notify.notify_one();
+            convert(state, "newsletter");
             thanks_page(site, "Check your inbox to confirm your subscription.")
         }
         Err(err) => {

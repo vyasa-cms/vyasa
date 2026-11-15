@@ -1,14 +1,34 @@
 //! Cookieless analytics: the server counts its own pages.
 //!
-//! No beacon script, no cookies, no fingerprints, no IPs — a request
-//! that leaves with an HTML 200 on a public path increments one
-//! day × path × referrer-host counter, and that aggregate is all that
-//! ever exists. Bots are filtered by the user agents they announce;
-//! the ones that lie are noise this feature can afford.
+//! No beacon script, no cookies, no stored IPs — a request that leaves
+//! with an HTML 200 on a public path increments day counters, and those
+//! aggregates are all that ever exists:
+//!
+//! * a path × referrer-host view counter, bots counted on their own line;
+//! * device class, browser family and `utm_*` tags as day counters;
+//! * entry pages, 404s with their referrers and internal search terms;
+//! * a unique-visitor count keyed by `sha256(day secret, client, agent,
+//!   host)`. The secret is random, lives in memory for one UTC day and is
+//!   never written anywhere; the day's hashes are deleted when the next
+//!   day's first visit arrives. A restart mid-day starts a new secret, so a
+//!   visitor can count twice that day, never twice across days.
+//!
+//! Not counted at all: requests carrying `X-Krishiv-Internal: 1` (link
+//! checks, staging QA), `DNT: 1` or `Sec-GPC: 1`, and anyone holding a
+//! session cookie (a signed-in author or admin). Bots are filtered by the
+//! user agents they announce; the ones that lie are noise this feature can
+//! afford.
 
-use axum::extract::{Request, State};
+use std::net::{IpAddr, SocketAddr};
+use std::sync::Mutex;
+
+use axum::extract::{ConnectInfo, Request, State};
+use axum::http::HeaderMap;
 use axum::middleware::Next;
 use axum::response::Response;
+use chrono::NaiveDate;
+use sha2::{Digest, Sha256};
+use vyasa_db::repo::audience::dim;
 
 use crate::state::AppState;
 
@@ -31,7 +51,7 @@ const BOT_MARKS: &[&str] = &[
 
 /// True for a user agent that announces automation (or announces
 /// nothing, which no browser does).
-fn is_bot(user_agent: Option<&str>) -> bool {
+pub(crate) fn is_bot(user_agent: Option<&str>) -> bool {
     match user_agent {
         None => true,
         Some(ua) => {
@@ -70,48 +90,252 @@ fn referrer_host(referer: Option<&str>, own_host: &str) -> String {
     }
 }
 
-/// Counts the response on its way out. Never blocks it: the write is
+/// Why a request is not counted at all (not even as a bot).
+pub(crate) fn opted_out(headers: &HeaderMap) -> bool {
+    let is_one = |name: &str| {
+        headers
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .is_some_and(|v| v.trim() == "1")
+    };
+    is_one("x-krishiv-internal")
+        || is_one("dnt")
+        || is_one("sec-gpc")
+        || headers
+            .get_all(axum::http::header::COOKIE)
+            .iter()
+            .filter_map(|v| v.to_str().ok())
+            .any(|c| {
+                c.split(';').any(|kv| {
+                    kv.trim()
+                        .strip_prefix(crate::middleware::SESSION_COOKIE)
+                        .is_some_and(|rest| rest.starts_with('='))
+                })
+            })
+}
+
+/// `desktop`, `mobile` or `tablet`, from the announced user agent.
+fn device_class(user_agent: &str) -> &'static str {
+    let ua = user_agent.to_ascii_lowercase();
+    if ua.contains("ipad")
+        || ua.contains("tablet")
+        || (ua.contains("android") && !ua.contains("mobile"))
+    {
+        "tablet"
+    } else if ua.contains("mobi") || ua.contains("iphone") || ua.contains("android") {
+        "mobile"
+    } else {
+        "desktop"
+    }
+}
+
+/// The browser family, from the announced user agent. Order matters: Edge, Opera and Chrome all say "Chrome".
+fn browser_family(user_agent: &str) -> &'static str {
+    let ua = user_agent.to_ascii_lowercase();
+    if ua.contains("edg/") || ua.contains("edga/") || ua.contains("edgios/") {
+        "Edge"
+    } else if ua.contains("opr/") || ua.contains("opera") {
+        "Opera"
+    } else if ua.contains("firefox") || ua.contains("fxios") {
+        "Firefox"
+    } else if ua.contains("chrome") || ua.contains("crios") {
+        "Chrome"
+    } else if ua.contains("safari") {
+        "Safari"
+    } else {
+        "Other"
+    }
+}
+
+/// A tag value kept for the day counters: trimmed, lower-cased, at most 60 characters.
+fn tag_value(raw: &str) -> Option<String> {
+    let v: String = raw
+        .trim()
+        .chars()
+        .take(60)
+        .collect::<String>()
+        .to_lowercase();
+    (!v.is_empty()).then_some(v)
+}
+
+/// The `utm_source`, `utm_medium` and `utm_campaign` values of a query string, as `(dimension, value)`.
+fn utm_tags(query: &str) -> Vec<(&'static str, String)> {
+    let mut out = Vec::new();
+    for (k, v) in url::form_urlencoded::parse(query.as_bytes()) {
+        let d = match k.as_ref() {
+            "utm_source" => dim::UTM_SOURCE,
+            "utm_medium" => dim::UTM_MEDIUM,
+            "utm_campaign" => dim::UTM_CAMPAIGN,
+            _ => continue,
+        };
+        if let Some(v) = tag_value(&v) {
+            out.push((d, v));
+        }
+    }
+    out
+}
+
+/// The internal search term (`/search?s=...`), tidied for counting.
+fn search_term(path: &str, query: &str) -> Option<String> {
+    if path != "/search" {
+        return None;
+    }
+    url::form_urlencoded::parse(query.as_bytes())
+        .find(|(k, _)| k == "s")
+        .and_then(|(_, v)| tag_value(&v))
+}
+
+/// The day's visitor secret: random, in memory only, replaced when the UTC day changes.
+static DAY_SECRET: Mutex<Option<(NaiveDate, [u8; 32])>> = Mutex::new(None);
+
+/// `sha256(day secret, client, agent, host)` for `day`. The secret of an earlier day is dropped on the way, so
+/// yesterday's hashes can no longer be recomputed by anyone.
+fn visitor_hash(day: NaiveDate, client: &str, user_agent: &str, host: &str) -> [u8; 32] {
+    let secret = {
+        let mut guard = DAY_SECRET
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        match *guard {
+            Some((d, s)) if d == day => s,
+            _ => {
+                let s: [u8; 32] = rand::random();
+                *guard = Some((day, s));
+                s
+            }
+        }
+    };
+    let mut h = Sha256::new();
+    h.update(secret);
+    for part in [client, user_agent, host] {
+        h.update((part.len() as u64).to_le_bytes());
+        h.update(part.as_bytes());
+    }
+    h.finalize().into()
+}
+
+/// Everything read from the request before the handler consumes it.
+struct Facts {
+    is_get: bool,
+    path: String,
+    query: String,
+    ua: Option<String>,
+    referer: Option<String>,
+    host: String,
+    skip: bool,
+    client: String,
+}
+
+fn facts(state: &AppState, req: &Request) -> Facts {
+    let header = |name: &str| {
+        req.headers()
+            .get(name)
+            .and_then(|v| v.to_str().ok())
+            .map(str::to_owned)
+    };
+    let peer: Option<IpAddr> = req
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|c| c.0.ip());
+    let client = crate::client_ip::for_request(state, peer, req.headers());
+    Facts {
+        is_get: req.method() == axum::http::Method::GET,
+        path: req.uri().path().chars().take(200).collect(),
+        query: req
+            .uri()
+            .query()
+            .unwrap_or_default()
+            .chars()
+            .take(500)
+            .collect(),
+        ua: header("user-agent"),
+        referer: header("referer"),
+        host: header("host").unwrap_or_default(),
+        skip: opted_out(req.headers()),
+        client,
+    }
+}
+
+/// Counts the response on its way out. Never blocks it: the writes are
 /// spawned, and a failed write is a lost view, not a lost page.
 pub async fn middleware(State(state): State<AppState>, req: Request, next: Next) -> Response {
-    let count = req.method() == axum::http::Method::GET && countable_path(req.uri().path());
-    let path: String = req.uri().path().chars().take(200).collect();
-    // Scoped: the closure borrows the request (whose body is !Sync), and
-    // letting it live across the await below would make this future
-    // !Send — which axum's layer bound rejects.
-    let (ua, referer, host) = {
-        let header = |name: &str| {
-            req.headers()
-                .get(name)
-                .and_then(|v| v.to_str().ok())
-                .map(str::to_owned)
-        };
-        (
-            header("user-agent"),
-            header("referer"),
-            header("host").unwrap_or_default(),
-        )
-    };
-
+    // Scoped: the request's body is !Sync, and keeping a borrow of it across the await below would make this future
+    // !Send — which axum's layer bound rejects. `Facts` owns what it read.
+    let f = facts(&state, &req);
     let response = next.run(req).await;
 
-    if count
-        && response.status() == axum::http::StatusCode::OK
-        && response
-            .headers()
-            .get(axum::http::header::CONTENT_TYPE)
-            .and_then(|v| v.to_str().ok())
-            .is_some_and(|ct| ct.starts_with("text/html"))
-        && !is_bot(ua.as_deref())
-    {
-        let from_host = referrer_host(referer.as_deref(), &host);
-        let audience = state.audience.clone();
-        tokio::spawn(async move {
-            if let Err(err) = audience.record_view(&path, &from_host).await {
-                tracing::debug!("view not recorded: {err}");
-            }
-        });
+    if f.skip || !f.is_get || !countable_path(&f.path) {
+        return response;
     }
+    let status = response.status();
+    let html = response
+        .headers()
+        .get(axum::http::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .is_some_and(|ct| ct.starts_with("text/html"));
+    if !html
+        || !(status == axum::http::StatusCode::OK || status == axum::http::StatusCode::NOT_FOUND)
+    {
+        return response;
+    }
+    let audience = state.audience.clone();
+    tokio::spawn(async move {
+        if let Err(err) = record(&audience, &f, status == axum::http::StatusCode::OK).await {
+            tracing::debug!("view not recorded: {err}");
+        }
+    });
     response
+}
+
+/// The counters one counted response moves.
+async fn record(
+    audience: &vyasa_db::repo::AudienceRepo,
+    f: &Facts,
+    ok: bool,
+) -> Result<(), vyasa_common::AppError> {
+    if is_bot(f.ua.as_deref()) {
+        return audience.count(dim::BOT, "", "", 1).await;
+    }
+    let from_host = referrer_host(f.referer.as_deref(), &f.host);
+    if !ok {
+        return audience.count(dim::NOT_FOUND, &f.path, &from_host, 1).await;
+    }
+    let ua = f.ua.as_deref().unwrap_or_default();
+    audience.record_view(&f.path, &from_host).await?;
+    audience.count(dim::DEVICE, device_class(ua), "", 1).await?;
+    audience
+        .count(dim::BROWSER, browser_family(ua), "", 1)
+        .await?;
+    for (d, v) in utm_tags(&f.query) {
+        audience.count(d, &v, "", 1).await?;
+    }
+    // An entry page is the first page of a visit: nothing on this site sent the visitor.
+    if !same_site_referrer(f.referer.as_deref(), &f.host) {
+        audience.count(dim::ENTRY, &f.path, "", 1).await?;
+    }
+    if let Some(term) = search_term(&f.path, &f.query) {
+        audience.count(dim::SEARCH, &term, "", 1).await?;
+    }
+    let day = chrono::Utc::now().date_naive();
+    let hash = visitor_hash(day, &f.client, ua, &f.host);
+    if audience.first_visit_today(&hash).await? {
+        audience.count(dim::VISITOR, "", "", 1).await?;
+    }
+    Ok(())
+}
+
+/// True when the `Referer` names this same host.
+fn same_site_referrer(referer: Option<&str>, own_host: &str) -> bool {
+    let Some(r) = referer else {
+        return false;
+    };
+    let host = r
+        .strip_prefix("https://")
+        .or_else(|| r.strip_prefix("http://"))
+        .unwrap_or("")
+        .split(['/', '?'])
+        .next()
+        .unwrap_or("");
+    !host.is_empty() && host.eq_ignore_ascii_case(own_host)
 }
 
 #[cfg(test)]
@@ -153,5 +377,91 @@ mod tests {
         );
         assert_eq!(referrer_host(None, "blog.example"), "");
         assert_eq!(referrer_host(Some("garbage"), "x"), "");
+    }
+
+    #[test]
+    fn opt_outs_and_internal_traffic_are_not_counted() {
+        use axum::http::HeaderMap;
+        let h = |pairs: &[(&'static str, &str)]| {
+            let mut m = HeaderMap::new();
+            for (k, v) in pairs {
+                m.append(*k, v.parse().unwrap());
+            }
+            m
+        };
+        assert!(!super::opted_out(&h(&[("user-agent", "Mozilla/5.0")])));
+        assert!(super::opted_out(&h(&[("dnt", "1")])));
+        assert!(super::opted_out(&h(&[("sec-gpc", "1")])));
+        assert!(super::opted_out(&h(&[("x-krishiv-internal", "1")])));
+        assert!(!super::opted_out(&h(&[("dnt", "0")])));
+        let cookie = format!("a=b; {}=token", crate::middleware::SESSION_COOKIE);
+        assert!(super::opted_out(&h(&[("cookie", cookie.as_str())])));
+        assert!(!super::opted_out(&h(&[("cookie", "other=1")])));
+    }
+
+    #[test]
+    fn devices_and_browsers_are_classed() {
+        let iphone =
+            "Mozilla/5.0 (iPhone; CPU iPhone OS 17_0) AppleWebKit Mobile/15E148 Safari/604.1";
+        let ipad = "Mozilla/5.0 (iPad; CPU OS 17_0) AppleWebKit Safari/604.1";
+        let desk = "Mozilla/5.0 (X11; Linux x86_64) Gecko/20100101 Firefox/126.0";
+        let edge = "Mozilla/5.0 (Windows NT 10.0) Chrome/126 Safari/537.36 Edg/126";
+        assert_eq!(super::device_class(iphone), "mobile");
+        assert_eq!(super::device_class(ipad), "tablet");
+        assert_eq!(super::device_class(desk), "desktop");
+        assert_eq!(super::browser_family(desk), "Firefox");
+        assert_eq!(super::browser_family(edge), "Edge");
+        assert_eq!(super::browser_family(iphone), "Safari");
+        assert_eq!(super::browser_family("something"), "Other");
+    }
+
+    #[test]
+    fn campaign_tags_and_search_terms_are_read_and_tidied() {
+        let tags =
+            super::utm_tags("utm_source=Newsletter&utm_medium=email&x=1&utm_campaign=%20Launch%20");
+        assert_eq!(
+            tags,
+            vec![
+                ("utm_source", "newsletter".to_owned()),
+                ("utm_medium", "email".to_owned()),
+                ("utm_campaign", "launch".to_owned()),
+            ]
+        );
+        assert!(super::utm_tags("utm_source=").is_empty());
+        assert_eq!(
+            super::search_term("/search", "s=Rust+CMS"),
+            Some("rust cms".to_owned())
+        );
+        assert_eq!(super::search_term("/search", "s="), None);
+        assert_eq!(super::search_term("/post/a", "s=x"), None);
+    }
+
+    #[test]
+    fn a_visitor_hash_is_stable_within_a_day_and_new_on_the_next() {
+        let d1 = chrono::NaiveDate::from_ymd_opt(2026, 11, 15).unwrap();
+        let d2 = chrono::NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+        let a = super::visitor_hash(d1, "203.0.113.7", "UA", "site");
+        assert_eq!(a, super::visitor_hash(d1, "203.0.113.7", "UA", "site"));
+        assert_ne!(a, super::visitor_hash(d1, "203.0.113.8", "UA", "site"));
+        assert_ne!(a, super::visitor_hash(d1, "203.0.113.7", "UA2", "site"));
+        // The boundaries are part of the hash: moving a character between fields changes it.
+        assert_ne!(
+            super::visitor_hash(d1, "ab", "c", "site"),
+            super::visitor_hash(d1, "a", "bc", "site")
+        );
+        assert_ne!(a, super::visitor_hash(d2, "203.0.113.7", "UA", "site"));
+    }
+
+    #[test]
+    fn a_same_site_referrer_is_not_an_entry() {
+        assert!(super::same_site_referrer(
+            Some("https://blog.example/a"),
+            "blog.example"
+        ));
+        assert!(!super::same_site_referrer(
+            Some("https://news.example/a"),
+            "blog.example"
+        ));
+        assert!(!super::same_site_referrer(None, "blog.example"));
     }
 }
