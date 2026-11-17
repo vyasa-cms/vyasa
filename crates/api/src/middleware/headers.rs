@@ -36,18 +36,40 @@ pub async fn security_headers(req: Request<axum::body::Body>, next: Next) -> Res
     // SVG is served under one that runs no script at all, and the site
     // default must not loosen it on the way out.
     if !h.contains_key(header::CONTENT_SECURITY_POLICY) {
-        insert(
-            h,
-            header::CONTENT_SECURITY_POLICY,
-            "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; \
-             img-src 'self' data: https:; frame-ancestors 'self'",
-        );
+        insert(h, header::CONTENT_SECURITY_POLICY, DEFAULT_CSP);
     }
     resp
 }
 
+/// The site's default policy. `script-src` allows Cloudflare's Web Analytics
+/// beacon origin and nothing else beyond `'self'`: the beacon is injected by
+/// Cloudflare at the edge, and its reports go to `/cdn-cgi/rum` on the site's
+/// own origin, so no `connect-src` entry is needed.
+const DEFAULT_CSP: &str = "default-src 'self'; \
+     script-src 'self' https://static.cloudflareinsights.com; \
+     style-src 'self' 'unsafe-inline'; \
+     img-src 'self' data: https:; frame-ancestors 'self'";
+
 fn insert(map: &mut axum::http::HeaderMap, name: header::HeaderName, value: &str) {
     if let Ok(v) = HeaderValue::from_str(value) {
         map.insert(name, v);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::DEFAULT_CSP;
+
+    #[test]
+    fn default_csp_allows_only_the_cloudflare_beacon_origin_beyond_self() {
+        let script_src = DEFAULT_CSP
+            .split(';')
+            .map(str::trim)
+            .find(|d| d.starts_with("script-src "))
+            .expect("script-src directive");
+        let sources: Vec<&str> = script_src.split_whitespace().skip(1).collect();
+        assert_eq!(sources, ["'self'", "https://static.cloudflareinsights.com"]);
+        assert!(!DEFAULT_CSP.contains("unsafe-eval"));
+        assert!(!script_src.contains("unsafe-inline"));
     }
 }

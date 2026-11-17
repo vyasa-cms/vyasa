@@ -316,7 +316,8 @@ in after registering says nothing about whether the address was new.
 ## Headers
 
 Security headers are applied to every response: a CSP with `script-src
-'self'`, `frame-ancestors 'self'`, `X-Content-Type-Options: nosniff` and a
+'self' https://static.cloudflareinsights.com` (the one external script origin: Cloudflare's
+Web Analytics beacon), `frame-ancestors 'self'`, `X-Content-Type-Options: nosniff` and a
 `Referrer-Policy`.
 
 ## Input and output

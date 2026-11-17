@@ -7,6 +7,10 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Changed
+
+- The default Content-Security-Policy allows scripts from `https://static.cloudflareinsights.com` in addition to `'self'`, so Cloudflare's Web Analytics beacon is not blocked. No other origin is added.
+
 ## [0.4.2] - 2026-11-13
 
 ### Fixed
