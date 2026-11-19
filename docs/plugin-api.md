@@ -357,7 +357,11 @@ the type's definitions, terms as `taxonomy:slug` (created when missing for a
 registered taxonomy), `seo-json` keys `canonical-path`, `noindex`, `title`,
 `description`. A row in `managed_entries` ties the plugin's `key` to the
 entry; the same `source-hash` means no write (`unchanged`), a new hash updates
-it (`updated`; a trashed entry returns through a draft). The entry shows in
+it (`updated`; a trashed entry returns through a draft). The hash covers the
+source, not the `status` asked for: with the same hash, an entry whose stored
+status is another one (written as a draft, then asked for as published) is
+written again (`updated`), except a trashed entry, which stays removed until
+its source changes. The entry shows in
 the editor as read-only with an "Edit source" link until an author presses
 **Detach**; after that the plugin never writes it again (`detached`) and
 `delete-entry` leaves it alone. Trashing a synced entry stays possible; the

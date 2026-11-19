@@ -7,6 +7,9 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Fixed
+- `put-entry` writes an entry whose source is unchanged when its stored status is not the one the plugin asks for (a draft asked for as published, or the reverse). It answered `unchanged` before, so a synced entry left as a draft stayed one for good, and a draft root of a hierarchical type hid its whole published subtree from the public tree: every docs page lost its sidebar, breadcrumb, pager and search. A trashed entry still stays removed until its source changes.
+
 ## [0.4.2] - 2026-11-13
 
 ### Fixed

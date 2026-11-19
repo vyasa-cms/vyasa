@@ -280,6 +280,101 @@ async fn delete_trashes_and_a_changed_put_restores_an_unchanged_one_does_not() {
     );
 }
 
+/// The source hash does not cover the status a plugin asks for. An entry
+/// first written as a draft (or left as one) and then asked for as
+/// published, with the same source, must not answer "unchanged" and stay
+/// hidden: on a hierarchical type a draft root hides its whole published
+/// subtree from the public tree.
+#[tokio::test]
+async fn an_unchanged_source_with_another_status_is_still_written() {
+    let e = setup().await;
+    let c = ctx(&e, e.plugin);
+    let status = |id: u64| {
+        let pool = e.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, String>("SELECT status FROM posts WHERE id = $1")
+                .bind(i64::try_from(id).unwrap())
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    let draft = || {
+        let mut d = entry("root", None, "Root", "h1");
+        d.status = "draft".into();
+        d
+    };
+    let root = hostdata::put_entry(&c, draft()).await.unwrap();
+    assert_eq!(root.outcome, "created");
+    assert_eq!(status(root.id).await, "draft");
+    let child = hostdata::put_entry(&c, entry("root/a.md", Some("root"), "A", "h1"))
+        .await
+        .unwrap();
+
+    // Same source, now asked for as published: written, and it stays the same entry.
+    let published = hostdata::put_entry(&c, entry("root", None, "Root", "h1"))
+        .await
+        .unwrap();
+    assert_eq!(
+        (published.outcome.as_str(), published.id),
+        ("updated", root.id)
+    );
+    assert_eq!(status(root.id).await, "published");
+    let parent: Option<i64> = sqlx::query_scalar("SELECT parent_id FROM posts WHERE id = $1")
+        .bind(i64::try_from(child.id).unwrap())
+        .fetch_one(&e.pool)
+        .await
+        .unwrap();
+    assert_eq!(
+        parent,
+        Some(i64::try_from(root.id).unwrap()),
+        "the child keeps its parent"
+    );
+
+    // Once the stored status is the one asked for, the same source changes nothing again.
+    let again = hostdata::put_entry(&c, entry("root", None, "Root", "h1"))
+        .await
+        .unwrap();
+    assert_eq!(again.outcome, "unchanged");
+
+    // The other direction: the plugin takes a published entry back to a draft.
+    let back = hostdata::put_entry(&c, draft()).await.unwrap();
+    assert_eq!(back.outcome, "updated");
+    assert_eq!(status(root.id).await, "draft");
+}
+
+/// A plugin that may not publish cannot use the status repair to publish.
+#[tokio::test]
+async fn the_status_repair_still_needs_the_publish_capability() {
+    let e = setup().await;
+    let repo = vyasa_db::repo::PluginsRepo::new(e.pool.clone());
+    let drafty = repo
+        .create(
+            "drafty",
+            "0.1.0",
+            b"{}",
+            "dd",
+            &serde_json::json!(["entries:sync"]),
+        )
+        .await
+        .unwrap()
+        .id;
+    let c = ctx(&e, drafty);
+    let mut draft = entry("a.md", None, "A", "h1");
+    draft.status = "draft".into();
+    let a = hostdata::put_entry(&c, draft).await.unwrap();
+    let err = hostdata::put_entry(&c, entry("a.md", None, "A", "h1"))
+        .await
+        .unwrap_err();
+    assert_eq!(err, "capability-denied");
+    let status: String = sqlx::query_scalar("SELECT status FROM posts WHERE id = $1")
+        .bind(i64::try_from(a.id).unwrap())
+        .fetch_one(&e.pool)
+        .await
+        .unwrap();
+    assert_eq!(status, "draft");
+}
+
 #[tokio::test]
 async fn a_detached_key_is_never_written_again() {
     let e = setup().await;

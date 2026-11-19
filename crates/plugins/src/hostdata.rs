@@ -660,10 +660,26 @@ pub async fn put_entry(ctx: &Ctx<'_>, input: EntryInput) -> Result<PutResult, St
             });
         }
         if row.source_hash == input.source_hash {
-            return Ok(PutResult {
-                id,
-                outcome: String::from("unchanged"),
-            });
+            // The hash covers the source, not the status asked for. An
+            // entry whose stored status is another one (written as a draft
+            // first, then asked for as published) is written again below;
+            // otherwise it would answer "unchanged" for ever, and on a
+            // hierarchical type a draft root hides its published subtree.
+            // A trashed entry stays removed until its source changes.
+            let stored = managed
+                .post_status(row.post_id)
+                .await
+                .map_err(|_| db_err("put-entry"))?;
+            let wanted = status.as_str();
+            if stored
+                .as_deref()
+                .is_none_or(|s| s == wanted || s == PostStatus::Trash.as_str())
+            {
+                return Ok(PutResult {
+                    id,
+                    outcome: String::from("unchanged"),
+                });
+            }
         }
     }
     let parent_id = match &input.parent_key {

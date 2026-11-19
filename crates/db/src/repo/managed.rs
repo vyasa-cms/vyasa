@@ -63,6 +63,20 @@ impl ManagedRepo {
         .map_err(|e| AppError::db(format!("managed lookup failed: {e}")))
     }
 
+    /// The stored status of an entry (`posts.status`), when the entry
+    /// exists. A sync asks this for an entry whose source has not changed:
+    /// the source hash does not cover the status the plugin asks for.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn post_status(&self, post_id: i64) -> Result<Option<String>, AppError> {
+        sqlx::query_scalar("SELECT status FROM posts WHERE id = $1")
+            .bind(post_id)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| AppError::db(format!("managed lookup failed: {e}")))
+    }
+
     /// The managed state of an entry, when it has one.
     ///
     /// # Errors
