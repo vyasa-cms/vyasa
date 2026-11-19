@@ -450,3 +450,33 @@ async fn repairing_the_status_of_an_unchanged_entry_needs_the_publish_capability
         .unwrap_err();
     assert!(denied.contains("capability-denied"), "{denied}");
 }
+
+#[tokio::test]
+async fn a_scheduled_or_private_entry_is_never_repaired_to_published_or_draft() {
+    let e = setup().await;
+    let c = ctx(&e, e.plugin);
+    for (i, stored) in ["scheduled", "private"].into_iter().enumerate() {
+        for asked in ["published", "draft"] {
+            let key = format!("k{i}-{asked}.md");
+            let created = hostdata::put_entry(&c, entry(&key, None, "T", "h1"))
+                .await
+                .unwrap();
+            sqlx::query("UPDATE posts SET status = $2 WHERE id = $1")
+                .bind(i64::try_from(created.id).unwrap())
+                .bind(stored)
+                .execute(&e.pool)
+                .await
+                .unwrap();
+            let mut again = entry(&key, None, "T", "h1");
+            again.status = asked.into();
+            let out = hostdata::put_entry(&c, again).await.unwrap();
+            assert_eq!(out.outcome, "unchanged", "{stored} asked as {asked}");
+            let now: String = sqlx::query_scalar("SELECT status FROM posts WHERE id = $1")
+                .bind(i64::try_from(created.id).unwrap())
+                .fetch_one(&e.pool)
+                .await
+                .unwrap();
+            assert_eq!(now, stored);
+        }
+    }
+}

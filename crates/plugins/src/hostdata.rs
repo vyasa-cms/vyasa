@@ -662,11 +662,13 @@ pub async fn put_entry(ctx: &Ctx<'_>, input: EntryInput) -> Result<PutResult, St
         }
         if row.source_hash == input.source_hash {
             // The hash says the content is current, not the status: an entry left in draft (or moved
-            // out of the requested status) is repaired in place. A trashed one stays removed until
-            // its source changes.
+            // between draft and published) is repaired in place. Scheduled, private and trashed entries
+            // are answered `unchanged`: an author's choice, or a removal, until the source changes.
             let svc = PostService::new(vyasa_db::repo::PostsRepo::new(ctx.pool.clone()));
             let current = svc.get(row.post_id).await.map_err(|e| e.to_string())?;
-            if current.status == PostStatus::Trash || current.status == status {
+            let repairable = matches!(current.status, PostStatus::Draft | PostStatus::Published)
+                && matches!(status, PostStatus::Draft | PostStatus::Published);
+            if !repairable || current.status == status {
                 return Ok(PutResult {
                     id,
                     outcome: String::from("unchanged"),
