@@ -163,7 +163,7 @@ pub fn excerpt_for(post: &PostRow) -> String {
         .map(|e| e.trim())
         .filter(|e| !e.is_empty())
     {
-        return text.to_owned();
+        return plain_text(text);
     }
     let doc: vyasa_core::BlockDocument = match serde_json::from_value(post.content.clone()) {
         Ok(doc) => doc,
@@ -171,6 +171,18 @@ pub fn excerpt_for(post: &PostRow) -> String {
     };
     let text = vyasa_themes::blocks_to_text(&doc.blocks);
     truncate_words(&text, EXCERPT_CHARS)
+}
+
+/// An excerpt or description with its markup removed. A hand-written excerpt
+/// can carry inline HTML (`<a href=...>`), which a meta `content` must not:
+/// cut at a word boundary it leaves a half tag (`&lt;a…`). Text with no `<`
+/// is returned as it is.
+fn plain_text(text: &str) -> String {
+    if text.contains('<') {
+        crate::seo::strip_tags(text)
+    } else {
+        text.to_owned()
+    }
 }
 
 /// Cuts at a word boundary and adds an ellipsis, or returns the whole
@@ -321,8 +333,10 @@ impl Head {
                 .filter(|v| !v.is_empty())
                 .map(str::to_owned)
         };
-        let description = meta("seo_description")
-            .unwrap_or_else(|| truncate_words(&excerpt_for(post), DESCRIPTION_CHARS));
+        let description = meta("seo_description").map_or_else(
+            || truncate_words(&excerpt_for(post), DESCRIPTION_CHARS),
+            |d| plain_text(&d),
+        );
         // The picture the author already placed, when they have not set a
         // separate social image. Asking someone to nominate an "SEO image"
         // for the photo at the top of their own post is a question with an
@@ -679,6 +693,15 @@ pub const fn is_public_type(t: PostType) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn markup_in_an_excerpt_never_reaches_a_description() {
+        assert_eq!(
+            plain_text("Links are listed in <a href=\"/docs\">the docs</a> and <b>more</b>."),
+            "Links are listed in the docs and more."
+        );
+        assert_eq!(plain_text("plain & simple"), "plain & simple");
+    }
+
     #[test]
     fn a_canonical_path_becomes_absolute_and_only_a_site_path_is_accepted() {
         let abs = |p: &str| Some(format!("https://docs.example.com{p}"));
