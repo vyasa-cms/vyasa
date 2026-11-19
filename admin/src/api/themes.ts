@@ -44,6 +44,12 @@ export type ScaleRatio =
 export interface FontFace {
   family: string;
   src?: string | null;
+  /** `font-weight` of this file: `400`, `100 900` (variable font), `normal` or `bold`. */
+  weight?: string | null;
+  /** `normal`, `italic` or `oblique`. */
+  style?: string | null;
+  /** `auto`, `block`, `swap`, `fallback` or `optional`. */
+  display?: string | null;
 }
 
 /** Mirrors `vyasa_themes::TokenSet` (docs/theme-token-schema.json). */

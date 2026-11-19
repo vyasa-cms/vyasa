@@ -260,6 +260,9 @@ pub struct Head {
     pub breadcrumbs: Vec<(String, String)>,
     /// Translations of this page: (language tag, absolute or site path).
     pub alternates: Vec<(String, String)>,
+    /// An entry of type `page`: `og:type website` and a `WebPage` JSON-LD
+    /// document, with no `article:*` dates. A page is not an article.
+    pub web_page: bool,
 }
 
 /// Which address a page declares as canonical: an absolute one the author
@@ -337,14 +340,26 @@ impl Head {
                     .ok()
                     .and_then(|doc| vyasa_themes::first_image(&doc.blocks))
             });
+        // A page (About, Subscribe, a docs page) is not an article: it is
+        // typed `website` and described as a `WebPage`, and it carries no
+        // `article:*` dates.
+        let web_page = post.post_type == PostType::Page;
         Self {
             alternates: Vec::new(),
             path: path.to_owned(),
             description,
-            kind: "article",
+            kind: if web_page { "website" } else { "article" },
+            web_page,
             image,
             published: post.published_at,
-            modified: Some(post.updated_at),
+            // Never earlier than the publication time: a scheduled post is
+            // saved before it goes out, so `updated_at` can predate
+            // `published_at`, and a modified time before the published one
+            // is nonsense to a reader of the head.
+            modified: Some(
+                post.published_at
+                    .map_or(post.updated_at, |p| post.updated_at.max(p)),
+            ),
             author,
             title: meta("seo_title").unwrap_or_else(|| post.title.clone()),
             indexable: post.password_hash.is_none() && !flag("seo_noindex"),
@@ -417,7 +432,7 @@ impl Head {
                 "\n<meta property=\"og:url\" content=\"{}\">",
                 esc(&url)
             );
-            if self.kind == "article" {
+            if self.kind == "article" || self.web_page {
                 // The markdown mirror, for AI readers that check the head.
                 let _ = write!(
                     out,
@@ -442,19 +457,22 @@ impl Head {
         } else {
             out.push_str("\n<meta name=\"twitter:card\" content=\"summary\">");
         }
-        if let Some(published) = self.published {
-            let _ = write!(
-                out,
-                "\n<meta property=\"article:published_time\" content=\"{}\">",
-                published.to_rfc3339()
-            );
-        }
-        if let Some(modified) = self.modified {
-            let _ = write!(
-                out,
-                "\n<meta property=\"article:modified_time\" content=\"{}\">",
-                modified.to_rfc3339()
-            );
+        // `article:*` belongs to `og:type article`; a page has none.
+        if self.kind == "article" {
+            if let Some(published) = self.published {
+                let _ = write!(
+                    out,
+                    "\n<meta property=\"article:published_time\" content=\"{}\">",
+                    published.to_rfc3339()
+                );
+            }
+            if let Some(modified) = self.modified {
+                let _ = write!(
+                    out,
+                    "\n<meta property=\"article:modified_time\" content=\"{}\">",
+                    modified.to_rfc3339()
+                );
+            }
         }
         if let Some(author) = &self.author {
             let _ = write!(out, "\n<meta name=\"author\" content=\"{}\">", esc(author));
@@ -617,6 +635,27 @@ impl Head {
                 );
             }
             article
+        } else if self.web_page {
+            let mut page = serde_json::json!({
+                "@context": "https://schema.org",
+                "@type": "WebPage",
+                "name": self.title,
+                "url": url,
+            });
+            let map = page.as_object_mut().unwrap_or_else(|| unreachable!());
+            if !self.description.is_empty() {
+                map.insert("description".into(), self.description.clone().into());
+            }
+            if let Some(modified) = self.modified {
+                map.insert("dateModified".into(), modified.to_rfc3339().into());
+            }
+            if !site.title.is_empty() {
+                map.insert(
+                    "isPartOf".into(),
+                    serde_json::json!({"@type": "WebSite", "name": site.title}),
+                );
+            }
+            page
         } else if self.path == "/" {
             // The home page describes the site itself, and advertises the
             // search endpoint so a result can carry a sitelinks searchbox.
@@ -732,6 +771,67 @@ mod tests {
         assert!(!valid_date_format(""));
         assert!(!valid_date_format("<script>"));
         assert!(!valid_date_format(&"%Y".repeat(40)));
+    }
+
+    fn entry_row(post_type: PostType) -> PostRow {
+        let now = Utc::now();
+        PostRow {
+            id: 1,
+            sticky: false,
+            lang: String::new(),
+            translation_group: None,
+            post_type,
+            status: vyasa_db::content_models::PostStatus::Published,
+            slug: "about".to_owned(),
+            title: "About".to_owned(),
+            content: serde_json::json!([]),
+            layout: None,
+            excerpt: Some("About this site".to_owned()),
+            author_id: 1,
+            parent_id: None,
+            meta: serde_json::json!({}),
+            published_at: Some(now),
+            scheduled_for: None,
+            password_hash: None,
+            created_at: now,
+            updated_at: now,
+            path: None,
+            position: 0,
+        }
+    }
+
+    #[test]
+    fn a_page_is_a_website_not_an_article() {
+        let page = Head::entry(&entry_row(PostType::Page), "/about", None);
+        assert_eq!(page.kind, "website");
+        assert!(page.web_page);
+        let post = Head::entry(&entry_row(PostType::Post), "/post/x", None);
+        assert_eq!(post.kind, "article");
+        assert!(!post.web_page);
+    }
+
+    #[test]
+    fn the_modified_time_is_never_before_the_published_time() {
+        // A scheduled post is saved before it goes out, so `updated_at`
+        // can be earlier than `published_at`.
+        let mut row = entry_row(PostType::Post);
+        let published = Utc::now();
+        row.published_at = Some(published);
+        row.updated_at = published - chrono::Duration::days(1);
+        let head = Head::entry(&row, "/post/x", None);
+        assert_eq!(head.modified, Some(published));
+        // A later edit still wins.
+        row.updated_at = published + chrono::Duration::hours(2);
+        assert_eq!(
+            Head::entry(&row, "/post/x", None).modified,
+            Some(row.updated_at)
+        );
+        // Unpublished: the edit time, as before.
+        row.published_at = None;
+        assert_eq!(
+            Head::entry(&row, "/post/x", None).modified,
+            Some(row.updated_at)
+        );
     }
 
     #[test]

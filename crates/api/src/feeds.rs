@@ -78,10 +78,19 @@ pub async fn build_feed(
         .list(&filter)
         .await?
         .into_iter()
-        .filter(|p| crate::public::page_meta::is_public_type(p.post_type))
+        .filter(|p| listed_in_feed(p.post_type))
         .collect();
     let rendered = render_feed(src, &rows, term, kind);
     Ok(rendered)
+}
+
+/// Whether an entry of this type belongs in a feed. A page (About,
+/// Subscribe, a docs page) is not a dated item and does not belong in a
+/// feed of what was published; posts and public custom types do.
+#[must_use]
+pub const fn listed_in_feed(t: vyasa_db::content_models::PostType) -> bool {
+    crate::public::page_meta::is_public_type(t)
+        && !matches!(t, vyasa_db::content_models::PostType::Page)
 }
 
 /// Pure XML rendering over post rows (unit-testable without a database).
@@ -368,6 +377,15 @@ mod tests {
             path: None,
             position: 0,
         }
+    }
+
+    #[test]
+    fn a_page_is_not_a_feed_item() {
+        use vyasa_db::content_models::PostType;
+        assert!(listed_in_feed(PostType::Post));
+        assert!(listed_in_feed(PostType::Custom("book")));
+        assert!(!listed_in_feed(PostType::Page));
+        assert!(!listed_in_feed(PostType::Block));
     }
 
     fn source() -> FeedSource<'static> {
