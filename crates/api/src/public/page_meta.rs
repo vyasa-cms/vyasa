@@ -41,6 +41,8 @@ pub struct SiteContext {
     pub per_page: i64,
     /// Media id of the favicon.
     pub favicon_media_id: Option<i64>,
+    /// The favicon is a PNG, so it also serves as `apple-touch-icon`.
+    pub favicon_is_png: bool,
     /// `<link>`/`<script>` tags for plugin-declared assets.
     ///
     /// Carried on the site context rather than added at each of the six
@@ -89,6 +91,15 @@ impl SiteContext {
             .and_then(|v| v.as_i64())
             .filter(|n| (1..=100).contains(n))
             .unwrap_or(super::routes::PAGE_SIZE);
+        let favicon_media_id = identity.as_ref().and_then(|i| i.favicon_media_id);
+        let favicon_is_png = match favicon_media_id {
+            Some(id) => state
+                .media
+                .get(id)
+                .await
+                .is_ok_and(|row| row.mime == "image/png"),
+            None => false,
+        };
         Self {
             plugin_head: state.plugin_surface.head_html().await,
             base_url: string_opt("site_url").await.map_or_else(
@@ -111,7 +122,8 @@ impl SiteContext {
             permalinks: crate::permalinks::pattern(state).await,
             date_format,
             per_page,
-            favicon_media_id: identity.as_ref().and_then(|i| i.favicon_media_id),
+            favicon_media_id,
+            favicon_is_png,
         }
     }
 
@@ -470,6 +482,9 @@ impl Head {
         );
         if site.favicon_media_id.is_some() {
             out.push_str("\n<link rel=\"icon\" href=\"/favicon.ico\">");
+            if site.favicon_is_png {
+                out.push_str("\n<link rel=\"apple-touch-icon\" href=\"/apple-touch-icon.png\">");
+            }
         } else {
             out.push_str("\n<link rel=\"icon\" type=\"image/svg+xml\" href=\"/brand/mark.svg\">");
         }
@@ -703,6 +718,33 @@ mod tests {
     }
 
     use super::*;
+
+    fn site_with_favicon(id: Option<i64>, png: bool) -> SiteContext {
+        SiteContext {
+            base_url: "https://x.test".to_owned(),
+            title: "X".to_owned(),
+            tagline: String::new(),
+            date_format: DEFAULT_DATE_FORMAT.to_owned(),
+            timezone: chrono_tz::UTC,
+            permalinks: vyasa_core::options::PermalinkPattern("/{slug}".to_owned()),
+            per_page: 10,
+            favicon_media_id: id,
+            favicon_is_png: png,
+            plugin_head: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_png_favicon_also_prints_the_apple_touch_icon_and_nothing_else_does() {
+        let head = Head::page("/a", "A", "d");
+        let png = head.render(&site_with_favicon(Some(7), true));
+        assert!(png.contains(r#"<link rel="icon" href="/favicon.ico">"#));
+        assert!(png.contains(r#"<link rel="apple-touch-icon" href="/apple-touch-icon.png">"#));
+        let other = head.render(&site_with_favicon(Some(7), false));
+        assert!(other.contains("/favicon.ico") && !other.contains("apple-touch-icon"));
+        let none = head.render(&site_with_favicon(None, false));
+        assert!(none.contains("/brand/mark.svg") && !none.contains("apple-touch-icon"));
+    }
 
     #[test]
     fn truncation_stops_at_a_word_and_marks_the_cut() {

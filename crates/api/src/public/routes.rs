@@ -2081,6 +2081,25 @@ pub async fn favicon(State(state): State<AppState>) -> R {
     serve_media_option(&state, "site_favicon_media_id").await
 }
 
+/// `GET /apple-touch-icon.png` — the site favicon when it is a PNG (the
+/// `<link>` is printed only then); 404 otherwise.
+pub async fn apple_touch_icon(State(state): State<AppState>) -> R {
+    let Ok(Some(id)) = state
+        .options
+        .get("site_favicon_media_id")
+        .await
+        .map(|v| v.as_i64())
+    else {
+        return not_found();
+    };
+    match state.media.get(id).await {
+        Ok(row) if row.mime == "image/png" => {
+            serve_media_option(&state, "site_favicon_media_id").await
+        }
+        _ => not_found(),
+    }
+}
+
 /// `GET /logo` — serves `site_logo_media_id`.
 pub async fn logo(State(state): State<AppState>) -> R {
     serve_media_option(&state, "site_logo_media_id").await

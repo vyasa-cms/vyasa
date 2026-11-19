@@ -56,6 +56,10 @@ pub fn router(state: &AppState) -> Router<AppState> {
             get(crate::public::routes::preview_theme),
         )
         .route("/favicon.ico", get(crate::public::routes::favicon))
+        .route(
+            "/apple-touch-icon.png",
+            get(crate::public::routes::apple_touch_icon),
+        )
         .route("/logo", get(crate::public::routes::logo))
         .route("/brand/mark.svg", get(crate::public::routes::brand_mark))
         .route("/custom.css", get(crate::public::routes::custom_css_route))
