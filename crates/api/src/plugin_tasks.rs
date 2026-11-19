@@ -9,6 +9,7 @@
 use vyasa_common::AppError;
 use vyasa_plugins::host::{HostEnv, V2Outcome};
 
+use crate::plugin_surface::TaskDecl;
 use crate::state::AppState;
 
 /// How often the runner looks for due work.
@@ -81,9 +82,15 @@ pub fn spawn_runner(state: AppState) {
             tick.tick().await;
             let declared = state.plugin_surface.tasks().await;
             for (plugin_id, name) in claim_due(&state).await {
-                let extended = declared
-                    .iter()
-                    .any(|t| t.plugin_id == plugin_id && t.name == name && t.extended);
+                let Some(task) = declaration(&declared, plugin_id, &name) else {
+                    // The plugin was disabled or refreshed between the
+                    // claim and now: with no declaration there is nothing
+                    // to run, and running it would call a plugin that no
+                    // longer offers the task.
+                    tracing::debug!(plugin_id, task = %name, "claimed task has no declaration; skipped");
+                    continue;
+                };
+                let extended = task.extended;
                 if extended {
                     // A minute-long run must not hold back every other
                     // plugin's tasks; the claim already stops this one
@@ -98,6 +105,14 @@ pub fn spawn_runner(state: AppState) {
             }
         }
     });
+}
+
+/// The declaration of a claimed task, or `None` when the plugin no longer
+/// declares it (disabled or refreshed after the claim).
+fn declaration<'a>(declared: &'a [TaskDecl], plugin_id: i64, name: &str) -> Option<&'a TaskDecl> {
+    declared
+        .iter()
+        .find(|t| t.plugin_id == plugin_id && t.name == name)
 }
 
 /// Claims every task that is due, marking it run before running it.
@@ -171,5 +186,29 @@ async fn run_one(state: &AppState, plugin_id: i64, name: &str, extended: bool) {
     .await;
     if let Err(e) = recorded {
         tracing::warn!(plugin_id, task = name, "could not record task result: {e}");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn decl(plugin_id: i64, name: &str, extended: bool) -> TaskDecl {
+        TaskDecl {
+            plugin_id,
+            name: name.to_owned(),
+            every_seconds: 60,
+            extended,
+        }
+    }
+
+    #[test]
+    fn an_undeclared_claim_has_no_declaration_and_a_declared_one_keeps_its_budget() {
+        let declared = vec![decl(1, "sync", true), decl(2, "sync", false)];
+        assert!(declaration(&declared, 1, "sync").unwrap().extended);
+        assert!(!declaration(&declared, 2, "sync").unwrap().extended);
+        assert!(declaration(&declared, 1, "gone").is_none());
+        assert!(declaration(&declared, 3, "sync").is_none());
+        assert!(declaration(&[], 1, "sync").is_none());
     }
 }
