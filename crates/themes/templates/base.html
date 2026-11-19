@@ -11,7 +11,7 @@
 <title>{% block title %}{% if page.title %}{{ page.title }}{% else %}Untitled{% endif %} — {% if site.name %}{{ site.name }}{% else %}Vyasa{% endif %}{% endblock %}</title>
 <style>{{ page.tokens_css | default(value="") | safe }}</style>
 <style>{{ page.base_css | default(value="") | safe }}</style>
-<link rel="stylesheet" href="/custom.css">{{ page.theme_assets | default(value="") | safe }}
+{% if site.custom_css %}<link rel="stylesheet" href="/custom.css">{% endif %}{{ page.theme_assets | default(value="") | safe }}
 {{ page.head | default(value="") | safe }}
 <script src="/theme-assets/components.js" defer></script>
 </head>

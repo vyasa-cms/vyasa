@@ -80,3 +80,42 @@ fn layout_json_reads_the_option() {
     let l: Layout = serde_json::from_str(r#"{"credit":"theme"}"#).expect("parses");
     assert_eq!(l.credit, Credit::Theme);
 }
+
+#[test]
+fn a_template_reads_the_site_url_and_prints_the_custom_css_link_only_when_there_is_css() {
+    let mut engine = Engine::builtin().expect("builtin");
+    engine
+        .install_theme_templates(&[(
+            "page.html",
+            "[{{ site.url | safe }}|{{ page.post_iso_updated }}]",
+        )])
+        .expect("installs");
+    let render = |site: SiteMeta| {
+        futures::executor::block_on(render_page(RenderRequest {
+            engine: &engine,
+            layout: &Layout::default(),
+            registry: &builtin_registry(),
+            tokens: &TokenSet::default(),
+            template: TemplateType::Page,
+            site: &site,
+            page: &PageContext {
+                iso_updated: Some("2026-01-02T00:00:00+00:00".to_owned()),
+                ..PageContext::default()
+            },
+            queries: fake_queries::FakeQueries::shared(),
+            post_id: Some(1),
+            content_blocks: None,
+            reply_to: None,
+            editor: false,
+        }))
+        .expect("renders")
+    };
+    let html = render(SiteMeta {
+        url: "https://x.test".to_owned(),
+        ..SiteMeta::default()
+    });
+    assert!(
+        html.contains("[https://x.test|2026-01-02T00:00:00+00:00]"),
+        "{html}"
+    );
+}

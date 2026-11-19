@@ -150,6 +150,29 @@ pub(crate) async fn missing(state: &AppState) -> R {
 
 /// Site identity from options, with safe defaults.
 async fn site_meta(state: &AppState, asset_head: &str) -> SiteMeta {
+    let url = state
+        .options
+        .get("site_url")
+        .await
+        .ok()
+        .and_then(|v| {
+            v.as_str()
+                .map(|s| s.trim().trim_end_matches('/').to_owned())
+        })
+        .unwrap_or_default();
+    let mut meta = site_meta_identity(state, asset_head).await;
+    meta.url = url;
+    meta.custom_css = !state
+        .options_service
+        .custom_css()
+        .await
+        .unwrap_or_default()
+        .trim()
+        .is_empty();
+    meta
+}
+
+async fn site_meta_identity(state: &AppState, asset_head: &str) -> SiteMeta {
     match state.options_service.site_identity().await {
         Ok(identity) => SiteMeta {
             asset_head: asset_head.to_owned(),
@@ -165,6 +188,8 @@ async fn site_meta(state: &AppState, asset_head: &str) -> SiteMeta {
                 .map(|id| format!("/api/v1/media/{id}/raw")),
             footer_credit: identity.footer_credit,
             color_scheme: identity.color_scheme,
+            url: String::new(),
+            custom_css: false,
         },
         Err(_) => SiteMeta {
             asset_head: asset_head.to_owned(),
@@ -760,6 +785,7 @@ pub(super) async fn render_single(
         crate::plugin_blocks::resolve(state_ref, &mut doc.blocks).await;
         crate::patterns::resolve(state_ref, &mut doc.blocks).await;
         crate::forms::resolve(state_ref, &mut doc.blocks).await;
+        crate::media_dims::resolve(state_ref, &mut doc.blocks).await;
         let content_html = vyasa_themes::render_blocks(&doc.blocks).map_err(internal)?;
         // `content` runs on the entry body before the template wraps it.
         // Nothing was ever registered on this stage, so post-published
@@ -835,6 +861,13 @@ pub(super) async fn render_single(
             iso_date: Some(published.to_rfc3339()),
             updated: (post.updated_at.date_naive() != published.date_naive())
                 .then(|| site.date(post.updated_at)),
+            iso_updated: Some(post.updated_at.max(published).to_rfc3339()),
+            summary: post
+                .excerpt
+                .as_deref()
+                .map(str::trim)
+                .filter(|e| !e.is_empty())
+                .map(str::to_owned),
             terms: page_meta::terms_for(state_ref, post.id).await,
             lang: (!post.lang.is_empty()).then(|| post.lang.clone()),
             head: page_meta::Head::entry(&post, &path, author)
@@ -1958,6 +1991,7 @@ pub async fn preview(
     crate::plugin_blocks::resolve(&state, &mut doc.blocks).await;
     crate::patterns::resolve(&state, &mut doc.blocks).await;
     crate::forms::resolve(&state, &mut doc.blocks).await;
+    crate::media_dims::resolve(&state, &mut doc.blocks).await;
     let content_html = match vyasa_themes::render_blocks(&doc.blocks) {
         Ok(h) => h,
         Err(e) => return internal(e),
@@ -2203,6 +2237,7 @@ pub async fn render_entry_candidate(
     crate::plugin_blocks::resolve(state, &mut doc.blocks).await;
     crate::patterns::resolve(state, &mut doc.blocks).await;
     crate::forms::resolve(state, &mut doc.blocks).await;
+    crate::media_dims::resolve(state, &mut doc.blocks).await;
     let content_html = vyasa_themes::render_blocks(&doc.blocks).map_err(|e| e.to_string())?;
     let page = PageContext {
         title: post.title.clone(),
@@ -2305,6 +2340,7 @@ async fn preview_single(
     crate::plugin_blocks::resolve(state, &mut doc.blocks).await;
     crate::patterns::resolve(state, &mut doc.blocks).await;
     crate::forms::resolve(state, &mut doc.blocks).await;
+    crate::media_dims::resolve(state, &mut doc.blocks).await;
     let content_html = vyasa_themes::render_blocks(&doc.blocks).map_err(|e| e.to_string())?;
     let page = PageContext {
         title: post.title.clone(),

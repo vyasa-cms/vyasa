@@ -417,12 +417,20 @@ impl Head {
                 esc(&href)
             );
         }
-        if let Some(url) = pick_canonical(
-            self.canonical.as_deref(),
-            self.canonical_path.as_deref(),
-            &self.path,
-            |p| site.absolute(p),
-        ) {
+        // A page kept out of the index names no canonical: the 404 used to
+        // declare the home page as its own canonical address.
+        if let Some(url) = self
+            .indexable
+            .then(|| {
+                pick_canonical(
+                    self.canonical.as_deref(),
+                    self.canonical_path.as_deref(),
+                    &self.path,
+                    |p| site.absolute(p),
+                )
+            })
+            .flatten()
+        {
             let _ = write!(out, "\n<link rel=\"canonical\" href=\"{}\">", esc(&url));
             let _ = write!(
                 out,

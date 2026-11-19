@@ -40,6 +40,7 @@ mod indexnow;
 mod locks;
 mod mail;
 mod mcp;
+mod media_dims;
 mod media_jobs;
 mod media_s3;
 mod media_storage;

@@ -32,6 +32,12 @@ pub struct SiteMeta {
     /// The site's default colour scheme: `system` (follow the visitor's OS),
     /// `light` or `dark`. A visitor's own toggle still wins.
     pub color_scheme: String,
+    /// The site's public address without a trailing slash (`site_url`), or
+    /// empty when the site has not set one. Templates read it as `site.url`.
+    pub url: String,
+    /// Whether the site has author CSS; the stylesheet link is printed only
+    /// then, since an empty one still blocks rendering.
+    pub custom_css: bool,
 }
 
 impl Default for SiteMeta {
@@ -44,6 +50,8 @@ impl Default for SiteMeta {
             asset_head: String::new(),
             footer_credit: true,
             color_scheme: "system".to_owned(),
+            url: String::new(),
+            custom_css: true,
         }
     }
 }
@@ -82,6 +90,10 @@ pub struct PageContext {
     pub iso_date: Option<String>,
     /// Formatted "last updated" date, when it differs from publication.
     pub updated: Option<String>,
+    /// RFC 3339 last-modified timestamp, never earlier than the publication one.
+    pub iso_updated: Option<String>,
+    /// The entry's summary (its excerpt) as plain text.
+    pub summary: Option<String>,
     /// Categories and tags of the current entry.
     pub terms: Vec<TermLink>,
     /// Ready-to-emit `<head>` markup: description, canonical, social
@@ -335,7 +347,10 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
     let page_body = render_page_sections(registry, &ctx_resolve, page).await?;
 
     let mut ctx = serde_json::json!({
-        "site": { "name": site.name, "tagline": site.tagline, "lang": site.lang },
+        "site": {
+            "name": site.name, "tagline": site.tagline, "lang": site.lang, "url": site.url,
+            "custom_css": site.custom_css,
+        },
         // `credit_html` is what a theme with `"credit": "theme"` prints in
         // its own footer. Empty when the site turned the credit off.
         "vyasa": { "credit_html": if site.footer_credit { FOOTER_CREDIT } else { "" } },
@@ -353,6 +368,8 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
             "post_date": page.date,
             "post_iso_date": page.iso_date,
             "post_updated": page.updated,
+            "post_iso_updated": page.iso_updated,
+            "post_summary": page.summary,
             "terms": page.terms.iter().map(|t| serde_json::json!({
                 "name": t.name, "url": t.url, "taxonomy": t.taxonomy,
             })).collect::<Vec<_>>(),
