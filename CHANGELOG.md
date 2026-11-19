@@ -7,6 +7,9 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Added
+- The base and highlight stylesheets are served as minified files with a content hash in the name and a one-year cache (`/theme-assets/vy-base-<hash>.css`, `vy-hl-<hash>.css`). Templates get their addresses as `page.base_css_url` and `page.highlight_css_url` (empty on a page without code), and the page-dependent rules as `page.scopes_css`; `page.base_css` is unchanged for themes that print it.
+
 ## [0.4.2] - 2026-11-13
 
 ### Fixed

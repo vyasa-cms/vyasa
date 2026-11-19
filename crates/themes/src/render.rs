@@ -231,6 +231,13 @@ impl<'a> RenderRequest<'a> {
     }
 }
 
+/// Whether the page holds highlighted code.
+fn page_has_code(page: &PageContext) -> bool {
+    page.regions_extra
+        .iter()
+        .any(|(_, html)| html.contains("vy-hl-"))
+}
+
 /// Base rules plus the section stylesheet, so a composed layout has the
 /// grid and band rules its markup references; scope rules per theme; and
 /// the highlight palette only when the page actually holds highlighted
@@ -241,20 +248,12 @@ fn page_base_css(tokens: &TokenSet, layout: &Layout, page: &PageContext) -> Stri
         crate::base_css::base_css(tokens),
         crate::sections::sections_css(tokens),
         crate::css::scopes_css(layout, &page.sections, tokens),
-        if page
-            .regions_extra
-            .iter()
-            .any(|(_, html)| html.contains("vy-hl-"))
-        {
+        if page_has_code(page) {
             crate::renderer::highlight::highlight_css()
         } else {
             ""
         },
-        if page
-            .regions_extra
-            .iter()
-            .any(|(_, html)| html.contains("vy-hl-"))
-        {
+        if page_has_code(page) {
             crate::css::code_palette_css(tokens)
         } else {
             String::new()
@@ -370,6 +369,17 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
             // has the grid and band rules its markup references. Scope rules
             // are appended per-theme below.
             "base_css": page_base_css(tokens, layout, page),
+            // The same rules as files with a content hash in the name, for a
+            // theme that links them instead of printing `base_css`.
+            // `scopes_css` is what depends on the page and stays inline;
+            // `highlight_css_url` is empty on a page without code.
+            "base_css_url": crate::shared_css::base_sheet(tokens).url(),
+            "highlight_css_url": if page_has_code(page) {
+                crate::shared_css::highlight_sheet(tokens).url()
+            } else {
+                String::new()
+            },
+            "scopes_css": crate::css::scopes_css(layout, &page.sections, tokens),
         },
         "posts": page.posts.iter().map(|p| serde_json::json!({
             "title": p.title, "url": p.url, "excerpt": p.excerpt,
