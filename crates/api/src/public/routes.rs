@@ -120,16 +120,32 @@ async fn load_bundle(state: &AppState) -> Result<std::sync::Arc<ThemeBundle>, R>
         }
         Err(e) => return Err(internal(e)),
     };
-    let bundle = std::sync::Arc::new(
-        bundle_from_docs(
-            &active.tokens,
-            &active.layout,
-            active.templates.as_ref(),
-            active.assets.as_ref(),
-            crate::render_cache::theme_namespace(&active.name, active.version),
-        )
-        .map_err(internal)?,
-    );
+    let mut bundle = bundle_from_docs(
+        &active.tokens,
+        &active.layout,
+        active.templates.as_ref(),
+        active.assets.as_ref(),
+        crate::render_cache::theme_namespace(&active.name, active.version),
+    )
+    .map_err(internal)?;
+    // A theme that bundles a web app manifest has it linked from every
+    // head. Looked up here, once per theme version, never per request.
+    if let Ok(Some(row)) = state
+        .themes
+        .file(active.id, vyasa_themes::package::MANIFEST_PATH)
+        .await
+    {
+        let hash = row.sha256.get(..16).unwrap_or(&row.sha256);
+        {
+            use std::fmt::Write as _;
+            let _ = write!(
+                bundle.asset_head,
+                "\n<link rel=\"manifest\" href=\"/theme-assets/{}?v={hash}\">",
+                vyasa_themes::package::MANIFEST_PATH
+            );
+        }
+    }
+    let bundle = std::sync::Arc::new(bundle);
     state.theme_bundle.put(bundle.clone());
     Ok(bundle)
 }
