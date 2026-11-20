@@ -238,6 +238,13 @@ impl Guest for Docs {
         if name != "sync" {
             return Ok(());
         }
+        // A sync belongs to the extended budget: under an ordinary call (2 s) it
+        // cannot finish, and a guest still running at the host's deadline is
+        // trapped, which disables the plugin. Do no network work at all.
+        let total = u64::from(host::call_budget_ms());
+        if !sync::sync_fits(total) {
+            return Ok(());
+        }
         let s = settings();
         if !s.configured() {
             return Ok(());
@@ -263,9 +270,8 @@ impl Guest for Docs {
         }
         host::kv_set("sync/last-run-ms", &now.to_string())?;
         // Stop short of the host's own deadline: a trap would disable the plugin.
-        let total = u64::from(host::call_budget_ms());
-        let usable = total.saturating_sub((total / 5).max(400));
-        let long = total > 10_000;
+        let usable = sync::usable_ms(total);
+        let long = total > sync::ORDINARY_BUDGET_MS;
         let budget = Budget {
             deadline_ms: now + usable,
             max_requests: if long { 250 } else { 12 },
@@ -351,7 +357,7 @@ impl Guest for Docs {
     fn filter_at(point: String, payload: String) -> String {
         match point.as_str() {
             "register-sections" => sections::descriptors().to_string(),
-            "render-section" => sections::render(&payload, &settings()),
+            "render-section" => sections::render_with(&payload, settings),
             "register-layouts" => sections::default_layouts().to_string(),
             _ => payload,
         }

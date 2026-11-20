@@ -18,8 +18,11 @@ use crate::frontmatter;
 use crate::github::{self, Repo};
 use crate::plan::{self, Kind, Meta, PageInfo, Planned, Root};
 
-/// Bump to rewrite every entry after an importer change.
-pub const FORMAT: &str = "f2";
+/// Bump to rewrite every entry after an importer change. 0.1.9 bumps it (f3)
+/// once so that the first sync after the upgrade writes every entry again: a
+/// host that now repairs a wrong stored status (a draft root) then does so
+/// for entries whose source did not change.
+pub const FORMAT: &str = "f3";
 /// Largest page the importer reads.
 pub const MAX_PAGE_BYTES: u64 = 512 * 1024;
 /// Page text kept between the scan and the write of one run.
@@ -1364,8 +1367,34 @@ pub fn civil_date(ms: u64) -> String {
     format!("{:04}-{:02}-{:02}", if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+/// Calls up to this long are ordinary host calls; a sync needs more.
+pub const ORDINARY_BUDGET_MS: u64 = 10_000;
+/// Kept back for the last request, the parse after it and the status write.
+/// One GitHub tree request takes about 300 ms and its listing 160 KB to parse.
+pub const RESERVE_MS: u64 = 1_000;
+
+/// Whether a call of `total` ms may run a sync at all.
+pub fn sync_fits(total: u64) -> bool {
+    total > ORDINARY_BUDGET_MS
+}
+
+/// The part of `total` ms in which a new request may start.
+pub fn usable_ms(total: u64) -> u64 {
+    total.saturating_sub((total / 5).max(RESERVE_MS))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_ordinary_call_does_no_sync_work_and_a_request_keeps_a_one_second_reserve() {
+        assert!(!sync_fits(2_000));
+        assert!(!sync_fits(10_000));
+        assert!(sync_fits(60_000));
+        assert_eq!(usable_ms(2_000), 1_000);
+        assert_eq!(usable_ms(60_000), 48_000);
+        assert_eq!(usable_ms(500), 0);
+    }
+
     use super::*;
     use std::cell::RefCell;
 
