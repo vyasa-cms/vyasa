@@ -33,6 +33,8 @@ pub const MAX_PAGES: usize = 2000;
 /// reads a minute even in an extended task, so a site of a thousand pages
 /// cannot keep one key per page: the cache is a few packs of ~40 KB.
 const PACK_PREFIX: &str = "scanpack/";
+/// Cached tree listings, keyed by commit and folder.
+const TREE_PREFIX: &str = "treecache/";
 /// Largest serialized pack (the key-value store refuses 64 KiB).
 const PACK_MAX_BYTES: usize = 40_000;
 /// Largest single cached text; a bigger one is read again next time.
@@ -707,6 +709,15 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
             cx.env.kv_set(&key, &next)?;
         }
     }
+    // Listings of commits no longer in use.
+    for k in cx.env.kv_list(TREE_PREFIX) {
+        if !heads
+            .iter()
+            .any(|h| k.starts_with(&format!("{TREE_PREFIX}{h}/")))
+        {
+            cx.env.kv_delete(&k);
+        }
+    }
     cx.env.kv_set("sync/complete", "1")?;
     cx.env.kv_set("sync/format", FORMAT)?;
     cx.env
@@ -1076,6 +1087,13 @@ fn list_folder<E: Env>(
     commit: &str,
     folder: &[String],
 ) -> Result<github::Tree, Stop> {
+    // A listing is fixed by its commit, so a round cut short by the budget
+    // reuses it: an anonymous run has 60 GitHub API calls an hour, and
+    // listing again on every round used them all before any page was made.
+    let key = format!("{TREE_PREFIX}{commit}/{}", folder.join("/"));
+    if let Some(t) = cx.env.kv_get(&key).and_then(|v| parse_cached_tree(&v)) {
+        return Ok(t);
+    }
     let mut tree_ref = commit.to_owned();
     for seg in folder {
         let url = github::tree_url(&cx.cfg.repo, &tree_ref, false);
@@ -1093,7 +1111,34 @@ fn list_folder<E: Env>(
     if t.truncated {
         return Err(Stop::Fail("the folder is too large for GitHub to list in one answer; point the importer at a smaller folder".to_owned()));
     }
+    // Best effort: a full quota only costs the next round its requests.
+    let rows: Vec<(&str, bool, &str, u64)> = t
+        .entries
+        .iter()
+        .map(|e| (e.path.as_str(), e.is_dir, e.sha.as_str(), e.size))
+        .collect();
+    let json = serde_json::json!({"sha": t.sha, "entries": rows}).to_string();
+    let _ = cx.env.kv_set(&key, &json);
     Ok(t)
+}
+
+fn parse_cached_tree(v: &str) -> Option<github::Tree> {
+    let c: serde_json::Value = serde_json::from_str(v).ok()?;
+    let mut entries = Vec::new();
+    for row in c.get("entries")?.as_array()? {
+        let r = row.as_array()?;
+        entries.push(github::TreeEntry {
+            path: r.first()?.as_str()?.to_owned(),
+            is_dir: r.get(1)?.as_bool()?,
+            sha: r.get(2)?.as_str()?.to_owned(),
+            size: r.get(3)?.as_u64()?,
+        });
+    }
+    Some(github::Tree {
+        sha: c.get("sha")?.as_str()?.to_owned(),
+        truncated: false,
+        entries,
+    })
 }
 
 /// The field values of an entry. Empty text is left out: the host reads
@@ -1910,6 +1955,29 @@ mod tests {
         let second = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
         assert!(second.finished, "{second:?}");
         assert_eq!(f.borrow().entries.len(), 3);
+    }
+
+    #[test]
+    fn a_round_cut_short_does_not_list_the_trees_again() {
+        let f = fake_with(repo_one());
+        let tiny = Budget {
+            deadline_ms: f.borrow().now + 60_000,
+            max_requests: 5,
+            max_writes: 200,
+        };
+        assert!(!run(&mut Wrap(&f), &cfg(), None, tiny).unwrap().finished);
+        let api = |f: &RefCell<Fake>| {
+            f.borrow()
+                .requests
+                .iter()
+                .filter(|u| u.contains("/git/trees/"))
+                .count()
+        };
+        let listed = api(&f);
+        assert!(listed >= 1);
+        let b = budget(&f);
+        assert!(run(&mut Wrap(&f), &cfg(), None, b).unwrap().finished);
+        assert_eq!(api(&f), listed, "the second round listed again");
     }
 
     /// The broker allows 600 key-value reads a minute, extended task or not.
