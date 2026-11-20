@@ -81,9 +81,18 @@ pub fn spawn_runner(state: AppState) {
             tick.tick().await;
             let declared = state.plugin_surface.tasks().await;
             for (plugin_id, name) in claim_due(&state).await {
-                let extended = declared
+                let Some(decl) = declared
                     .iter()
-                    .any(|t| t.plugin_id == plugin_id && t.name == name && t.extended);
+                    .find(|t| t.plugin_id == plugin_id && t.name == name)
+                else {
+                    // Claimed, but its declaration is gone (the plugin was
+                    // disabled or is being refreshed): running it with the
+                    // ordinary budget would trap a task that needs the
+                    // extended one. The next due time retries it.
+                    tracing::debug!(plugin_id, task = %name, "claimed task has no declaration; skipped");
+                    continue;
+                };
+                let extended = decl.extended;
                 if extended {
                     // A minute-long run must not hold back every other
                     // plugin's tasks; the claim already stops this one
