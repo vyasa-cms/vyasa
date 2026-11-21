@@ -76,10 +76,14 @@ pub struct AdminForm {
     pub description: Option<String>,
     /// The fields, in declaration order.
     pub fields: Vec<AdminField>,
+    /// Which collection put the form here; a fresh answer replaces only
+    /// the form of the same collection (see [`PluginSurface::replace_admin`]).
+    #[serde(skip)]
+    load: u64,
 }
 
 /// One settings field.
-#[derive(Clone, Debug, serde::Serialize)]
+#[derive(Clone, Debug, serde::Serialize, utoipa::ToSchema)]
 pub struct AdminField {
     /// Settings key this field reads and writes.
     pub key: String,
@@ -204,6 +208,8 @@ struct Inner {
     routes: Vec<RouteDecl>,
     assets: BTreeMap<i64, AssetBundle>,
     admin: Vec<AdminForm>,
+    /// Last load stamp given to a collected form.
+    admin_loads: u64,
     post_types: BTreeMap<String, PostTypeDecl>,
     taxonomies: BTreeMap<String, TaxonomyDecl>,
     sections: BTreeMap<String, SectionDecl>,
@@ -276,18 +282,23 @@ impl PluginSurface {
             .cloned()
     }
 
-    /// Puts `form` in place of the plugin's current form, keeping its
-    /// position; a plugin with no form yet gets it appended.
-    async fn replace_admin(&self, form: AdminForm) {
+    /// Puts `form`, a fresh answer to a question asked of the form
+    /// collected as `load`, in that form's place. When the plugin was
+    /// forgotten or collected again since (a disable, save, upgrade or
+    /// rollback raced the call), nothing changes: the answer came from an
+    /// instance that is gone. Returns whether the form was replaced.
+    async fn replace_admin(&self, mut form: AdminForm, load: u64) -> bool {
         let mut inner = self.inner.write().await;
-        match inner
+        let Some(slot) = inner
             .admin
             .iter_mut()
-            .find(|f| f.plugin_id == form.plugin_id)
-        {
-            Some(slot) => *slot = form,
-            None => inner.admin.push(form),
-        }
+            .find(|f| f.plugin_id == form.plugin_id && f.load == load)
+        else {
+            return false;
+        };
+        form.load = load;
+        *slot = form;
+        true
     }
 
     /// Every registered custom post type.
@@ -532,8 +543,15 @@ pub async fn fresh_admin_form(state: &AppState, plugin_id: i64) -> Option<AdminF
     else {
         return Some(loaded);
     };
-    state.plugin_surface.replace_admin(form.clone()).await;
-    Some(form)
+    if state
+        .plugin_surface
+        .replace_admin(form.clone(), loaded.load)
+        .await
+    {
+        return Some(form);
+    }
+    // The plugin changed while it was asked: what is registered now wins.
+    state.plugin_surface.admin_form(plugin_id).await
 }
 
 /// How a plugin's declarations meet an administrator's content types.
@@ -1143,7 +1161,9 @@ fn collect_assets(
 }
 
 fn collect_admin(inner: &mut Inner, plugin_id: i64, name: &str, value: &serde_json::Value) {
-    if let Some(form) = parse_admin(plugin_id, name, value) {
+    if let Some(mut form) = parse_admin(plugin_id, name, value) {
+        inner.admin_loads += 1;
+        form.load = inner.admin_loads;
         inner.admin.push(form);
     }
 }
@@ -1232,6 +1252,7 @@ fn parse_admin(plugin_id: i64, name: &str, value: &serde_json::Value) -> Option<
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned),
         fields,
+        load: 0,
     })
 }
 
@@ -1783,7 +1804,8 @@ mod tests {
             );
             let fresh = parse_admin(1, "p", &serde_json::json!({"title": "P", "fields": [{"key": "a", "help": "Last sync: 2 minutes ago."}]}))
                 .expect("a usable form");
-            surface.replace_admin(fresh).await;
+            let load = surface.admin_form(1).await.expect("loaded").load;
+            assert!(surface.replace_admin(fresh, load).await);
             let forms = surface.admin_forms().await;
             assert_eq!(forms.len(), 2, "replaced, not appended");
             assert_eq!(forms[0].plugin_id, 1, "keeps its place");
@@ -1798,6 +1820,51 @@ mod tests {
             parse_admin(1, "p", &serde_json::json!({"fields": [{"key": "bad key"}]})).is_none(),
             "a form with no usable field is no form"
         );
+    }
+
+    #[test]
+    fn a_fresh_answer_from_a_plugin_changed_meanwhile_is_dropped() {
+        let declared = serde_json::json!({"fields": [{"key": "a", "help": "old"}]});
+        let stale = parse_admin(
+            1,
+            "p",
+            &serde_json::json!({"fields": [{"key": "a", "help": "stale"}]}),
+        )
+        .expect("a usable form");
+        let mut inner = Inner::default();
+        collect_admin(&mut inner, 1, "p", &declared);
+        let surface = PluginSurface {
+            inner: tokio::sync::RwLock::new(inner),
+        };
+        futures::executor::block_on(async {
+            // Disabled while it was asked: the form stays gone.
+            let load = surface.admin_form(1).await.expect("loaded").load;
+            surface.forget(1).await;
+            assert!(!surface.replace_admin(stale.clone(), load).await);
+            assert!(surface.admin_forms().await.is_empty(), "not resurrected");
+
+            // Collected again (a save or an upgrade) while it was asked:
+            // the new collection's form is the only one, unchanged.
+            {
+                let mut inner = surface.inner.write().await;
+                collect_admin(&mut inner, 1, "p", &declared);
+            }
+            let load = surface.admin_form(1).await.expect("loaded").load;
+            surface.forget_for_refresh(1).await;
+            {
+                let mut inner = surface.inner.write().await;
+                collect_admin(
+                    &mut inner,
+                    1,
+                    "p",
+                    &serde_json::json!({"fields": [{"key": "a", "help": "new"}]}),
+                );
+            }
+            assert!(!surface.replace_admin(stale, load).await);
+            let forms = surface.admin_forms().await;
+            assert_eq!(forms.len(), 1, "no second form");
+            assert_eq!(forms[0].fields[0].help.as_deref(), Some("new"));
+        });
     }
 
     #[test]

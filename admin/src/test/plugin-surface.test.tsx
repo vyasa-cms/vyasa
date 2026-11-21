@@ -152,6 +152,23 @@ describe("plugin surface", () => {
     expect(await screen.findByText("Last sync: just now.")).toBeInTheDocument();
   });
 
+  it("saves a field the plugin added while a draft was open with its default", async () => {
+    const user = userEvent.setup();
+    const loaded = surface.forms[0]!;
+    let answer: (form: typeof loaded) => void = () => {};
+    mocked.getPluginForm.mockReturnValue(new Promise((resolve) => (answer = resolve)));
+    render(makeApp());
+    await user.selectOptions(await screen.findByLabelText("Star glyph"), "●");
+    answer({
+      ...loaded,
+      fields: [...loaded.fields, { key: "shelf", label: "Shelf", kind: "text", help: null, options: [], default: "main" }],
+    });
+    expect(await screen.findByLabelText("Shelf")).toBeInTheDocument();
+    await user.click(screen.getByTestId("plugin-form-save-bookshelf"));
+    await waitFor(() => expect(mocked.putPluginSetting).toHaveBeenCalledWith("1", "shelf", "main"));
+    expect(mocked.putPluginSetting).toHaveBeenCalledWith("1", "star", "●");
+  });
+
   it("hides itself entirely when no plugin contributes anything", async () => {
     mocked.getPluginSurface.mockResolvedValue({
       blocks: [],

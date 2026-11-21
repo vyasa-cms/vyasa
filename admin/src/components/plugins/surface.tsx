@@ -191,14 +191,12 @@ export function SettingsForm({ form: loaded }: { form: PluginForm }) {
   const secretFlags = (stored.data?.["__secrets"] ?? {}) as Record<string, boolean>;
   const [secretActions, setSecretActions] = React.useState<Record<string, "set" | "clear">>({});
 
-  const values =
-    draft ??
-    Object.fromEntries(
-      form.fields.map((f) => [
-        f.key,
-        f.kind === "secret" ? "" : (stored.data?.[f.key] ?? f.default ?? defaultFor(f)),
-      ]),
-    );
+  const initial = (f: PluginField) =>
+    f.kind === "secret" ? "" : (stored.data?.[f.key] ?? f.default ?? defaultFor(f));
+  // Under the draft, so a field the plugin added after the draft was opened
+  // (the form is fetched again every minute) shows and saves its stored or
+  // default value.
+  const values = { ...Object.fromEntries(form.fields.map((f) => [f.key, initial(f)])), ...draft };
 
   const save = useMutation({
     mutationFn: async () => {

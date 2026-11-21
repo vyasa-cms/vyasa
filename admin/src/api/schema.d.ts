@@ -3855,6 +3855,24 @@ export interface components {
             timezone?: string | null;
             username?: string | null;
         };
+        /** @description One settings field. */
+        AdminField: {
+            /** @description Default value, as JSON. */
+            default: unknown;
+            /** @description Optional help text. */
+            help?: string | null;
+            /** @description Settings key this field reads and writes. */
+            key: string;
+            /**
+             * @description One of `text`, `textarea`, `number`, `boolean`, `select`, `secret`
+             *     (write-only: its value is never returned by a settings read).
+             */
+            kind: string;
+            /** @description Label shown to the operator. */
+            label: string;
+            /** @description Choices, for `select`. */
+            options: string[];
+        };
         /** @description An administrator's content type as stored. */
         AdminType: {
             /**
@@ -5211,6 +5229,19 @@ export interface components {
             posts: unknown[];
             submissions: unknown[];
             subscriptions: unknown[];
+        };
+        /** @description One plugin's settings form, as the plugin declares it now. */
+        PluginFormResponse: {
+            /** @description Optional explanatory paragraph. */
+            description?: string | null;
+            /** @description The fields, in declaration order. */
+            fields: components["schemas"]["AdminField"][];
+            /** @description Owning plugin, as a string id. */
+            pluginId: string;
+            /** @description Owning plugin's name. */
+            pluginName: string;
+            /** @description Heading for the form. */
+            title: string;
         };
         /** @description Response shape for a plugin. */
         PluginResponse: {
@@ -9383,7 +9414,7 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content: {
-                    "application/json": unknown;
+                    "application/json": components["schemas"]["PluginFormResponse"];
                 };
             };
             /** @description No settings form loaded */
