@@ -529,6 +529,18 @@ fn listings_and_feeds(base: &str) {
     let category = get(base, "/category/rust");
     assert!(category.contains("First entry"), "category archive empty");
 
+    // A term has its own feed: only the posts filed under it, and the
+    // archive says where the feed is. An unknown term is a 404.
+    let term_feed = get(base, "/category/rust/feed.xml");
+    assert!(term_feed.contains("/post/first-entry"), "term feed item");
+    assert!(
+        !term_feed.contains("second-entry"),
+        "term feed holds a post outside the term"
+    );
+    assert!(term_feed.contains("Rust"), "term feed has no term title");
+    let unknown = http(ureq::get(format!("{base}/tag/none/feed.xml").as_str()).call());
+    assert_eq!(unknown.status(), 404);
+
     // Feeds and the sitemap skip reusable patterns and link at real routes.
     let feed = get(base, "/feed.xml");
     assert!(feed.contains("/post/first-entry"), "feed item link");

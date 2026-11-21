@@ -67,10 +67,11 @@ pub struct BoundQuery<'a> {
 /// ORDER BY can be interpolated without carrying author input into SQL.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum PostSort {
-    /// Most recently created first (the historical order).
+    /// Most recently published first; a draft, which has no publication
+    /// time yet, sorts by when it was created.
     #[default]
     Newest,
-    /// Oldest first.
+    /// Oldest published first.
     Oldest,
     /// Alphabetical by title.
     Title,
@@ -84,8 +85,8 @@ impl PostSort {
     #[must_use]
     pub const fn order_sql(self) -> &'static str {
         match self {
-            Self::Newest => "p.created_at DESC, p.id DESC",
-            Self::Oldest => "p.created_at ASC, p.id ASC",
+            Self::Newest => "COALESCE(p.published_at, p.created_at) DESC, p.id DESC",
+            Self::Oldest => "COALESCE(p.published_at, p.created_at) ASC, p.id ASC",
             Self::Title => "p.title ASC, p.id ASC",
             Self::Updated => "p.updated_at DESC, p.id DESC",
         }

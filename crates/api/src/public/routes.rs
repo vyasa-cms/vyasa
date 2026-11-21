@@ -32,6 +32,10 @@ pub struct ThemeBundle {
     /// bytes does not bust a visitor's cache, and the URL changes the
     /// moment they do.
     asset_head: String,
+    /// The shared stylesheet and its content-addressed URL. `None` when the
+    /// theme overrides a template that prints `base_css` itself: such a
+    /// template has no `<link>` for the file, so the rules stay inline.
+    shared_css: Option<(String, String)>,
 }
 
 type R = Response;
@@ -46,6 +50,8 @@ fn bundle_from_docs(
     assets: Option<&serde_json::Value>,
     version: String,
 ) -> Result<ThemeBundle, String> {
+    let tokens: TokenSet =
+        serde_json::from_value(tokens.clone()).map_err(|e| format!("tokens: {e}"))?;
     let mut engine = Engine::builtin().map_err(|e| e.to_string())?;
     let pairs: Vec<(&str, &str)> = templates
         .and_then(serde_json::Value::as_object)
@@ -56,9 +62,19 @@ fn bundle_from_docs(
     engine
         .install_theme_templates(&pairs)
         .map_err(|e| e.to_string())?;
+    // A theme template that prints `page.base_css` is a copy of the old
+    // base.html and would lose the rules if they moved to a file.
+    let overrides_base_css = pairs.iter().any(|(_, src)| src.contains("base_css"));
+    let shared_css = (!overrides_base_css).then(|| {
+        use sha2::{Digest, Sha256};
+        let css = vyasa_themes::shared_css(&tokens);
+        let hash = hex::encode(&Sha256::digest(css.as_bytes())[..8]);
+        (css, format!("/theme-assets/shared.css?v={hash}"))
+    });
     Ok(ThemeBundle {
+        shared_css,
         layout: serde_json::from_value(layout.clone()).map_err(|e| format!("layout: {e}"))?,
-        tokens: serde_json::from_value(tokens.clone()).map_err(|e| format!("tokens: {e}"))?,
+        tokens,
         asset_head: crate::theme_assets::head_tags(assets),
         version,
         engine,
@@ -120,16 +136,33 @@ async fn load_bundle(state: &AppState) -> Result<std::sync::Arc<ThemeBundle>, R>
         }
         Err(e) => return Err(internal(e)),
     };
-    let bundle = std::sync::Arc::new(
-        bundle_from_docs(
-            &active.tokens,
-            &active.layout,
-            active.templates.as_ref(),
-            active.assets.as_ref(),
-            crate::render_cache::theme_namespace(&active.name, active.version),
-        )
-        .map_err(internal)?,
-    );
+    let mut bundle = bundle_from_docs(
+        &active.tokens,
+        &active.layout,
+        active.templates.as_ref(),
+        active.assets.as_ref(),
+        crate::render_cache::theme_namespace(&active.name, active.version),
+    )
+    .map_err(internal)?;
+    // A theme that bundles a web app manifest has it linked from every
+    // head. Looked up here, once per theme version, never per request.
+    // A failed lookup is an error, not a missing manifest: the bundle is
+    // cached, and one that silently lacked the link would stay so.
+    if let Some(row) = state
+        .themes
+        .file(active.id, vyasa_themes::package::MANIFEST_PATH)
+        .await
+        .map_err(internal)?
+    {
+        use std::fmt::Write as _;
+        let hash = row.sha256.get(..16).unwrap_or(&row.sha256);
+        let _ = write!(
+            bundle.asset_head,
+            "\n<link rel=\"manifest\" href=\"/theme-assets/{}?v={hash}\">",
+            vyasa_themes::package::MANIFEST_PATH
+        );
+    }
+    let bundle = std::sync::Arc::new(bundle);
     state.theme_bundle.put(bundle.clone());
     Ok(bundle)
 }
@@ -149,10 +182,13 @@ pub(crate) async fn missing(state: &AppState) -> R {
 }
 
 /// Site identity from options, with safe defaults.
-async fn site_meta(state: &AppState, asset_head: &str) -> SiteMeta {
+async fn site_meta(state: &AppState, bundle: &ThemeBundle) -> SiteMeta {
+    let asset_head = bundle.asset_head.as_str();
+    let base_css_href = bundle.shared_css.as_ref().map(|(_, href)| href.clone());
     match state.options_service.site_identity().await {
         Ok(identity) => SiteMeta {
             asset_head: asset_head.to_owned(),
+            base_css_href,
             name: if identity.title.is_empty() {
                 "Vyasa".to_owned()
             } else {
@@ -168,6 +204,7 @@ async fn site_meta(state: &AppState, asset_head: &str) -> SiteMeta {
         },
         Err(_) => SiteMeta {
             asset_head: asset_head.to_owned(),
+            base_css_href,
             ..SiteMeta::default()
         },
     }
@@ -563,7 +600,7 @@ async fn render_raw(
     editor: bool,
     content_blocks: Option<&[vyasa_core::block::Block]>,
 ) -> Result<String, String> {
-    let site = site_meta(state, &bundle.asset_head).await;
+    let site = site_meta(state, bundle).await;
     let owned = filtered_page(state, page).await;
     let page = owned.as_ref().unwrap_or(page);
     let registry = crate::plugin_sections::registry_with_plugins(state).await;
@@ -1018,7 +1055,7 @@ async fn render_entry(
     reply_to: Option<i64>,
     editor: bool,
 ) -> Result<String, R> {
-    let site = site_meta(state, &bundle.asset_head).await;
+    let site = site_meta(state, bundle).await;
     let owned = filtered_page(state, page).await;
     let page = owned.as_ref().unwrap_or(page);
     let registry = crate::plugin_sections::registry_with_plugins(state).await;
@@ -1656,6 +1693,7 @@ async fn archive_impl(
         let page_ctx = PageContext {
             title: format!("{} — {taxonomy}", term.name),
             archive_title: Some(term.name.clone()),
+            archive_feed_url: Some(format!("{base}/feed.xml")),
             posts: cards(state_ref, &site, &rows).await,
             pagination_page: page_no,
             pagination_next: has_more.then(|| format!("{base}?page={}", page_no + 1)),
@@ -2115,6 +2153,39 @@ async fn serve_media_option(state: &AppState, key: &str) -> R {
     }
 }
 
+/// `GET /theme-assets/shared.css` — the rules every page of the active theme shares.
+///
+/// Pages link it as `/theme-assets/shared.css?v=<content hash>`, so a response for the
+/// current hash can be cached for good; any other `v` (a page cached before
+/// a theme change) gets the current rules with a short lifetime.
+pub async fn shared_css_route(
+    State(state): State<AppState>,
+    axum::extract::Query(q): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> R {
+    let bundle = match load_bundle(&state).await {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let Some((css, href)) = &bundle.shared_css else {
+        return not_found();
+    };
+    let current = q.get("v").is_some_and(|v| href.ends_with(v.as_str()));
+    let cache = if current {
+        "public, max-age=31536000, immutable"
+    } else {
+        "public, max-age=60"
+    };
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+            (header::CACHE_CONTROL, cache),
+        ],
+        css.clone(),
+    )
+        .into_response()
+}
+
 /// `GET /custom.css` — sanitized author CSS, namespaced under `#vy-site`.
 ///
 /// Always returns 200 so browsers don't log noisy 404s for the `<link>`.
@@ -2155,6 +2226,8 @@ pub async fn render_candidate(
     // The preview links the draft's own assets, so an author sees the
     // stylesheet they are editing rather than the live theme's.
     let mut bundle = bundle_from_docs(tokens, layout, templates, assets, "preview".to_owned())?;
+    // The draft's rules, not the live theme's file.
+    bundle.shared_css = None;
     bundle.asset_head = crate::theme_assets::preview_head(state, assets, base_theme_id)?;
     let html = render_path(state, &bundle, path).await?;
     Ok(crate::theme_assets::preview_urls(&html, base_theme_id))
