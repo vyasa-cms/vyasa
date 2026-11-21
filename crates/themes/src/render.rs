@@ -27,6 +27,10 @@ pub struct SiteMeta {
     /// every page it renders, and because a preview has to link the
     /// *draft's* assets rather than the live theme's.
     pub asset_head: String,
+    /// URL of the shared stylesheet ([`shared_css`]) when the host serves it
+    /// as a cacheable file. `None` keeps those rules inline in every page,
+    /// which is what a preview or a standalone page does.
+    pub base_css_href: Option<String>,
     /// Whether to add the "Made with Vyasa" line to the footer.
     pub footer_credit: bool,
     /// The site's default colour scheme: `system` (follow the visitor's OS),
@@ -42,6 +46,7 @@ impl Default for SiteMeta {
             lang: "en".to_owned(),
             logo_url: None,
             asset_head: String::new(),
+            base_css_href: None,
             footer_credit: true,
             color_scheme: "system".to_owned(),
         }
@@ -233,34 +238,50 @@ impl<'a> RenderRequest<'a> {
     }
 }
 
-/// Base rules plus the section stylesheet, so a composed layout has the
-/// grid and band rules its markup references; scope rules per theme; and
-/// the highlight palette only when the page actually holds highlighted
-/// code (it is a few hundred generated rules).
-fn page_base_css(tokens: &TokenSet, layout: &Layout, page: &PageContext) -> String {
+/// The rules every page of a theme shares: base rules, the section
+/// stylesheet, the highlight rules and the code palette. They depend on the
+/// theme's tokens only, so a host can serve them once as a cacheable file
+/// (see [`SiteMeta::base_css_href`]) instead of inlining ~60 KB per page.
+#[must_use]
+pub fn shared_css(tokens: &TokenSet) -> String {
+    format!(
+        "{}{}{}{}",
+        crate::base_css::base_css(tokens),
+        crate::sections::sections_css(tokens),
+        crate::renderer::highlight::highlight_css(),
+        crate::css::code_palette_css(tokens),
+    )
+}
+
+/// What goes in the page's own `<style>`. With an external stylesheet that
+/// is the scope rules alone (they vary per layout); otherwise base rules plus
+/// the section stylesheet, so a composed layout has the grid and band rules
+/// its markup references, scope rules per theme, and the highlight palette
+/// only when the page holds highlighted code (a few hundred generated rules).
+fn page_base_css(tokens: &TokenSet, layout: &Layout, page: &PageContext, external: bool) -> String {
+    let scopes = crate::css::scopes_css(layout, &page.sections, tokens);
+    if external {
+        return scopes;
+    }
+    let highlighted = page
+        .regions_extra
+        .iter()
+        .any(|(_, html)| html.contains("vy-hl-"));
     format!(
         "{}{}{}{}{}",
         crate::base_css::base_css(tokens),
         crate::sections::sections_css(tokens),
-        crate::css::scopes_css(layout, &page.sections, tokens),
-        if page
-            .regions_extra
-            .iter()
-            .any(|(_, html)| html.contains("vy-hl-"))
-        {
+        scopes,
+        if highlighted {
             crate::renderer::highlight::highlight_css()
         } else {
             ""
         },
-        if page
-            .regions_extra
-            .iter()
-            .any(|(_, html)| html.contains("vy-hl-"))
-        {
+        if highlighted {
             crate::css::code_palette_css(tokens)
         } else {
             String::new()
-        }
+        },
     )
 }
 
@@ -372,7 +393,8 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
             // Base rules plus the section stylesheet, so a composed layout
             // has the grid and band rules its markup references. Scope rules
             // are appended per-theme below.
-            "base_css": page_base_css(tokens, layout, page),
+            "base_css": page_base_css(tokens, layout, page, site.base_css_href.is_some()),
+            "base_css_href": site.base_css_href,
         },
         "posts": page.posts.iter().map(|p| serde_json::json!({
             "title": p.title, "url": p.url, "excerpt": p.excerpt,

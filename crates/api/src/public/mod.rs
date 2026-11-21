@@ -63,6 +63,10 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route("/favicon.ico", get(crate::public::routes::favicon))
         .route("/logo", get(crate::public::routes::logo))
         .route("/brand/mark.svg", get(crate::public::routes::brand_mark))
+        .route(
+            "/theme-assets/shared.css",
+            get(crate::public::routes::shared_css_route),
+        )
         .route("/custom.css", get(crate::public::routes::custom_css_route))
         .route("/feed.xml", get(crate::feeds::rss_route))
         .route("/atom.xml", get(crate::feeds::atom_route))
