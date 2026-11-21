@@ -65,6 +65,8 @@ pub struct PageContext {
     pub archive_description: Option<String>,
     /// An image beside the archive title: an author's avatar.
     pub archive_image: Option<String>,
+    /// The RSS feed of a category or tag archive (`/tag/rust/feed.xml`).
+    pub archive_feed_url: Option<String>,
     /// The entry's own language, when it differs from the site's.
     pub lang: Option<String>,
     /// Post cards for listing templates.
@@ -362,6 +364,7 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
             "archive_title": page.archive_title,
             "archive_description": page.archive_description,
             "archive_image": page.archive_image,
+            "archive_feed_url": page.archive_feed_url,
             "lang": page.lang,
             "tokens_css": tokens_to_css(tokens),
             // The rules that consume those custom properties; without
