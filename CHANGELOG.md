@@ -7,6 +7,9 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Security
+- Dependencies: lettre 0.11.24 (SMTP STARTTLS, dot-stuffing and header-handling advisories) and wasmtime / wasmtime-wasi 50.0.3 (plugin host advisories).
+
 ## [0.4.2] - 2026-11-13
 
 ### Fixed
