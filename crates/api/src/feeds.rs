@@ -52,34 +52,36 @@ pub struct RenderedFeed {
     pub content_type: &'static str,
 }
 
+/// The newest published *posts*, for the home feed or one term's. Pages and custom types are not feed items: a
+/// docs import writes hundreds of pages, and without this filter they filled the newest-50 window and pushed every
+/// post out of both feeds. `readable_types` is passed on, but a post type filter already excludes custom types.
+fn feed_filter(term_id: Option<i64>, readable_types: Option<Vec<String>>) -> PostFilter {
+    PostFilter {
+        status: Some(PostStatus::Published),
+        post_type: Some(vyasa_db::content_models::PostType::Post),
+        limit: FEED_ITEM_LIMIT,
+        term_id,
+        readable_types,
+        ..PostFilter::default()
+    }
+}
+
 /// Builds the feed for a listing.
 ///
-/// `term` selects an optional `(slug, name)` pair for a category archive;
-/// `None` produces the home feed.
+/// `term` selects an optional `(taxonomy, slug, name)` for a category or tag
+/// archive, with its id in `term_id`; `None` produces the home feed.
 ///
 /// # Errors
 /// Returns [`AppError::Db`] on repository failure.
 pub async fn build_feed(
     posts: &vyasa_db::repo::PostsRepo,
     src: &FeedSource<'_>,
-    term: Option<(&str, &str)>,
+    term: Option<(&str, &str, &str)>,
+    term_id: Option<i64>,
     kind: FeedKind,
     readable_types: Option<Vec<String>>,
 ) -> Result<RenderedFeed, AppError> {
-    // `readable_types`: the custom types served publicly; a type declared
-    // or made non-public never reaches a feed.
-    let filter = PostFilter {
-        status: Some(PostStatus::Published),
-        limit: FEED_ITEM_LIMIT,
-        readable_types,
-        ..PostFilter::default()
-    };
-    let rows: Vec<_> = posts
-        .list(&filter)
-        .await?
-        .into_iter()
-        .filter(|p| crate::public::page_meta::is_public_type(p.post_type))
-        .collect();
+    let rows = posts.list(&feed_filter(term_id, readable_types)).await?;
     let rendered = render_feed(src, &rows, term, kind);
     Ok(rendered)
 }
@@ -88,7 +90,7 @@ pub async fn build_feed(
 pub fn render_feed(
     src: &FeedSource<'_>,
     rows: &[PostRow],
-    term: Option<(&str, &str)>,
+    term: Option<(&str, &str, &str)>,
     kind: FeedKind,
 ) -> RenderedFeed {
     // The newest edit, not the newest publication: a post published last
@@ -107,9 +109,9 @@ pub fn render_feed(
         .unwrap_or(DateTime::<Utc>::UNIX_EPOCH);
 
     let (title, self_url) = match term {
-        Some((slug, name)) => (
+        Some((taxonomy, slug, name)) => (
             format!("{} — {name}", src.site_name),
-            format!("{}/category/{}", src.base_url, slug),
+            format!("{}/{taxonomy}/{slug}", src.base_url),
         ),
         None => (src.site_name.to_owned(), format!("{}/", src.base_url)),
     };
@@ -225,7 +227,25 @@ pub async fn rss_route(
     State(state): State<AppState>,
     headers: header::HeaderMap,
 ) -> Result<Response, (StatusCode, String)> {
-    serve(state, &headers, FeedKind::Rss).await
+    serve(state, &headers, FeedKind::Rss, None).await
+}
+
+/// `GET /tag/{slug}/feed.xml`: the posts filed under one tag.
+pub async fn tag_rss_route(
+    State(state): State<AppState>,
+    axum::extract::Path(slug): axum::extract::Path<String>,
+    headers: header::HeaderMap,
+) -> Result<Response, (StatusCode, String)> {
+    serve(state, &headers, FeedKind::Rss, Some(("tag", slug))).await
+}
+
+/// `GET /category/{slug}/feed.xml`: the posts filed under one category.
+pub async fn category_rss_route(
+    State(state): State<AppState>,
+    axum::extract::Path(slug): axum::extract::Path<String>,
+    headers: header::HeaderMap,
+) -> Result<Response, (StatusCode, String)> {
+    serve(state, &headers, FeedKind::Rss, Some(("category", slug))).await
 }
 
 /// `GET /atom.xml`.
@@ -233,13 +253,14 @@ pub async fn atom_route(
     State(state): State<AppState>,
     headers: header::HeaderMap,
 ) -> Result<Response, (StatusCode, String)> {
-    serve(state, &headers, FeedKind::Atom).await
+    serve(state, &headers, FeedKind::Atom, None).await
 }
 
 async fn serve(
     state: AppState,
     headers: &header::HeaderMap,
     kind: FeedKind,
+    term: Option<(&'static str, String)>,
 ) -> Result<Response, (StatusCode, String)> {
     // Previously hardcoded to "Vyasa" at http://localhost:8080, which meant
     // every published feed advertised the wrong name and linked every entry
@@ -272,9 +293,33 @@ async fn serve(
     };
     let posts = PostsRepo::new(state.pool.clone());
     let readable = crate::policy::readable_custom_types(&state, None).await;
-    let rendered = build_feed(&posts, &source, None, kind, readable)
-        .await
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    // A term feed names the term; an unknown term is a 404, not an empty feed.
+    let found = match &term {
+        Some((taxonomy, slug)) => {
+            let tax = vyasa_db::content_models::Taxonomy::parse(taxonomy)
+                .map_err(|_| (StatusCode::NOT_FOUND, "not found".to_owned()))?;
+            let row = vyasa_db::repo::TermsRepo::new(state.pool.clone())
+                .get_by_slug(tax, slug)
+                .await
+                .map_err(|_| (StatusCode::NOT_FOUND, "not found".to_owned()))?;
+            Some(row)
+        }
+        None => None,
+    };
+    let term_arg = match (&term, &found) {
+        (Some((taxonomy, slug)), Some(row)) => Some((*taxonomy, slug.as_str(), row.name.as_str())),
+        _ => None,
+    };
+    let rendered = build_feed(
+        &posts,
+        &source,
+        term_arg,
+        found.as_ref().map(|r| r.id),
+        kind,
+        readable,
+    )
+    .await
+    .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     // `feed-item` runs on the rendered feed before delivery, which is
     // what the contract says it does; it previously ran nowhere.
     let body = crate::public::routes::filter_through_plugins(
@@ -305,6 +350,17 @@ mod tests {
             site_name: "Test",
             tagline: "t",
             base_url: "https://example.test",
+        }
+    }
+
+    #[test]
+    fn the_feed_lists_posts_only_never_pages_or_custom_types() {
+        // A page or a custom-type entry newer than every post must not take a place in the newest-N window.
+        for term_id in [None, Some(7)] {
+            let f = feed_filter(term_id, Some(vec!["doc".to_owned()]));
+            assert_eq!(f.post_type, Some(vyasa_db::content_models::PostType::Post));
+            assert_eq!(f.status, Some(PostStatus::Published));
+            assert_eq!(f.term_id, term_id);
         }
     }
 
@@ -437,7 +493,7 @@ mod tests {
         let rendered = render_feed(
             &source(),
             &[row(5, "Rusty", "rusty", "", true)],
-            Some(("rust", "Rust")),
+            Some(("category", "rust", "Rust")),
             FeedKind::Rss,
         );
         assert!(rendered.body.contains("<title>Vyasa — Rust</title>"));
