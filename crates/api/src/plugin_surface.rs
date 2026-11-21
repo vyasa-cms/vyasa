@@ -417,6 +417,10 @@ impl PluginSurface {
         inner.layouts.retain(|slug, _| !owned.contains(slug));
         inner.post_types.retain(|_, t| t.plugin_id != plugin_id);
         inner.taxonomies.retain(|_, t| t.plugin_id != plugin_id);
+        // Sections too: the first declaration of a kind wins, so one left
+        // behind would shadow the refreshed plugin's own (a new version's
+        // `context`, say) until a restart, and outlive a disable.
+        inner.sections.retain(|_, s| s.plugin_id != plugin_id);
         inner.tasks.retain(|t| t.plugin_id != plugin_id);
         inner.v2_plugins.retain(|id| *id != plugin_id);
         inner.interests.remove(&plugin_id);
@@ -1410,6 +1414,63 @@ mod tests {
         ] {
             assert!(!is_valid_post_type_slug(bad), "{bad}");
         }
+    }
+
+    /// The docs plugin's sections went blank on a live site that had its
+    /// plugin upgraded without a restart: a refresh withdrew everything the
+    /// plugin contributed except its sections, and the first declaration
+    /// of a kind wins, so the old version's declaration (no `context`)
+    /// outlived the upgrade and every section rendered "unresolved".
+    #[tokio::test]
+    async fn a_refresh_replaces_the_plugins_sections_and_keeps_others() {
+        let surface = PluginSurface::new();
+        {
+            let mut inner = surface.inner.write().await;
+            collect_sections(
+                &mut inner,
+                1,
+                "docs",
+                &serde_json::json!([{"kind": "docs/sidebar"}]),
+            );
+            collect_sections(
+                &mut inner,
+                2,
+                "other",
+                &serde_json::json!([{"kind": "other/grid"}]),
+            );
+        }
+        surface.forget_for_refresh(1).await;
+        let kinds: Vec<String> = surface
+            .sections()
+            .await
+            .into_iter()
+            .map(|s| s.kind)
+            .collect();
+        assert_eq!(
+            kinds,
+            ["other/grid"],
+            "the refreshed plugin's kinds are withdrawn"
+        );
+        {
+            let mut inner = surface.inner.write().await;
+            collect_sections(
+                &mut inner,
+                1,
+                "docs",
+                &serde_json::json!([{"kind": "docs/sidebar", "context": ["entry", "tree"]}]),
+            );
+        }
+        let sidebar = surface
+            .sections()
+            .await
+            .into_iter()
+            .find(|s| s.kind == "docs/sidebar")
+            .expect("declared again");
+        assert_eq!(
+            sidebar.context,
+            ["entry", "tree"],
+            "the new declaration wins"
+        );
     }
 
     #[test]
