@@ -7,6 +7,10 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Added
+
+- A theme may bundle `assets/manifest/site.webmanifest`; it is served as `application/manifest+json` under `/theme-assets/manifest/` and linked from every page head.
+
 ### Fixed
 
 - A page description taken from an excerpt or `seo_description` never carries markup (a hand-written excerpt with inline HTML left a half tag in `<meta name="description">`).
