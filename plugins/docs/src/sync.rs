@@ -18,8 +18,11 @@ use crate::frontmatter;
 use crate::github::{self, Repo};
 use crate::plan::{self, Kind, Meta, PageInfo, Planned, Root};
 
-/// Bump to rewrite every entry after an importer change.
-pub const FORMAT: &str = "f2";
+/// Bump to rewrite every entry after an importer change. 0.1.9 bumps it (f3)
+/// once so that the first sync after the upgrade writes every entry again: a
+/// host that now repairs a wrong stored status (a draft root) then does so
+/// for entries whose source did not change.
+pub const FORMAT: &str = "f3";
 /// Largest page the importer reads.
 pub const MAX_PAGE_BYTES: u64 = 512 * 1024;
 /// Page text kept between the scan and the write of one run.
@@ -30,6 +33,8 @@ pub const MAX_PAGES: usize = 2000;
 /// reads a minute even in an extended task, so a site of a thousand pages
 /// cannot keep one key per page: the cache is a few packs of ~40 KB.
 const PACK_PREFIX: &str = "scanpack/";
+/// Cached tree listings, keyed by commit and folder.
+const TREE_PREFIX: &str = "treecache/";
 /// Largest serialized pack (the key-value store refuses 64 KiB).
 const PACK_MAX_BYTES: usize = 40_000;
 /// Largest single cached text; a bigger one is read again next time.
@@ -704,6 +709,15 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
             cx.env.kv_set(&key, &next)?;
         }
     }
+    // Listings of commits no longer in use.
+    for k in cx.env.kv_list(TREE_PREFIX) {
+        if !heads
+            .iter()
+            .any(|h| k.starts_with(&format!("{TREE_PREFIX}{h}/")))
+        {
+            cx.env.kv_delete(&k);
+        }
+    }
     cx.env.kv_set("sync/complete", "1")?;
     cx.env.kv_set("sync/format", FORMAT)?;
     cx.env
@@ -894,6 +908,9 @@ fn make_plan(
         };
         // A section slug may be `product/version`: the root hangs under `product`, which is
         // generated when no section of that name is configured.
+        // The host stores a slug without dots (`0.2` is `0-2`), so links are written in that
+        // form instead of relying on a redirect for each one.
+        let seg = seg.replace('.', "-");
         let (seg_parent, seg_leaf) = match seg.split_once('/') {
             Some((p, l)) => (Some(p.to_owned()), l.to_owned()),
             None => (None, seg.clone()),
@@ -1073,6 +1090,13 @@ fn list_folder<E: Env>(
     commit: &str,
     folder: &[String],
 ) -> Result<github::Tree, Stop> {
+    // A listing is fixed by its commit, so a round cut short by the budget
+    // reuses it: an anonymous run has 60 GitHub API calls an hour, and
+    // listing again on every round used them all before any page was made.
+    let key = format!("{TREE_PREFIX}{commit}/{}", folder.join("/"));
+    if let Some(t) = cx.env.kv_get(&key).and_then(|v| parse_cached_tree(&v)) {
+        return Ok(t);
+    }
     let mut tree_ref = commit.to_owned();
     for seg in folder {
         let url = github::tree_url(&cx.cfg.repo, &tree_ref, false);
@@ -1090,7 +1114,34 @@ fn list_folder<E: Env>(
     if t.truncated {
         return Err(Stop::Fail("the folder is too large for GitHub to list in one answer; point the importer at a smaller folder".to_owned()));
     }
+    // Best effort: a full quota only costs the next round its requests.
+    let rows: Vec<(&str, bool, &str, u64)> = t
+        .entries
+        .iter()
+        .map(|e| (e.path.as_str(), e.is_dir, e.sha.as_str(), e.size))
+        .collect();
+    let json = serde_json::json!({"sha": t.sha, "entries": rows}).to_string();
+    let _ = cx.env.kv_set(&key, &json);
     Ok(t)
+}
+
+fn parse_cached_tree(v: &str) -> Option<github::Tree> {
+    let c: serde_json::Value = serde_json::from_str(v).ok()?;
+    let mut entries = Vec::new();
+    for row in c.get("entries")?.as_array()? {
+        let r = row.as_array()?;
+        entries.push(github::TreeEntry {
+            path: r.first()?.as_str()?.to_owned(),
+            is_dir: r.get(1)?.as_bool()?,
+            sha: r.get(2)?.as_str()?.to_owned(),
+            size: r.get(3)?.as_u64()?,
+        });
+    }
+    Some(github::Tree {
+        sha: c.get("sha")?.as_str()?.to_owned(),
+        truncated: false,
+        entries,
+    })
 }
 
 /// The field values of an entry. Empty text is left out: the host reads
@@ -1364,8 +1415,34 @@ pub fn civil_date(ms: u64) -> String {
     format!("{:04}-{:02}-{:02}", if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+/// Calls up to this long are ordinary host calls; a sync needs more.
+pub const ORDINARY_BUDGET_MS: u64 = 10_000;
+/// Kept back for the last request, the parse after it and the status write.
+/// One GitHub tree request takes about 300 ms and its listing 160 KB to parse.
+pub const RESERVE_MS: u64 = 1_000;
+
+/// Whether a call of `total` ms may run a sync at all.
+pub fn sync_fits(total: u64) -> bool {
+    total > ORDINARY_BUDGET_MS
+}
+
+/// The part of `total` ms in which a new request may start.
+pub fn usable_ms(total: u64) -> u64 {
+    total.saturating_sub((total / 5).max(RESERVE_MS))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_ordinary_call_does_no_sync_work_and_a_request_keeps_a_one_second_reserve() {
+        assert!(!sync_fits(2_000));
+        assert!(!sync_fits(10_000));
+        assert!(sync_fits(60_000));
+        assert_eq!(usable_ms(2_000), 1_000);
+        assert_eq!(usable_ms(60_000), 48_000);
+        assert_eq!(usable_ms(500), 0);
+    }
+
     use super::*;
     use std::cell::RefCell;
 
@@ -1883,6 +1960,29 @@ mod tests {
         assert_eq!(f.borrow().entries.len(), 3);
     }
 
+    #[test]
+    fn a_round_cut_short_does_not_list_the_trees_again() {
+        let f = fake_with(repo_one());
+        let tiny = Budget {
+            deadline_ms: f.borrow().now + 60_000,
+            max_requests: 5,
+            max_writes: 200,
+        };
+        assert!(!run(&mut Wrap(&f), &cfg(), None, tiny).unwrap().finished);
+        let api = |f: &RefCell<Fake>| {
+            f.borrow()
+                .requests
+                .iter()
+                .filter(|u| u.contains("/git/trees/"))
+                .count()
+        };
+        let listed = api(&f);
+        assert!(listed >= 1);
+        let b = budget(&f);
+        assert!(run(&mut Wrap(&f), &cfg(), None, b).unwrap().finished);
+        assert_eq!(api(&f), listed, "the second round listed again");
+    }
+
     /// The broker allows 600 key-value reads a minute, extended task or not.
     /// A site with two sections of about 620 pages each (one folder each)
     /// must sync inside that, on the first run, on a run that
@@ -2058,7 +2158,7 @@ mod tests {
         assert_eq!(product.slug, "engine");
         assert!(product.parent_key.is_none());
         let root = &fk.entries["@section/engine/0.2"].0;
-        assert_eq!(root.slug, "0.2");
+        assert_eq!(root.slug, "0-2");
         assert_eq!(root.parent_key.as_deref(), Some("@section/engine"));
         let calls = &fk.entries["s:engine/0.2:calls.md"].0;
         assert_eq!(calls.parent_key.as_deref(), Some("@section/engine/0.2"));

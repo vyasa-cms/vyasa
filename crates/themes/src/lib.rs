@@ -38,7 +38,9 @@ pub use layout::{
     canonical_layout_json, merge_layouts, page_sections, validate_layout, validate_sections,
     Credit, Layout, MapSettings, Screen, Section, TemplateType, STATIC_REGIONS,
 };
-pub use render::{render_page, PageContext, PostCard, RenderRequest, SiteMeta, TermLink};
+pub use render::{
+    render_page, shared_css, PageContext, PostCard, RenderRequest, SiteMeta, TermLink,
+};
 pub use renderer::blocks::RESOLVED_ATTR as PLUGIN_BLOCK_RESOLVED_ATTR;
 pub use renderer::embed::{resolve_embed as resolve_embed_url, EmbedOutcome};
 pub use renderer::markdown::blocks_to_markdown;

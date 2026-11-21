@@ -113,10 +113,22 @@ pub fn tokens_to_css(tokens: &TokenSet) -> String {
         if let Some(src) = &face.src {
             let _ = write!(
                 out,
-                "@font-face {{\n  font-family: \"{}\";\n  src: url(\"{}\") format(\"woff2\");\n}}\n",
+                "@font-face {{\n  font-family: \"{}\";\n  src: url(\"{}\") format(\"woff2\");\n",
                 css_string(&face.family),
                 css_string(src)
             );
+            // Closed vocabularies: the accessors drop anything else, so no
+            // theme text reaches the stylesheet through these three.
+            if let Some(w) = face.weight_css() {
+                let _ = writeln!(out, "  font-weight: {w};");
+            }
+            if let Some(s) = face.style_css() {
+                let _ = writeln!(out, "  font-style: {s};");
+            }
+            if let Some(d) = face.display_css() {
+                let _ = writeln!(out, "  font-display: {d};");
+            }
+            out.push_str("}\n");
         }
     }
     out
@@ -372,6 +384,45 @@ mod font_src_tests {
     fn an_ordinary_source_is_untouched() {
         let src = "https://fonts.example/inter-var.woff2?v=3&w=400";
         assert_eq!(css_string(src), src);
+    }
+
+    fn face(
+        weight: Option<&str>,
+        style: Option<&str>,
+        display: Option<&str>,
+    ) -> crate::tokens::FontFace {
+        crate::tokens::FontFace {
+            family: "Inter".into(),
+            src: Some("https://fonts.example/inter.woff2".into()),
+            weight: weight.map(str::to_owned),
+            style: style.map(str::to_owned),
+            display: display.map(str::to_owned),
+        }
+    }
+
+    #[test]
+    fn weight_style_and_display_are_printed_when_well_formed() {
+        let f = face(Some("100 900"), Some("italic"), Some("swap"));
+        assert_eq!(f.weight_css(), Some("100 900"));
+        assert_eq!(f.style_css(), Some("italic"));
+        assert_eq!(f.display_css(), Some("swap"));
+        assert_eq!(face(Some("400"), None, None).weight_css(), Some("400"));
+        assert_eq!(face(Some("bold"), None, None).weight_css(), Some("bold"));
+    }
+
+    #[test]
+    fn a_value_that_skipped_validation_is_dropped_not_printed() {
+        let f = face(
+            Some("400; } body{ color:red"),
+            Some("italic; }"),
+            Some("swap</style>"),
+        );
+        assert_eq!(f.weight_css(), None);
+        assert_eq!(f.style_css(), None);
+        assert_eq!(f.display_css(), None);
+        for w in ["0", "1001", "100 900 400", "9e2", "-1", ""] {
+            assert_eq!(face(Some(w), None, None).weight_css(), None, "{w:?}");
+        }
     }
 }
 
