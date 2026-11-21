@@ -908,6 +908,9 @@ fn make_plan(
         };
         // A section slug may be `product/version`: the root hangs under `product`, which is
         // generated when no section of that name is configured.
+        // The host stores a slug without dots (`0.2` is `0-2`), so links are written in that
+        // form instead of relying on a redirect for each one.
+        let seg = seg.replace('.', "-");
         let (seg_parent, seg_leaf) = match seg.split_once('/') {
             Some((p, l)) => (Some(p.to_owned()), l.to_owned()),
             None => (None, seg.clone()),
@@ -2155,7 +2158,7 @@ mod tests {
         assert_eq!(product.slug, "engine");
         assert!(product.parent_key.is_none());
         let root = &fk.entries["@section/engine/0.2"].0;
-        assert_eq!(root.slug, "0.2");
+        assert_eq!(root.slug, "0-2");
         assert_eq!(root.parent_key.as_deref(), Some("@section/engine"));
         let calls = &fk.entries["s:engine/0.2:calls.md"].0;
         assert_eq!(calls.parent_key.as_deref(), Some("@section/engine/0.2"));
