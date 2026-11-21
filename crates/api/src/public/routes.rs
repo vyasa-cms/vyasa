@@ -2525,6 +2525,50 @@ async fn theme_file(
     (StatusCode::OK, headers, row.bytes).into_response()
 }
 
+/// `GET /theme-assets/vy-base-<hash>.css` and `vy-hl-<hash>.css`: the base
+/// and highlight stylesheets, derived from the active theme's tokens. The
+/// name carries a hash of the bytes, so the response is cached for good.
+async fn shared_css_asset(state: &AppState, file: &str) -> R {
+    let bundle = match load_bundle(state).await {
+        Ok(b) => b,
+        Err(r) => return r,
+    };
+    let Some(sheet) = vyasa_themes::shared_css::find(&bundle.tokens, file) else {
+        return StatusCode::NOT_FOUND.into_response();
+    };
+    (
+        StatusCode::OK,
+        [
+            (header::CONTENT_TYPE, "text/css; charset=utf-8"),
+            (header::CACHE_CONTROL, "public, max-age=31536000, immutable"),
+            (
+                axum::http::HeaderName::from_static("x-content-type-options"),
+                "nosniff",
+            ),
+        ],
+        sheet.body,
+    )
+        .into_response()
+}
+
+/// `theme-toggle.js`: linked as `?v=<hash of the script>`, so a versioned
+/// URL never changes meaning; a bare URL stays revalidated.
+fn theme_toggle_js(raw_query: Option<&str>) -> R {
+    let cache = if raw_query.is_some_and(|q| q.starts_with("v=")) {
+        "public, max-age=31536000, immutable"
+    } else {
+        "public, max-age=0, must-revalidate"
+    };
+    (
+        [
+            (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
+            (header::CACHE_CONTROL, cache),
+        ],
+        vyasa_themes::sections::THEME_TOGGLE_JS,
+    )
+        .into_response()
+}
+
 /// `GET /theme-assets/{file}` — the active theme's own CSS or JS.
 ///
 /// The file name carries a content hash, so the URL changes whenever the
@@ -2546,22 +2590,11 @@ pub async fn theme_asset(
         )
             .into_response();
     }
+    if file.starts_with("vy-") {
+        return shared_css_asset(&state, &file).await;
+    }
     if file == "theme-toggle.js" {
-        // Linked as `?v=<hash of the script>`, so a versioned URL never
-        // changes meaning; a bare URL stays revalidated.
-        let cache = if raw_query.as_deref().is_some_and(|q| q.starts_with("v=")) {
-            "public, max-age=31536000, immutable"
-        } else {
-            "public, max-age=0, must-revalidate"
-        };
-        return (
-            [
-                (header::CONTENT_TYPE, "text/javascript; charset=utf-8"),
-                (header::CACHE_CONTROL, cache),
-            ],
-            vyasa_themes::sections::THEME_TOGGLE_JS,
-        )
-            .into_response();
+        return theme_toggle_js(raw_query.as_deref());
     }
     if let Some(name) = file.strip_prefix("preview/") {
         let allowed = principal
