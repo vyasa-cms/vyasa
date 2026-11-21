@@ -356,7 +356,9 @@ input before writing anything: blocks as an editor save would, fields against
 the type's definitions, terms as `taxonomy:slug` (created when missing for a
 registered taxonomy), `seo-json` keys `canonical-path`, `noindex`, `title`,
 `description`. A row in `managed_entries` ties the plugin's `key` to the
-entry; the same `source-hash` means no write (`unchanged`), a new hash updates
+entry; the same `source-hash` means no content write (`unchanged`; if the stored
+status is `draft` and `published` is asked, or the reverse, only the status is
+repaired, `updated`; `scheduled`, `private` and `trash` are never repaired), a new hash updates
 it (`updated`; a trashed entry returns through a draft). The entry shows in
 the editor as read-only with an "Edit source" link until an author presses
 **Detach**; after that the plugin never writes it again (`detached`) and

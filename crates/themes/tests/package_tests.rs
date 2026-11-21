@@ -328,3 +328,41 @@ fn screenshot_and_bundled_files_coexist() {
     assert!(parsed.screenshot_png.is_some());
     assert_eq!(parsed.files.len(), 1);
 }
+
+#[test]
+fn a_web_manifest_is_bundled_at_its_one_path() {
+    let mut entries = blog_entries();
+    entries.push((
+        "assets/manifest/site.webmanifest".into(),
+        br##"{"name":"Site","theme_color":"#0b0b0b"}"##.to_vec(),
+    ));
+    let parsed = parse_vytheme(&zip_files(&entries)).expect("valid");
+    assert!(parsed
+        .files
+        .iter()
+        .any(|f| f.path == "manifest/site.webmanifest"
+            && f.content_type == "application/manifest+json"));
+}
+
+#[test]
+fn a_web_manifest_elsewhere_or_not_json_is_refused() {
+    for (name, body, needle) in [
+        ("assets/manifest/other.webmanifest", "{}", "unexpected file"),
+        ("assets/images/site.webmanifest", "{}", "images may be"),
+        (
+            "assets/manifest/site.webmanifest",
+            "not json",
+            "not a JSON object",
+        ),
+        (
+            "assets/manifest/site.webmanifest",
+            "[1]",
+            "not a JSON object",
+        ),
+    ] {
+        let mut entries = blog_entries();
+        entries.push((name.into(), body.as_bytes().to_vec()));
+        let e = parse_vytheme(&zip_files(&entries)).expect_err(name);
+        assert!(e.0.contains(needle), "{name}: {e}");
+    }
+}
