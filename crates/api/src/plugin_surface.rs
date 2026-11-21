@@ -265,6 +265,31 @@ impl PluginSurface {
         self.inner.read().await.admin.clone()
     }
 
+    /// One plugin's settings form as collected at load, if it has one.
+    pub async fn admin_form(&self, plugin_id: i64) -> Option<AdminForm> {
+        self.inner
+            .read()
+            .await
+            .admin
+            .iter()
+            .find(|f| f.plugin_id == plugin_id)
+            .cloned()
+    }
+
+    /// Puts `form` in place of the plugin's current form, keeping its
+    /// position; a plugin with no form yet gets it appended.
+    async fn replace_admin(&self, form: AdminForm) {
+        let mut inner = self.inner.write().await;
+        match inner
+            .admin
+            .iter_mut()
+            .find(|f| f.plugin_id == form.plugin_id)
+        {
+            Some(slot) => *slot = form,
+            None => inner.admin.push(form),
+        }
+    }
+
     /// Every registered custom post type.
     pub async fn post_types(&self) -> Vec<PostTypeDecl> {
         let inner = self.inner.read().await;
@@ -490,6 +515,25 @@ async fn declaration(
             None
         }
     }
+}
+
+/// The plugin's settings form as it declares it now.
+///
+/// Forms are collected once at load, but a plugin may put live state in
+/// one (the docs plugin's "Last sync" line), so the admin asks again when
+/// it opens a plugin. Only a plugin that declared a form at load is asked;
+/// when the new answer is unusable (an error, or no field left) the form
+/// from load stays.
+pub async fn fresh_admin_form(state: &AppState, plugin_id: i64) -> Option<AdminForm> {
+    let loaded = state.plugin_surface.admin_form(plugin_id).await?;
+    let Some(form) = declaration(state, plugin_id, &loaded.plugin_name, Declaration::Admin)
+        .await
+        .and_then(|v| parse_admin(plugin_id, &loaded.plugin_name, &v))
+    else {
+        return Some(loaded);
+    };
+    state.plugin_surface.replace_admin(form.clone()).await;
+    Some(form)
 }
 
 /// How a plugin's declarations meet an administrator's content types.
@@ -1099,9 +1143,15 @@ fn collect_assets(
 }
 
 fn collect_admin(inner: &mut Inner, plugin_id: i64, name: &str, value: &serde_json::Value) {
-    let Some(raw_fields) = value.get("fields").and_then(serde_json::Value::as_array) else {
-        return;
-    };
+    if let Some(form) = parse_admin(plugin_id, name, value) {
+        inner.admin.push(form);
+    }
+}
+
+/// A `register-admin` declaration checked into a form, or `None` when it
+/// declares no usable field.
+fn parse_admin(plugin_id: i64, name: &str, value: &serde_json::Value) -> Option<AdminForm> {
+    let raw_fields = value.get("fields").and_then(serde_json::Value::as_array)?;
     let mut fields = Vec::new();
     for field in raw_fields.iter().take(MAX_FIELDS) {
         let Some(key) = field.get("key").and_then(serde_json::Value::as_str) else {
@@ -1167,9 +1217,9 @@ fn collect_admin(inner: &mut Inner, plugin_id: i64, name: &str, value: &serde_js
         });
     }
     if fields.is_empty() {
-        return;
+        return None;
     }
-    inner.admin.push(AdminForm {
+    Some(AdminForm {
         plugin_id,
         plugin_name: name.to_owned(),
         title: value
@@ -1182,7 +1232,7 @@ fn collect_admin(inner: &mut Inner, plugin_id: i64, name: &str, value: &serde_js
             .and_then(serde_json::Value::as_str)
             .map(str::to_owned),
         fields,
-    });
+    })
 }
 
 /// Slugs no plugin may claim, for a post type or a taxonomy.
@@ -1706,6 +1756,48 @@ mod tests {
             assert!(surface.head_html().await.is_empty(), "assets go too");
             assert_eq!(surface.v2_plugins().await, vec![2]);
         });
+    }
+
+    #[test]
+    fn a_fresh_form_replaces_the_loaded_one_in_place() {
+        let mut inner = Inner::default();
+        collect_admin(
+            &mut inner,
+            1,
+            "p",
+            &serde_json::json!({"fields": [{"key": "a", "help": "Last sync: never."}]}),
+        );
+        collect_admin(
+            &mut inner,
+            2,
+            "q",
+            &serde_json::json!({"fields": [{"key": "b"}]}),
+        );
+        let surface = PluginSurface {
+            inner: tokio::sync::RwLock::new(inner),
+        };
+        futures::executor::block_on(async {
+            assert!(
+                surface.admin_form(3).await.is_none(),
+                "no form, nothing to refresh"
+            );
+            let fresh = parse_admin(1, "p", &serde_json::json!({"title": "P", "fields": [{"key": "a", "help": "Last sync: 2 minutes ago."}]}))
+                .expect("a usable form");
+            surface.replace_admin(fresh).await;
+            let forms = surface.admin_forms().await;
+            assert_eq!(forms.len(), 2, "replaced, not appended");
+            assert_eq!(forms[0].plugin_id, 1, "keeps its place");
+            assert_eq!(forms[0].title, "P");
+            assert_eq!(
+                forms[0].fields[0].help.as_deref(),
+                Some("Last sync: 2 minutes ago.")
+            );
+            assert_eq!(forms[1].plugin_id, 2);
+        });
+        assert!(
+            parse_admin(1, "p", &serde_json::json!({"fields": [{"key": "bad key"}]})).is_none(),
+            "a form with no usable field is no form"
+        );
     }
 
     #[test]

@@ -324,6 +324,32 @@ pub async fn audit(
     Ok(Json(serde_json::json!(rows)))
 }
 
+/// `GET /api/v1/plugins/{id}/form` — the plugin's settings form, asked
+/// for again so live state in it (a sync status line) is current.
+///
+/// Same shape as one entry of the surface's `forms`; 404 when the plugin
+/// is not loaded or declares no form.
+#[utoipa::path(
+    get, path = "/api/v1/plugins/{id}/form", tag = "plugins",
+    security(("session_cookie" = [])),
+    responses(
+        (status = 200, description = "Settings form", body = serde_json::Value),
+        (status = 404, description = "No settings form loaded", body = ApiErrorBody),
+    )
+)]
+pub async fn form(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<serde_json::Value>> {
+    let f = crate::plugin_surface::fresh_admin_form(&state, id)
+        .await
+        .ok_or_else(|| ApiError(AppError::not_found("plugin_form", id)))?;
+    Ok(Json(serde_json::json!({
+        "pluginId": f.plugin_id.to_string(), "pluginName": f.plugin_name,
+        "title": f.title, "description": f.description, "fields": f.fields,
+    })))
+}
+
 /// `GET /api/v1/plugins` — list with capabilities + audit summary.
 #[utoipa::path(
     get, path = "/api/v1/plugins", tag = "plugins",
