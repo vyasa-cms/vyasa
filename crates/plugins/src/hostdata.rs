@@ -597,7 +597,8 @@ fn apply_seo(
 
 /// Creates or updates the entry with this key, owned by the plugin.
 ///
-/// Validated whole before anything is written; idempotent on `source_hash`;
+/// Validated whole before anything is written; idempotent on `source_hash` and status (a matching
+/// hash with a different stored status updates only the status);
 /// parent-first (a child's `parent_key` must already exist); an entry an
 /// author detached is never touched; a trashed entry stays out of the way
 /// until its source changes.
@@ -660,9 +661,36 @@ pub async fn put_entry(ctx: &Ctx<'_>, input: EntryInput) -> Result<PutResult, St
             });
         }
         if row.source_hash == input.source_hash {
+            // The hash says the content is current, not the status: an entry left in draft (or moved
+            // between draft and published) is repaired in place. Scheduled, private and trashed entries
+            // are answered `unchanged`: an author's choice, or a removal, until the source changes.
+            let svc = PostService::new(vyasa_db::repo::PostsRepo::new(ctx.pool.clone()));
+            let current = svc.get(row.post_id).await.map_err(|e| e.to_string())?;
+            let repairable = matches!(current.status, PostStatus::Draft | PostStatus::Published)
+                && matches!(status, PostStatus::Draft | PostStatus::Published);
+            if !repairable || current.status == status {
+                return Ok(PutResult {
+                    id,
+                    outcome: String::from("unchanged"),
+                });
+            }
+            ctx.allow_write(
+                &Capability::EntriesSync,
+                &format!("put-entry {}", input.key),
+            )
+            .await?;
+            svc.update(
+                row.post_id,
+                UpdatePost {
+                    status: Some(status),
+                    ..UpdatePost::default()
+                },
+            )
+            .await
+            .map_err(|e| e.to_string())?;
             return Ok(PutResult {
                 id,
-                outcome: String::from("unchanged"),
+                outcome: String::from("updated"),
             });
         }
     }
