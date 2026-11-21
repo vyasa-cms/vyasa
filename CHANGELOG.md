@@ -7,6 +7,10 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Fixed
+
+- A page description taken from an excerpt or `seo_description` never carries markup (a hand-written excerpt with inline HTML left a half tag in `<meta name="description">`).
+- Newest and Oldest order by publication time, so the `latest-posts` block lists the most recently published entry first; a draft sorts by its creation time.
 - `put-entry`: an entry whose `source-hash` is unchanged but whose stored status is `draft` while `published` is asked (or the reverse) now has its status repaired (`updated`) instead of answering `unchanged`; `scheduled`, `private` and `trash` entries are left alone. A root left in draft by an earlier sync kept the docs tree empty.
 
 ### Security
