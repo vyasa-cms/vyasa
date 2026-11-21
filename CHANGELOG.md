@@ -11,6 +11,9 @@ follows [semantic versioning](https://semver.org) as described in
 
 - A theme may bundle `assets/manifest/site.webmanifest`; it is served as `application/manifest+json` under `/theme-assets/manifest/` and linked from every page head.
 
+### Security
+- Dependencies: lettre 0.11.24 (SMTP STARTTLS, dot-stuffing and header-handling advisories) and wasmtime / wasmtime-wasi 50.0.3 (plugin host advisories).
+
 ## [0.4.2] - 2026-11-13
 
 ### Fixed
