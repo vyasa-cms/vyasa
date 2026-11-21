@@ -187,6 +187,7 @@ pub(crate) async fn refresh(
         .and_then(|rows| rows.into_iter().find(|p| p.id == plugin_id))
         .filter(|row| row.enabled);
     let mut refused = None;
+    let collected = still_on.is_some();
     if let Some(row) = still_on {
         if let Err(e) = crate::plugins_boot::activate(state, &row, mode).await {
             state.plugins_repo.set_enabled(plugin_id, false).await.ok();
@@ -194,6 +195,10 @@ pub(crate) async fn refresh(
         }
     }
     state.plugin_surface.release_stale_types(&kept_types).await;
+    if refused.is_some() || !collected {
+        // Not collected again: its tasks, kept through the refresh, go now.
+        state.plugin_surface.forget_tasks(plugin_id).await;
+    }
 
     // Scheduled tasks follow the same lifecycle: an install or an enable
     // schedules them now, not at the next restart, and a disable drops them.
