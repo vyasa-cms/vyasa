@@ -15,6 +15,9 @@ follows [semantic versioning](https://semver.org) as described in
 ### Added
 - A theme's `font_faces` entries take optional `weight`, `style` and `display`, printed as `font-weight`, `font-style` and `font-display` in the `@font-face` rule. Two files of one family (400 and 700, roman and italic) are no longer reported as a duplicate.
 
+### Security
+- Dependencies: lettre 0.11.24 (SMTP STARTTLS, dot-stuffing and header-handling advisories) and wasmtime / wasmtime-wasi 50.0.3 (plugin host advisories).
+
 ## [0.4.2] - 2026-11-13
 
 ### Fixed
