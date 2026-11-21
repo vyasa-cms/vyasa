@@ -244,6 +244,18 @@ fn text_schema() -> serde_json::Value {
 /// headings only, truncated to `budget` characters with ellipsis.
 #[must_use]
 pub fn extract_text(blocks: &[Block], budget: usize) -> String {
+    extract(blocks, budget, false)
+}
+
+/// Like [`extract_text`] but for the search index: table cells, code
+/// blocks and quotes are text too (a config key lives in a table row, an
+/// error class in a code block), so a search for them finds the page.
+#[must_use]
+pub fn extract_search_text(blocks: &[Block], budget: usize) -> String {
+    extract(blocks, budget, true)
+}
+
+fn extract(blocks: &[Block], budget: usize, everything: bool) -> String {
     // Paragraph and heading text is inline HTML (`<code>`, links, `&amp;`):
     // keep the words, drop the markup.
     fn push_plain(html: &str, out: &mut String) {
@@ -267,20 +279,45 @@ pub fn extract_text(blocks: &[Block], budget: usize) -> String {
                 .replace("&amp;", "&"),
         );
     }
-    fn walk<'a>(blocks: &'a [Block], out: &'a mut String) -> &'a mut String {
+    fn walk<'a>(blocks: &'a [Block], out: &'a mut String, everything: bool) -> &'a mut String {
         for b in blocks {
-            if b.kind.as_str() == "paragraph" || b.kind.as_str() == "heading" {
+            let kind = b.kind.as_str();
+            if kind == "paragraph" || kind == "heading" || (everything && kind == "quote") {
                 if let Some(text) = b.attrs.get("text").and_then(serde_json::Value::as_str) {
                     push_plain(text, out);
                     out.push('\n');
                 }
             }
-            walk(&b.children, out);
+            if everything && kind == "code" {
+                if let Some(code) = b.attrs.get("code").and_then(serde_json::Value::as_str) {
+                    out.push_str(code);
+                    out.push('\n');
+                }
+            }
+            if everything && kind == "table" {
+                let rows = b.attrs.get("header").into_iter().chain(
+                    b.attrs
+                        .get("rows")
+                        .and_then(serde_json::Value::as_array)
+                        .into_iter()
+                        .flatten(),
+                );
+                for row in rows {
+                    for cell in row.as_array().into_iter().flatten() {
+                        if let Some(cell) = cell.as_str() {
+                            push_plain(cell, out);
+                            out.push(' ');
+                        }
+                    }
+                    out.push('\n');
+                }
+            }
+            walk(&b.children, out, everything);
         }
         out
     }
     let mut buf = String::new();
-    walk(blocks, &mut buf);
+    walk(blocks, &mut buf, everything);
     let trimmed = buf.trim().to_owned();
     if trimmed.chars().count() > budget {
         let cut: String = trimmed.chars().take(budget).collect();

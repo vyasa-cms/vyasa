@@ -57,3 +57,28 @@ fn kinds_parse_and_purpose_map() {
     assert_eq!(AssistKind::parse("tags").unwrap().purpose(), "assist-tags");
     assert!(AssistKind::parse("bogus").is_err());
 }
+
+#[test]
+fn search_text_includes_tables_code_and_quotes_but_assist_text_does_not() {
+    use vyasa_ai::assist::extract_search_text;
+    let doc = vec![
+        block(
+            "table",
+            serde_json::json!({
+                "header": ["Key", "Default"],
+                "rows": [["<code>krishiv.memory.limit</code>", "75%"]]
+            }),
+        ),
+        block(
+            "code",
+            serde_json::json!({"code": "UNABLE_TO_ACQUIRE_MEMORY"}),
+        ),
+        block("quote", serde_json::json!({"text": "a quoted line"})),
+    ];
+    let text = extract_search_text(&doc, 4000);
+    assert!(text.contains("krishiv.memory.limit"));
+    assert!(!text.contains("<code>"));
+    assert!(text.contains("UNABLE_TO_ACQUIRE_MEMORY"));
+    assert!(text.contains("a quoted line"));
+    assert!(extract_text(&doc, 4000).is_empty());
+}
