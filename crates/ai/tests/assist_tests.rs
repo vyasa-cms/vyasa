@@ -66,7 +66,7 @@ fn search_text_includes_tables_code_and_quotes_but_assist_text_does_not() {
             "table",
             serde_json::json!({
                 "header": ["Key", "Default"],
-                "rows": [["<code>krishiv.memory.limit</code>", "75%"]]
+                "rows": [["<code>acme.memory.limit</code>", "75%"]]
             }),
         ),
         block(
@@ -76,7 +76,7 @@ fn search_text_includes_tables_code_and_quotes_but_assist_text_does_not() {
         block("quote", serde_json::json!({"text": "a quoted line"})),
     ];
     let text = extract_search_text(&doc, 4000);
-    assert!(text.contains("krishiv.memory.limit"));
+    assert!(text.contains("acme.memory.limit"));
     assert!(!text.contains("<code>"));
     assert!(text.contains("UNABLE_TO_ACQUIRE_MEMORY"));
     assert!(text.contains("a quoted line"));
