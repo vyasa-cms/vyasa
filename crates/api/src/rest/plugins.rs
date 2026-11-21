@@ -324,6 +324,51 @@ pub async fn audit(
     Ok(Json(serde_json::json!(rows)))
 }
 
+/// `GET /api/v1/plugins/{id}/form` — the plugin's settings form, asked
+/// for again so live state in it (a sync status line) is current.
+///
+/// Same shape as one entry of the surface's `forms`; 404 when the plugin
+/// is not loaded or declares no form.
+#[utoipa::path(
+    get, path = "/api/v1/plugins/{id}/form", tag = "plugins",
+    security(("session_cookie" = [])),
+    responses(
+        (status = 200, description = "Settings form", body = PluginFormResponse),
+        (status = 404, description = "No settings form loaded", body = ApiErrorBody),
+    )
+)]
+pub async fn form(
+    State(state): State<AppState>,
+    Path(id): Path<i64>,
+) -> ApiResult<Json<PluginFormResponse>> {
+    let f = crate::plugin_surface::fresh_admin_form(&state, id)
+        .await
+        .ok_or_else(|| ApiError(AppError::not_found("plugin_form", id)))?;
+    Ok(Json(PluginFormResponse {
+        plugin_id: f.plugin_id.to_string(),
+        plugin_name: f.plugin_name,
+        title: f.title,
+        description: f.description,
+        fields: f.fields,
+    }))
+}
+
+/// One plugin's settings form, as the plugin declares it now.
+#[derive(Serialize, utoipa::ToSchema)]
+#[serde(rename_all = "camelCase")]
+pub struct PluginFormResponse {
+    /// Owning plugin, as a string id.
+    pub plugin_id: String,
+    /// Owning plugin's name.
+    pub plugin_name: String,
+    /// Heading for the form.
+    pub title: String,
+    /// Optional explanatory paragraph.
+    pub description: Option<String>,
+    /// The fields, in declaration order.
+    pub fields: Vec<crate::plugin_surface::AdminField>,
+}
+
 /// `GET /api/v1/plugins` — list with capabilities + audit summary.
 #[utoipa::path(
     get, path = "/api/v1/plugins", tag = "plugins",

@@ -1,4 +1,4 @@
-import { api, type PluginInstallResponse, type PluginSummary, type PluginSurface } from "./client";
+import { api, type PluginForm, type PluginInstallResponse, type PluginSummary, type PluginSurface } from "./client";
 
 export type {
   PluginField,
@@ -56,3 +56,5 @@ export const getPluginSettings = (
 ): Promise<Record<string, unknown>> => api.getPluginSettings(id);
 export const getPluginSurface = (): Promise<PluginSurface> =>
   api.getPluginSurface();
+export const getPluginForm = (id: string): Promise<PluginForm> =>
+  api.getPluginForm(id);

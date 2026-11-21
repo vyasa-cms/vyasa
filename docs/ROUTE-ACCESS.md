@@ -126,6 +126,7 @@ plugin's own route, public, decided by the plugin.
 | GET | /plugins/{id}/audit | manage_plugins |
 | POST | /plugins/{id}/disable | manage_plugins |
 | POST | /plugins/{id}/enable | manage_plugins |
+| GET | /plugins/{id}/form | manage_plugins |
 | POST | /plugins/{id}/rollback | manage_plugins |
 | GET | /post-types/{type}/tree | public |
 | PUT | /post-types/{type}/tree | edit_posts |
