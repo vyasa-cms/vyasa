@@ -368,3 +368,115 @@ async fn terms_fields_and_seo_land_where_they_belong() {
         )
     );
 }
+
+#[tokio::test]
+async fn an_unchanged_entry_left_in_the_wrong_status_is_repaired_but_a_trashed_one_is_not() {
+    let e = setup().await;
+    let c = ctx(&e, e.plugin);
+    // The 2026-11-19 outage: a root written as a draft, every later sync saw the same hash.
+    let mut draft = entry("root.md", None, "Root", "h1");
+    draft.status = "draft".into();
+    let root = hostdata::put_entry(&c, draft).await.unwrap();
+    assert_eq!(root.outcome, "created");
+    let status = |id: u64| {
+        let pool = e.pool.clone();
+        async move {
+            sqlx::query_scalar::<_, String>("SELECT status FROM posts WHERE id = $1")
+                .bind(i64::try_from(id).unwrap())
+                .fetch_one(&pool)
+                .await
+                .unwrap()
+        }
+    };
+    assert_eq!(status(root.id).await, "draft");
+    // The same source, now asked to be published: the status follows and nothing else changes.
+    let before: (String, String) =
+        sqlx::query_as("SELECT title, updated_at::text FROM posts WHERE id = $1")
+            .bind(i64::try_from(root.id).unwrap())
+            .fetch_one(&e.pool)
+            .await
+            .unwrap();
+    let fixed = hostdata::put_entry(&c, entry("root.md", None, "Root", "h1"))
+        .await
+        .unwrap();
+    assert_eq!((fixed.outcome.as_str(), fixed.id), ("updated", root.id));
+    assert_eq!(status(root.id).await, "published");
+    let after_title: String = sqlx::query_scalar("SELECT title FROM posts WHERE id = $1")
+        .bind(i64::try_from(root.id).unwrap())
+        .fetch_one(&e.pool)
+        .await
+        .unwrap();
+    assert_eq!(after_title, before.0);
+    // Now matching: unchanged, no write.
+    let again = hostdata::put_entry(&c, entry("root.md", None, "Root", "h1"))
+        .await
+        .unwrap();
+    assert_eq!(again.outcome, "unchanged");
+    // A parent left in draft is repaired before its child is written under it.
+    let child = hostdata::put_entry(&c, entry("root/c.md", Some("root.md"), "Child", "c1"))
+        .await
+        .unwrap();
+    assert_eq!(child.outcome, "created");
+    // Asked to be a draft again (the source says so), a published entry follows.
+    let mut back = entry("root.md", None, "Root", "h1");
+    back.status = "draft".into();
+    assert_eq!(
+        hostdata::put_entry(&c, back).await.unwrap().outcome,
+        "updated"
+    );
+    assert_eq!(status(root.id).await, "draft");
+    // A trashed entry stays removed for the same source whatever status is asked.
+    hostdata::delete_entry(&c, "root.md".into()).await.unwrap();
+    assert_eq!(
+        hostdata::put_entry(&c, entry("root.md", None, "Root", "h1"))
+            .await
+            .unwrap()
+            .outcome,
+        "unchanged"
+    );
+    assert_eq!(status(root.id).await, "trash");
+}
+
+#[tokio::test]
+async fn repairing_the_status_of_an_unchanged_entry_needs_the_publish_capability() {
+    let e = setup().await;
+    let c = ctx(&e, e.plugin);
+    let mut draft = entry("a.md", None, "A", "h1");
+    draft.status = "draft".into();
+    hostdata::put_entry(&c, draft).await.unwrap();
+    // `bare` holds neither capability: the check for the requested status comes first, as for any put.
+    let denied = hostdata::put_entry(&ctx(&e, e.bare), entry("a.md", None, "A", "h1"))
+        .await
+        .unwrap_err();
+    assert!(denied.contains("capability-denied"), "{denied}");
+}
+
+#[tokio::test]
+async fn a_scheduled_or_private_entry_is_never_repaired_to_published_or_draft() {
+    let e = setup().await;
+    let c = ctx(&e, e.plugin);
+    for (i, stored) in ["scheduled", "private"].into_iter().enumerate() {
+        for asked in ["published", "draft"] {
+            let key = format!("k{i}-{asked}.md");
+            let created = hostdata::put_entry(&c, entry(&key, None, "T", "h1"))
+                .await
+                .unwrap();
+            sqlx::query("UPDATE posts SET status = $2 WHERE id = $1")
+                .bind(i64::try_from(created.id).unwrap())
+                .bind(stored)
+                .execute(&e.pool)
+                .await
+                .unwrap();
+            let mut again = entry(&key, None, "T", "h1");
+            again.status = asked.into();
+            let out = hostdata::put_entry(&c, again).await.unwrap();
+            assert_eq!(out.outcome, "unchanged", "{stored} asked as {asked}");
+            let now: String = sqlx::query_scalar("SELECT status FROM posts WHERE id = $1")
+                .bind(i64::try_from(created.id).unwrap())
+                .fetch_one(&e.pool)
+                .await
+                .unwrap();
+            assert_eq!(now, stored);
+        }
+    }
+}
