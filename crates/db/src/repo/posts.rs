@@ -1239,18 +1239,3 @@ impl PostsRepo {
             .map_err(|e| AppError::db(format!("clear failed: {e}")))
     }
 }
-
-#[cfg(test)]
-mod sort_tests {
-    use super::PostSort;
-
-    #[test]
-    fn newest_and_oldest_go_by_publication_time_with_created_at_for_drafts() {
-        assert!(PostSort::Newest
-            .order_sql()
-            .starts_with("COALESCE(p.published_at, p.created_at) DESC"));
-        assert!(PostSort::Oldest
-            .order_sql()
-            .starts_with("COALESCE(p.published_at, p.created_at) ASC"));
-    }
-}

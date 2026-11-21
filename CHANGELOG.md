@@ -7,6 +7,11 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Fixed
+
+- A page description taken from an excerpt or `seo_description` never carries markup (a hand-written excerpt with inline HTML left a half tag in `<meta name="description">`).
+- Newest and Oldest order by publication time, so the `latest-posts` block lists the most recently published entry first; a draft sorts by its creation time.
+
 ## [0.4.2] - 2026-11-13
 
 ### Fixed
