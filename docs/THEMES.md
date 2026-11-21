@@ -36,7 +36,7 @@ stale.
     "body": "system_ui",
     "base_size_px": 16,              // 12..=24
     "scale_ratio": "major_third",    // major_second|minor_third|major_third|perfect_fourth|golden|{"custom":1.0..2.5}
-    "font_faces": [ { "family": "Inter", "src": "https://…/inter.woff2" } ]
+    "font_faces": [ { "family": "Inter", "src": "https://…/inter.woff2", "weight": "400", "style": "normal", "display": "swap" } ]  // weight, style, display optional
   },
   "spacing": { "unit_px": 4, "section_scale": [1, 2, 4, 8] }, // ascending, ≤8 steps
   "radius_px": 8,                    // 0..=32
@@ -68,6 +68,9 @@ hard error so typos never disappear silently.
 | error | `typography.scale_ratio.custom` | `1.0..=2.5` |
 | error | `typography.font_faces[].family` | Non-empty; `[A-Za-z0-9 _-]` only (CSS-injection guard) |
 | error | `typography.font_faces[].src` | Must start with `https://` |
+| error | `typography.font_faces[].weight` | `normal`, `bold`, `1..=1000`, or a range such as `"100 900"` |
+| error | `typography.font_faces[].style` | `normal`, `italic` or `oblique` |
+| error | `typography.font_faces[].display` | `auto`, `block`, `swap`, `fallback` or `optional` |
 | error | `spacing.unit_px` | `2..=16` |
 | error | `spacing.section_scale` | Non-empty, ≤ 8 steps, each `0.25..=20`, ascending |
 | error | `radius_px` | `0..=32` |
@@ -76,7 +79,7 @@ hard error so typos never disappear silently.
 | error | `layout.breakpoint_{sm,md}_px` | `320..=1920`, and `sm` narrower than `md` |
 | warning | color roles | WCAG AA contrast < 4.5 for `text/bg`, `text/surface`, `text_muted/surface`, `on_primary/primary` (checked per mode) |
 | warning | `colors.<role>.dark` | Dark palette partially overridden; role keeps its light value |
-| warning | `typography.font_faces[i]` | Duplicate family |
+| warning | `typography.font_faces[i]` | Duplicate face (same family, weight and style) |
 | warning | `typography.heading/body` | Custom family without a matching `@font-face` |
 
 Errors block compilation; warnings are returned alongside valid CSS so the
@@ -465,6 +468,8 @@ the base stylesheet — and is where animation lives: transitions, keyframes,
 scroll-driven effects. The base stylesheet zeroes transitions under
 `prefers-reduced-motion`, and a theme's own rules should respect the same
 query.
+
+**Web app manifest.** `assets/manifest/site.webmanifest` (a JSON object; no other name or folder) is served at `/theme-assets/manifest/site.webmanifest` as `application/manifest+json` and linked from every page head with `<link rel="manifest">`, so a theme can offer "Add to Home Screen". Its `icons` may point at `/theme-assets/images/…`.
 
 **Bundled pictures and fonts.** `assets/images/` and `assets/fonts/`
 travel with the package and are served from the site at

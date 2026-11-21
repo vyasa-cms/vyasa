@@ -242,13 +242,13 @@ pub async fn put_file(
     let row = state.themes.get(id).await?;
     if !pkg::valid_bundled_path(&path) {
         return Err(ApiError(AppError::validation(
-            "the path must be images/… or fonts/…, lowercase letters, digits, dots, \
+            "the path must be images/… or fonts/… (or manifest/site.webmanifest), lowercase letters, digits, dots, \
              dashes and underscores, at most one directory deep",
         )));
     }
     let Some(content_type) = pkg::bundled_content_type(&path) else {
         return Err(ApiError(AppError::validation(
-            "images may be png, jpg, gif, webp, avif or svg; fonts may be woff2, woff, ttf or otf",
+            "images may be png, jpg, gif, webp, avif or svg; fonts may be woff2, woff, ttf or otf; the manifest is site.webmanifest",
         )));
     };
     if body.is_empty() {
