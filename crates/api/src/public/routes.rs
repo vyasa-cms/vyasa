@@ -1656,6 +1656,7 @@ async fn archive_impl(
         let page_ctx = PageContext {
             title: format!("{} — {taxonomy}", term.name),
             archive_title: Some(term.name.clone()),
+            archive_feed_url: Some(format!("{base}/feed.xml")),
             posts: cards(state_ref, &site, &rows).await,
             pagination_page: page_no,
             pagination_next: has_more.then(|| format!("{base}?page={}", page_no + 1)),
