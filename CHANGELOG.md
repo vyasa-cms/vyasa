@@ -8,6 +8,8 @@ follows [semantic versioning](https://semver.org) as described in
 ## [Unreleased]
 
 ### Fixed
+- A plugin call that runs past its time or fuel limit (an epoch-deadline or fuel trap) no longer disables the plugin for good on the first occurrence: it is marked degraded and stays enabled, and the third such trap within ten minutes disables it as before. A busy server (a deploy publishing pages while a sync runs) could trap a healthy plugin once and take its pages down until an administrator re-enabled it. Any trap now records its reason on the Plugins page; before, a disabled plugin showed no cause. A settings save (or a restart) that a plugin refuses now leaves it degraded and serving on its previous settings, not errored: an errored plugin refuses every later call, so the next settings save could not heal it, and the docs import of a staging deploy left vyasa-docs off until an administrator re-enabled it.
+
 - A page (About, Subscribe, a docs page) is no longer described as an article: it gets `og:type website`, a `WebPage` JSON-LD block and no `article:*` dates.
 - `article:modified_time` and `dateModified` are never earlier than the publication time (a scheduled post is saved before it goes out).
 - Each menu `<nav>` has an accessible name: the block's `label` setting, else the menu's slug.
