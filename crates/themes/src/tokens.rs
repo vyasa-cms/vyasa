@@ -393,6 +393,55 @@ pub struct FontFace {
     /// inject insecure or `javascript:` URLs into rendered pages.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub src: Option<String>,
+    /// `font-weight` of this file: a number 1 to 1000 (`"400"`), a range for a
+    /// variable font (`"100 900"`) or `normal` / `bold`. Omit for the
+    /// browser's default (`normal`).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub weight: Option<String>,
+    /// `font-style` of this file: `normal`, `italic` or `oblique`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub style: Option<String>,
+    /// `font-display`: `auto`, `block`, `swap`, `fallback` or `optional`.
+    /// Omit for the browser's default; `swap` shows text at once in a
+    /// fallback font and switches when the file arrives.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub display: Option<String>,
+}
+
+impl FontFace {
+    /// The `font-weight`, if set and well formed. The stylesheet printer
+    /// uses these accessors, so a value that skipped validation is dropped
+    /// rather than printed.
+    #[must_use]
+    pub fn weight_css(&self) -> Option<&str> {
+        self.weight.as_deref().filter(|w| valid_font_weight(w))
+    }
+
+    /// The `font-style`, if set and one of the three keywords.
+    #[must_use]
+    pub fn style_css(&self) -> Option<&str> {
+        self.style
+            .as_deref()
+            .filter(|s| matches!(*s, "normal" | "italic" | "oblique"))
+    }
+
+    /// The `font-display`, if set and one of the five keywords.
+    #[must_use]
+    pub fn display_css(&self) -> Option<&str> {
+        self.display
+            .as_deref()
+            .filter(|d| matches!(*d, "auto" | "block" | "swap" | "fallback" | "optional"))
+    }
+}
+
+/// Whether `v` is a `font-weight` this crate prints: `normal`, `bold`, a
+/// number 1 to 1000, or two of them as a variable-font range.
+fn valid_font_weight(v: &str) -> bool {
+    let num = |s: &str| s.parse::<u16>().is_ok_and(|n| (1..=1000).contains(&n));
+    match v.split_once(' ') {
+        Some((a, b)) => num(a) && num(b),
+        None => matches!(v, "normal" | "bold") || num(v),
+    }
 }
 
 /// Modular scale ratios with well-known names plus a numeric escape hatch.
@@ -682,6 +731,28 @@ fn check_range(out: &mut Vec<TokenDiagnostic>, path: &str, v: f32, min: f32, max
     }
 }
 
+/// Errors for a font face's optional `weight`, `style` and `display`.
+fn validate_face_descriptors(face: &FontFace, base: &str, out: &mut Vec<TokenDiagnostic>) {
+    if let (Some(w), None) = (&face.weight, face.weight_css()) {
+        out.push(err(
+            &format!("{base}.weight"),
+            format!("\"{w}\" must be normal, bold, 1 to 1000, or a range such as \"100 900\""),
+        ));
+    }
+    if let (Some(s), None) = (&face.style, face.style_css()) {
+        out.push(err(
+            &format!("{base}.style"),
+            format!("\"{s}\" must be normal, italic or oblique"),
+        ));
+    }
+    if let (Some(d), None) = (&face.display, face.display_css()) {
+        out.push(err(
+            &format!("{base}.display"),
+            format!("\"{d}\" must be auto, block, swap, fallback or optional"),
+        ));
+    }
+}
+
 fn validate_typography(t: &Typography, out: &mut Vec<TokenDiagnostic>) {
     check_range(
         out,
@@ -698,7 +769,7 @@ fn validate_typography(t: &Typography, out: &mut Vec<TokenDiagnostic>) {
             ));
         }
     }
-    let mut seen: Vec<&str> = Vec::new();
+    let mut seen: Vec<(&str, &str, &str)> = Vec::new();
     for (i, face) in t.font_faces.iter().enumerate() {
         let base = format!("typography.font_faces[{i}]");
         if face.family.is_empty()
@@ -738,13 +809,21 @@ fn validate_typography(t: &Typography, out: &mut Vec<TokenDiagnostic>) {
                 ));
             }
         }
-        if seen.contains(&face.family.as_str()) {
+        validate_face_descriptors(face, &base, out);
+        // Two files of one family are normal when weight or style differ
+        // (400 and 700, roman and italic); only an identical face is a repeat.
+        let key = (
+            face.family.as_str(),
+            face.weight.as_deref().unwrap_or(""),
+            face.style.as_deref().unwrap_or(""),
+        );
+        if seen.contains(&key) {
             out.push(warn(
                 &base,
                 format!("duplicate @font-face for family \"{}\"", face.family),
             ));
         }
-        seen.push(face.family.as_str());
+        seen.push(key);
     }
     let used = |c: &FontChoice| matches!(c, FontChoice::Custom(name) if t.font_faces.iter().any(|f| &f.family == name));
     for (slot, choice) in [("heading", &t.heading), ("body", &t.body)] {

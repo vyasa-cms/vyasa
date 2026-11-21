@@ -7,6 +7,14 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Fixed
+- A page (About, Subscribe, a docs page) is no longer described as an article: it gets `og:type website`, a `WebPage` JSON-LD block and no `article:*` dates.
+- `article:modified_time` and `dateModified` are never earlier than the publication time (a scheduled post is saved before it goes out).
+- Each menu `<nav>` has an accessible name: the block's `label` setting, else the menu's slug.
+
+### Added
+- A theme's `font_faces` entries take optional `weight`, `style` and `display`, printed as `font-weight`, `font-style` and `font-display` in the `@font-face` rule. Two files of one family (400 and 700, roman and italic) are no longer reported as a duplicate.
+
 ### Added
 
 - A theme may bundle `assets/manifest/site.webmanifest`; it is served as `application/manifest+json` under `/theme-assets/manifest/` and linked from every page head.
