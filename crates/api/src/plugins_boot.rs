@@ -131,15 +131,44 @@ pub async fn activate(
             // no longer permanent damage on the admin page.
             repo.set_status_reason(row.id, "loaded", "").await.ok();
         }
-        Ok(Err(reject)) => {
-            tracing::warn!("plugin {} rejected config: {reject}", row.name);
+        Ok(Err(reject))
+            if state
+                .broker
+                .quota_refused_within(row.id, std::time::Duration::from_secs(90)) =>
+        {
+            // A per-minute quota refusal is transient: the plugin keeps
+            // running on its previous settings and the next apply (a
+            // deploy, an enable, the next boot) tries again. Marking it
+            // errored turned one busy minute into a permanent outage.
+            tracing::warn!(
+                "plugin {} could not apply its settings now (quota): {reject}",
+                row.name
+            );
             repo.set_status_reason(
                 row.id,
-                "errored",
-                &format!("rejected its settings: {reject}"),
+                "degraded",
+                &format!("settings not applied: a per-minute quota was hit ({reject}); it retries on the next apply"),
             )
             .await
             .ok();
+            return Ok(false);
+        }
+        Ok(Err(reject)) => {
+            // A settings save (and a restart) that the plugin refuses leaves it running on the settings it had:
+            // its `init` keeps them in its own store. `errored` was sticky there: `load` refuses an errored plugin,
+            // so no later save could run `init` again, and the docs import of a staging deploy (one save per changed
+            // key) left vyasa-docs dead until an administrator re-enabled it. Degraded keeps it serving and heals on
+            // the next clean `init`. Enabling a plugin that refuses its settings still refuses it.
+            tracing::warn!("plugin {} rejected config: {reject}", row.name);
+            let (status, reason) = if matches!(mode, crate::plugin_surface::Collect::Boot) {
+                (
+                    "degraded",
+                    format!("settings not applied, running on its previous settings: {reject}"),
+                )
+            } else {
+                ("errored", format!("rejected its settings: {reject}"))
+            };
+            repo.set_status_reason(row.id, status, &reason).await.ok();
             return Ok(false);
         }
         Err(e) => {

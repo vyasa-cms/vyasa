@@ -18,14 +18,114 @@ use crate::frontmatter;
 use crate::github::{self, Repo};
 use crate::plan::{self, Kind, Meta, PageInfo, Planned, Root};
 
-/// Bump to rewrite every entry after an importer change.
-pub const FORMAT: &str = "f2";
+/// Bump to rewrite every entry after an importer change. 0.1.9 bumps it (f3)
+/// once so that the first sync after the upgrade writes every entry again: a
+/// host that now repairs a wrong stored status (a draft root) then does so
+/// for entries whose source did not change.
+pub const FORMAT: &str = "f3";
 /// Largest page the importer reads.
 pub const MAX_PAGE_BYTES: u64 = 512 * 1024;
 /// Page text kept between the scan and the write of one run.
 const MAX_KEPT_BODIES: usize = 8 * 1024 * 1024;
 /// Most pages one site may import.
 pub const MAX_PAGES: usize = 2000;
+/// Key prefix of the packed scan cache. The broker allows 600 key-value
+/// reads a minute even in an extended task, so a site of a thousand pages
+/// cannot keep one key per page: the cache is a few packs of ~40 KB.
+const PACK_PREFIX: &str = "scanpack/";
+/// Cached tree listings, keyed by commit and folder.
+const TREE_PREFIX: &str = "treecache/";
+/// Largest serialized pack (the key-value store refuses 64 KiB).
+const PACK_MAX_BYTES: usize = 40_000;
+/// Largest single cached text; a bigger one is read again next time.
+const PACK_MAX_ENTRY: usize = 20_000;
+/// Old one-key-per-page cache entries removed per finished sync.
+const LEGACY_SCAN_DELETES: usize = 100;
+
+/// Blob sha to cached scan (or `_meta.json` text), loaded in a few reads.
+struct ScanCache {
+    map: BTreeMap<String, String>,
+    /// Pack keys that existed when loaded.
+    packs: Vec<String>,
+    dirty: bool,
+}
+
+impl ScanCache {
+    fn load<E: Env>(env: &mut E) -> Self {
+        let mut packs = env.kv_list(PACK_PREFIX);
+        packs.sort();
+        let mut map = BTreeMap::new();
+        for k in &packs {
+            let parsed = env
+                .kv_get(k)
+                .and_then(|v| serde_json::from_str::<BTreeMap<String, String>>(&v).ok());
+            if let Some(m) = parsed {
+                map.extend(m);
+            }
+        }
+        Self {
+            map,
+            packs,
+            dirty: false,
+        }
+    }
+
+    fn insert(&mut self, sha: &str, text: &str) {
+        if text.len() <= PACK_MAX_ENTRY && self.map.get(sha).map(String::as_str) != Some(text) {
+            self.map.insert(sha.to_owned(), text.to_owned());
+            self.dirty = true;
+        }
+    }
+
+    fn retain_live(&mut self, live: &BTreeSet<&str>) {
+        let before = self.map.len();
+        self.map.retain(|k, _| live.contains(k.as_str()));
+        if self.map.len() != before {
+            self.dirty = true;
+        }
+    }
+
+    /// Writes the packs back (a handful of writes); best effort, a full
+    /// quota only makes the next run read some pages again.
+    fn flush<E: Env>(&mut self, env: &mut E) {
+        if !self.dirty {
+            return;
+        }
+        let mut chunks: Vec<BTreeMap<&str, &str>> = vec![BTreeMap::new()];
+        let mut size = 2usize;
+        for (k, v) in &self.map {
+            let cost = k.len() + v.len() * 2 + 8;
+            if size + cost > PACK_MAX_BYTES && !chunks.last().is_some_and(BTreeMap::is_empty) {
+                chunks.push(BTreeMap::new());
+                size = 2;
+            }
+            size += cost;
+            if let Some(c) = chunks.last_mut() {
+                c.insert(k, v);
+            }
+        }
+        let mut keys = Vec::new();
+        for (i, c) in chunks.iter().enumerate() {
+            if c.is_empty() {
+                continue;
+            }
+            let key = format!("{PACK_PREFIX}{i:03}");
+            let json = serde_json::to_string(c).unwrap_or_default();
+            if env.kv_set(&key, &json).is_err() {
+                return;
+            }
+            keys.push(key);
+        }
+        for old in &self.packs {
+            if !keys.contains(old) {
+                env.kv_delete(old);
+            }
+        }
+        self.packs = keys;
+        self.dirty = false;
+    }
+}
+
 /// The post type written.
 pub const POST_TYPE: &str = "doc";
 /// The URL base of the type.
@@ -418,50 +518,53 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
     let mut bodies: BTreeMap<String, String> = BTreeMap::new();
     let mut bodies_bytes = 0usize;
     let mut metas: BTreeMap<(String, String), Meta> = BTreeMap::new();
-    for f in &files {
-        let is_meta = f.path == "_meta.json" || f.path.ends_with("/_meta.json");
-        let text_key = format!("scan/{}", f.sha);
-        let cached = cx.env.kv_get(&text_key);
-        let text = if let Some(c) = &cached {
-            c.clone()
-        } else {
-            let url = github::raw_url(
-                &cx.cfg.repo,
-                &f.tree.commit,
-                &join_repo_path(&f.tree.folder, &f.path),
-            );
-            let body = cx.get(&url, "text/plain", None)?.body;
-            if is_meta {
-                // `_meta.json` is cached as it is; a value the key-value
-                // store would refuse (64 KiB) is simply read again next time.
-                if body.len() <= 60_000 {
-                    let _ = cx.env.kv_set(&text_key, &body);
-                }
-                body
+    // The cache is read once (a few packs), kept in memory, and written back
+    // when this phase ends, however it ends, so a run cut short by the
+    // request budget resumes where it stopped.
+    let mut cache = ScanCache::load(cx.env);
+    let scanned: Result<(), Stop> = (|| {
+        for f in &files {
+            let is_meta = f.path == "_meta.json" || f.path.ends_with("/_meta.json");
+            let text = if let Some(c) = cache.map.get(&f.sha) {
+                c.clone()
             } else {
-                let scan = scan_page(&body);
-                let json = scan.to_json();
-                // Best effort: a full quota only makes the next run re-read this page.
-                let _ = cx.env.kv_set(&text_key, &json);
-                if bodies_bytes + body.len() <= MAX_KEPT_BODIES {
-                    bodies_bytes += body.len();
-                    bodies.insert(f.sha.clone(), body);
+                let url = github::raw_url(
+                    &cx.cfg.repo,
+                    &f.tree.commit,
+                    &join_repo_path(&f.tree.folder, &f.path),
+                );
+                let body = cx.get(&url, "text/plain", None)?.body;
+                if is_meta {
+                    // `_meta.json` is cached as it is; a text too big for a
+                    // pack is simply read again next time.
+                    cache.insert(&f.sha, &body);
+                    body
+                } else {
+                    let json = scan_page(&body).to_json();
+                    cache.insert(&f.sha, &json);
+                    if bodies_bytes + body.len() <= MAX_KEPT_BODIES {
+                        bodies_bytes += body.len();
+                        bodies.insert(f.sha.clone(), body);
+                    }
+                    json
                 }
-                json
+            };
+            if is_meta {
+                let dir = f.path.rsplit_once('/').map_or("", |(d, _)| d).to_owned();
+                metas.insert((f.tree.tag.clone(), dir), plan::parse_meta(&text));
+            } else {
+                infos.insert(
+                    file_key(f),
+                    Scan::from_json(&text).ok_or_else(|| {
+                        Stop::Fail(format!("cache entry for {} is unreadable", f.path))
+                    })?,
+                );
             }
-        };
-        if is_meta {
-            let dir = f.path.rsplit_once('/').map_or("", |(d, _)| d).to_owned();
-            metas.insert((f.tree.tag.clone(), dir), plan::parse_meta(&text));
-        } else {
-            infos.insert(
-                file_key(f),
-                Scan::from_json(&text).ok_or_else(|| {
-                    Stop::Fail(format!("cache entry for {} is unreadable", f.path))
-                })?,
-            );
         }
-    }
+        Ok(())
+    })();
+    cache.flush(cx.env);
+    scanned?;
 
     // 4. Plan.
     let p = make_plan(cx.cfg, &files, &infos, &metas);
@@ -475,11 +578,38 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
         .into_iter()
         .map(|m| (m.key, m.source_hash))
         .collect();
+    // Trash what no current page or section owns FIRST, so pages from an
+    // earlier configuration (before the sections were set) leave the site and
+    // its sitemap now, not when a long import finally ends.
+    let wanted: BTreeSet<&str> = p.entries.iter().map(|e| e.planned.key.as_str()).collect();
+    // Managed rows stay listed after they are trashed, so a cursor (the last
+    // key handled) lets a budget-limited run carry on where the last stopped,
+    // and the plan signature says the whole set was already done.
+    if cx.env.kv_get("sync/pruned").as_deref() != Some(sig.as_str()) {
+        let cursor = cx.env.kv_get("sync/prune-cursor").unwrap_or_default();
+        let mut last: Option<String> = None;
+        for key in managed.keys().filter(|k| k.as_str() > cursor.as_str()) {
+            if wanted.contains(key.as_str()) {
+                continue;
+            }
+            if cx.report.deleted >= cx.budget.max_writes {
+                if let Some(last) = &last {
+                    cx.env.kv_set("sync/prune-cursor", last)?;
+                }
+                return Err(Stop::Budget);
+            }
+            cx.env.delete_entry(key)?;
+            cx.report.deleted += 1;
+            last = Some(key.clone());
+        }
+        cx.env.kv_set("sync/pruned", &sig)?;
+        cx.env.kv_delete("sync/prune-cursor");
+    }
     let today = civil_date(cx.env.now_ms());
     for pe in &p.entries {
         let hash_basis = match &pe.source {
             Source::Page(f) => format!("{FORMAT}:{}:{sig}", f.sha),
-            Source::Generated => format!("{FORMAT}:{}", generated_basis(pe, &p.entries)),
+            Source::Generated => format!("{FORMAT}:{}", generated_basis(pe, &p.entries, &infos)),
         };
         let hash = hex(&Sha256::digest(hash_basis.as_bytes()));
         if managed.get(&pe.planned.key) == Some(&hash) {
@@ -512,7 +642,40 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
                     &infos,
                 )
             }
-            Source::Generated => build_generated_entry(pe, &p, &hash),
+            Source::Generated => {
+                // A root with its own top-level index page shows that page.
+                let overview = match overview_of(pe, &p) {
+                    Some((o, f)) => {
+                        let body = match bodies.get(&f.sha) {
+                            Some(b) => b.clone(),
+                            None => {
+                                let url = github::raw_url(
+                                    &cx.cfg.repo,
+                                    &f.tree.commit,
+                                    &join_repo_path(&f.tree.folder, &f.path),
+                                );
+                                cx.get(&url, "text/plain", None)?.body
+                            }
+                        };
+                        Some(
+                            build_page_entry(
+                                cx.cfg,
+                                &f.tree.commit,
+                                f,
+                                &body,
+                                o,
+                                &p,
+                                &hash,
+                                &today,
+                                &infos,
+                            )
+                            .blocks_json,
+                        )
+                    }
+                    None => None,
+                };
+                build_generated_entry(pe, &p, &hash, &infos, overview)
+            }
         };
         match cx.env.put_entry(&entry)? {
             Put::Created => cx.report.created += 1,
@@ -521,23 +684,20 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
         }
     }
 
-    // 6. Trash what the repository no longer has.
-    let wanted: BTreeSet<&str> = p.entries.iter().map(|e| e.planned.key.as_str()).collect();
-    for key in managed.keys() {
-        if !wanted.contains(key.as_str()) {
-            cx.env.delete_entry(key)?;
-            cx.report.deleted += 1;
-        }
-    }
-
     // 7. Done: remember it, and forget what is no longer in the repository.
     // The per-blob scans stay: they are what lets the next run plan without
     // reading a page that has not changed.
-    let live: BTreeSet<String> = files.iter().map(|f| format!("scan/{}", f.sha)).collect();
-    for k in cx.env.kv_list("scan/") {
-        if !live.contains(&k) {
-            cx.env.kv_delete(&k);
-        }
+    let live: BTreeSet<&str> = files.iter().map(|f| f.sha.as_str()).collect();
+    cache.retain_live(&live);
+    cache.flush(cx.env);
+    // Importers before 0.1.5 kept one key per page; drop those a few at a time.
+    for k in cx
+        .env
+        .kv_list("scan/")
+        .into_iter()
+        .take(LEGACY_SCAN_DELETES)
+    {
+        cx.env.kv_delete(&k);
     }
     for i in 0..refs.len() {
         let key = if i == 0 {
@@ -547,6 +707,15 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
         };
         if let Some(next) = cx.env.kv_get(&format!("{key}-next")) {
             cx.env.kv_set(&key, &next)?;
+        }
+    }
+    // Listings of commits no longer in use.
+    for k in cx.env.kv_list(TREE_PREFIX) {
+        if !heads
+            .iter()
+            .any(|h| k.starts_with(&format!("{TREE_PREFIX}{h}/")))
+        {
+            cx.env.kv_delete(&k);
         }
     }
     cx.env.kv_set("sync/complete", "1")?;
@@ -592,6 +761,8 @@ fn join_repo_path(folder: &[String], path: &str) -> String {
 struct Scan {
     title: String,
     description: String,
+    /// The first paragraph as plain text: the card text when there is no description.
+    lead: String,
     slug: Option<String>,
     position: Option<i64>,
     hide: bool,
@@ -602,10 +773,19 @@ struct Scan {
 
 fn scan_page(src: &str) -> Scan {
     let split = frontmatter::split(src);
-    let h1 = blocks::convert(split.body, &Links::default()).h1;
+    let converted = blocks::convert(split.body, &Links::default());
+    let lead = converted
+        .blocks
+        .iter()
+        .find(|b| b["kind"] == "paragraph")
+        .and_then(|b| b["attrs"]["text"].as_str())
+        .map(plain_text)
+        .unwrap_or_default();
+    let h1 = converted.h1;
     Scan {
         title: split.front.title.clone().or(h1).unwrap_or_default(),
         description: split.front.description.clone().unwrap_or_default(),
+        lead,
         slug: split.front.slug.clone(),
         position: split.front.position,
         hide: split.front.hide,
@@ -618,7 +798,7 @@ fn scan_page(src: &str) -> Scan {
 impl Scan {
     fn to_json(&self) -> String {
         serde_json::json!({
-            "title": self.title, "description": self.description, "slug": self.slug, "position": self.position,
+            "title": self.title, "description": self.description, "lead": self.lead, "slug": self.slug, "position": self.position,
             "hide": self.hide, "version": self.version, "section": self.section, "updated": self.updated,
         })
         .to_string()
@@ -630,6 +810,7 @@ impl Scan {
         Some(Self {
             title: v["title"].as_str()?.to_owned(),
             description: opt("description").unwrap_or_default(),
+            lead: opt("lead").unwrap_or_default(),
             slug: opt("slug"),
             position: v["position"].as_i64(),
             hide: v["hide"].as_bool().unwrap_or(false),
@@ -727,6 +908,9 @@ fn make_plan(
         };
         // A section slug may be `product/version`: the root hangs under `product`, which is
         // generated when no section of that name is configured.
+        // The host stores a slug without dots (`0.2` is `0-2`), so links are written in that
+        // form instead of relying on a redirect for each one.
+        let seg = seg.replace('.', "-");
         let (seg_parent, seg_leaf) = match seg.split_once('/') {
             Some((p, l)) => (Some(p.to_owned()), l.to_owned()),
             None => (None, seg.clone()),
@@ -864,9 +1048,13 @@ fn plan_signature(entries: &[PlannedEntry]) -> String {
     hex(&h.finalize())[..16].to_owned()
 }
 
-fn generated_basis(pe: &PlannedEntry, all: &[PlannedEntry]) -> String {
+fn generated_basis(
+    pe: &PlannedEntry,
+    all: &[PlannedEntry],
+    infos: &BTreeMap<String, Scan>,
+) -> String {
     let mut s = format!(
-        "{}|{}|{}|{}|{}",
+        "cards2|{}|{}|{}|{}|{}",
         pe.planned.key,
         pe.planned.slug,
         pe.planned.title,
@@ -877,7 +1065,18 @@ fn generated_basis(pe: &PlannedEntry, all: &[PlannedEntry]) -> String {
         .iter()
         .filter(|c| c.planned.parent_key.as_deref() == Some(pe.planned.key.as_str()))
     {
-        s.push_str(&format!("|{}={}", c.planned.site_path, c.planned.title));
+        s.push_str(&format!(
+            "|{}={}={}|{}",
+            c.planned.site_path,
+            c.planned.title,
+            card_text(c, infos),
+            c.planned.hide
+        ));
+        if let Source::Page(f) = &c.source {
+            if !f.path.contains('/') && plan::is_index(&f.path) {
+                s.push_str(&format!("|{}", f.sha));
+            }
+        }
     }
     s
 }
@@ -891,6 +1090,13 @@ fn list_folder<E: Env>(
     commit: &str,
     folder: &[String],
 ) -> Result<github::Tree, Stop> {
+    // A listing is fixed by its commit, so a round cut short by the budget
+    // reuses it: an anonymous run has 60 GitHub API calls an hour, and
+    // listing again on every round used them all before any page was made.
+    let key = format!("{TREE_PREFIX}{commit}/{}", folder.join("/"));
+    if let Some(t) = cx.env.kv_get(&key).and_then(|v| parse_cached_tree(&v)) {
+        return Ok(t);
+    }
     let mut tree_ref = commit.to_owned();
     for seg in folder {
         let url = github::tree_url(&cx.cfg.repo, &tree_ref, false);
@@ -908,7 +1114,34 @@ fn list_folder<E: Env>(
     if t.truncated {
         return Err(Stop::Fail("the folder is too large for GitHub to list in one answer; point the importer at a smaller folder".to_owned()));
     }
+    // Best effort: a full quota only costs the next round its requests.
+    let rows: Vec<(&str, bool, &str, u64)> = t
+        .entries
+        .iter()
+        .map(|e| (e.path.as_str(), e.is_dir, e.sha.as_str(), e.size))
+        .collect();
+    let json = serde_json::json!({"sha": t.sha, "entries": rows}).to_string();
+    let _ = cx.env.kv_set(&key, &json);
     Ok(t)
+}
+
+fn parse_cached_tree(v: &str) -> Option<github::Tree> {
+    let c: serde_json::Value = serde_json::from_str(v).ok()?;
+    let mut entries = Vec::new();
+    for row in c.get("entries")?.as_array()? {
+        let r = row.as_array()?;
+        entries.push(github::TreeEntry {
+            path: r.first()?.as_str()?.to_owned(),
+            is_dir: r.get(1)?.as_bool()?,
+            sha: r.get(2)?.as_str()?.to_owned(),
+            size: r.get(3)?.as_u64()?,
+        });
+    }
+    Some(github::Tree {
+        sha: c.get("sha")?.as_str()?.to_owned(),
+        truncated: false,
+        entries,
+    })
 }
 
 /// The field values of an entry. Empty text is left out: the host reads
@@ -1035,32 +1268,112 @@ fn build_page_entry(
     }
 }
 
-fn build_generated_entry(pe: &PlannedEntry, p: &FullPlan, hash: &str) -> Entry {
-    let mut items = Vec::new();
-    for c in p.entries.iter().filter(|c| {
-        c.planned.parent_key.as_deref() == Some(pe.planned.key.as_str()) && !c.planned.hide
-    }) {
-        items.push(serde_json::json!({"kind": "paragraph", "attrs": {"text": format!("<a href=\"{}\">{}</a>", blocks::esc(&c.planned.site_path), blocks::esc(&c.planned.title))}, "children": []}));
+/// Inline markup removed, entities left escaped, one line: for card text.
+fn plain_text(html: &str) -> String {
+    let mut out = String::new();
+    let mut in_tag = false;
+    for c in html.chars() {
+        match c {
+            '<' => in_tag = true,
+            '>' if in_tag => in_tag = false,
+            _ if in_tag => {}
+            '\n' | '\r' => out.push(' '),
+            _ => out.push(c),
+        }
     }
-    let intro = if pe.kind_version_root {
-        format!("Documentation for {}.", blocks::esc(&pe.planned.title))
-    } else {
-        format!("In this section: {}.", blocks::esc(&pe.planned.title))
+    let one = out.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut t: String = one.chars().take(200).collect();
+    if one.chars().count() > 200 {
+        t.push('\u{2026}');
+    }
+    t
+}
+
+/// The text a card shows under a child's title: its front-matter
+/// description, else its first paragraph. Empty for a generated page.
+fn card_text(c: &PlannedEntry, infos: &BTreeMap<String, Scan>) -> String {
+    let Source::Page(f) = &c.source else {
+        return String::new();
     };
-    let mut blocks =
-        vec![serde_json::json!({"kind": "paragraph", "attrs": {"text": intro}, "children": []})];
-    if !items.is_empty() {
-        blocks.push(
-            serde_json::json!({"kind": "list", "attrs": {"ordered": false}, "children": items}),
-        );
+    infos.get(&file_key(f)).map_or(String::new(), |s| {
+        if s.description.trim().is_empty() {
+            s.lead.clone()
+        } else {
+            s.description.trim().chars().take(300).collect()
+        }
+    })
+}
+
+/// A version or section root shows the tree's top-level `index.md` / `README.md`
+/// as its page, when the tree has one.
+fn overview_of<'a>(pe: &PlannedEntry, p: &'a FullPlan) -> Option<(&'a PlannedEntry, &'a SrcFile)> {
+    if !(pe.kind_version_root || pe.kind_section_root) {
+        return None;
     }
+    p.entries.iter().find_map(|c| match &c.source {
+        Source::Page(f)
+            if c.planned.parent_key.as_deref() == Some(pe.planned.key.as_str())
+                && !f.path.contains('/')
+                && plan::is_index(&f.path) =>
+        {
+            Some((c, f))
+        }
+        _ => None,
+    })
+}
+
+/// One list item per visible child: the title as a link, then its description.
+fn card_blocks(
+    pe: &PlannedEntry,
+    p: &FullPlan,
+    infos: &BTreeMap<String, Scan>,
+) -> Vec<serde_json::Value> {
+    let items: Vec<serde_json::Value> = p
+        .entries
+        .iter()
+        .filter(|c| {
+            c.planned.parent_key.as_deref() == Some(pe.planned.key.as_str()) && !c.planned.hide
+        })
+        .map(|c| {
+            let desc = card_text(c, infos);
+            let mut text = format!(
+                "<a href=\"{}\"><strong>{}</strong></a>",
+                blocks::esc(&c.planned.site_path),
+                blocks::esc(&c.planned.title)
+            );
+            if !desc.is_empty() {
+                text.push_str(" \u{2014} ");
+                text.push_str(&blocks::esc(&desc));
+            }
+            serde_json::json!({"kind": "paragraph", "attrs": {"text": text}, "children": []})
+        })
+        .collect();
+    if items.is_empty() {
+        return vec![
+            serde_json::json!({"kind": "paragraph", "attrs": {"text": ""}, "children": []}),
+        ];
+    }
+    vec![serde_json::json!({"kind": "list", "attrs": {"ordered": false}, "children": items})]
+}
+
+/// `overview`: the blocks of the tree's top-level index page, when the root has one.
+fn build_generated_entry(
+    pe: &PlannedEntry,
+    p: &FullPlan,
+    hash: &str,
+    infos: &BTreeMap<String, Scan>,
+    overview: Option<String>,
+) -> Entry {
+    let cards = overview.is_none();
+    let blocks_json =
+        overview.unwrap_or_else(|| serde_json::Value::Array(card_blocks(pe, p, infos)).to_string());
     Entry {
         key: pe.planned.key.clone(),
         parent_key: pe.planned.parent_key.clone(),
         slug: pe.planned.slug.clone(),
         title: pe.planned.title.clone(),
         excerpt: String::new(),
-        blocks_json: serde_json::Value::Array(blocks).to_string(),
+        blocks_json,
         position: pe.planned.position,
         terms: terms_for(&pe.version),
         fields_json: {
@@ -1074,6 +1387,9 @@ fn build_generated_entry(pe: &PlannedEntry, p: &FullPlan, hash: &str) -> Entry {
             .unwrap_or_default();
             if pe.kind_section_root {
                 f["section_root"] = true.into();
+            }
+            if cards {
+                f["cards"] = true.into();
             }
             f.to_string()
         },
@@ -1099,8 +1415,34 @@ pub fn civil_date(ms: u64) -> String {
     format!("{:04}-{:02}-{:02}", if m <= 2 { y + 1 } else { y }, m, d)
 }
 
+/// Calls up to this long are ordinary host calls; a sync needs more.
+pub const ORDINARY_BUDGET_MS: u64 = 10_000;
+/// Kept back for the last request, the parse after it and the status write.
+/// One GitHub tree request takes about 300 ms and its listing 160 KB to parse.
+pub const RESERVE_MS: u64 = 1_000;
+
+/// Whether a call of `total` ms may run a sync at all.
+pub fn sync_fits(total: u64) -> bool {
+    total > ORDINARY_BUDGET_MS
+}
+
+/// The part of `total` ms in which a new request may start.
+pub fn usable_ms(total: u64) -> u64 {
+    total.saturating_sub((total / 5).max(RESERVE_MS))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_ordinary_call_does_no_sync_work_and_a_request_keeps_a_one_second_reserve() {
+        assert!(!sync_fits(2_000));
+        assert!(!sync_fits(10_000));
+        assert!(sync_fits(60_000));
+        assert_eq!(usable_ms(2_000), 1_000);
+        assert_eq!(usable_ms(60_000), 48_000);
+        assert_eq!(usable_ms(500), 0);
+    }
+
     use super::*;
     use std::cell::RefCell;
 
@@ -1124,6 +1466,8 @@ mod tests {
         etag_seen: Vec<Option<String>>,
         fail_status: Option<u16>,
         step_ms: u64,
+        /// Key-value reads (`kv_get` and `kv_list`): the broker allows 600 a minute.
+        kv_reads: std::cell::Cell<u32>,
     }
 
     fn blob_sha(content: &str) -> String {
@@ -1258,7 +1602,10 @@ mod tests {
             self.0.borrow().now
         }
         fn kv_get(&mut self, key: &str) -> Option<String> {
-            self.0.borrow().kv.borrow().get(key).cloned()
+            let f = self.0.borrow();
+            f.kv_reads.set(f.kv_reads.get() + 1);
+            let v = f.kv.borrow().get(key).cloned();
+            v
         }
         fn kv_set(&mut self, key: &str, value: &str) -> Result<(), String> {
             self.0
@@ -1272,14 +1619,15 @@ mod tests {
             self.0.borrow().kv.borrow_mut().remove(key);
         }
         fn kv_list(&mut self, prefix: &str) -> Vec<String> {
-            self.0
-                .borrow()
-                .kv
-                .borrow()
-                .keys()
-                .filter(|k| k.starts_with(prefix))
-                .cloned()
-                .collect()
+            let f = self.0.borrow();
+            f.kv_reads.set(f.kv_reads.get() + 1);
+            let keys: Vec<String> =
+                f.kv.borrow()
+                    .keys()
+                    .filter(|k| k.starts_with(prefix))
+                    .cloned()
+                    .collect();
+            keys
         }
         fn put_entry(&mut self, e: &Entry) -> Result<Put, String> {
             let mut f = self.0.borrow_mut();
@@ -1359,6 +1707,20 @@ mod tests {
             step_ms: 1,
             ..Fake::default()
         })
+    }
+
+    /// Pages and `_meta.json` files in the packed scan cache.
+    fn cached_scans(f: &RefCell<Fake>) -> usize {
+        let fk = f.borrow();
+        let kv = fk.kv.borrow();
+        kv.iter()
+            .filter(|(k, _)| k.starts_with("scanpack/"))
+            .map(|(_, v)| {
+                serde_json::from_str::<BTreeMap<String, String>>(v)
+                    .unwrap()
+                    .len()
+            })
+            .sum()
     }
 
     fn budget(f: &RefCell<Fake>) -> Budget {
@@ -1462,9 +1824,10 @@ mod tests {
         let b = budget(&f);
         let report = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
         assert!(report.finished);
-        assert_eq!(report.updated, 1, "{report:?}");
+        // The page itself, and the generated Guides page that shows its first paragraph.
+        assert_eq!(report.updated, 2, "{report:?}");
         assert_eq!(report.created, 0);
-        assert!(report.unchanged >= 2);
+        assert!(report.unchanged >= 1);
         // intro links to install; its own text did not change, nor did any path.
         assert!(f.borrow().entries["main:guides/install.md"]
             .0
@@ -1503,14 +1866,7 @@ mod tests {
         let f = fake_with(repo_one());
         let b = budget(&f);
         run(&mut Wrap(&f), &cfg(), None, b).unwrap();
-        let count = |f: &RefCell<Fake>| {
-            f.borrow()
-                .kv
-                .borrow()
-                .keys()
-                .filter(|k| k.starts_with("scan/"))
-                .count()
-        };
+        let count = |f: &RefCell<Fake>| cached_scans(f);
         assert_eq!(
             count(&f),
             3,
@@ -1596,18 +1952,112 @@ mod tests {
         };
         let first = run(&mut Wrap(&f), &cfg(), None, tiny).unwrap();
         assert!(!first.finished);
-        let cached = f
-            .borrow()
-            .kv
-            .borrow()
-            .keys()
-            .filter(|k| k.starts_with("scan/"))
-            .count();
+        let cached = cached_scans(&f);
         assert!(cached >= 1, "pages read so far are remembered");
         let b = budget(&f);
         let second = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
         assert!(second.finished, "{second:?}");
         assert_eq!(f.borrow().entries.len(), 3);
+    }
+
+    #[test]
+    fn a_round_cut_short_does_not_list_the_trees_again() {
+        let f = fake_with(repo_one());
+        let tiny = Budget {
+            deadline_ms: f.borrow().now + 60_000,
+            max_requests: 5,
+            max_writes: 200,
+        };
+        assert!(!run(&mut Wrap(&f), &cfg(), None, tiny).unwrap().finished);
+        let api = |f: &RefCell<Fake>| {
+            f.borrow()
+                .requests
+                .iter()
+                .filter(|u| u.contains("/git/trees/"))
+                .count()
+        };
+        let listed = api(&f);
+        assert!(listed >= 1);
+        let b = budget(&f);
+        assert!(run(&mut Wrap(&f), &cfg(), None, b).unwrap().finished);
+        assert_eq!(api(&f), listed, "the second round listed again");
+    }
+
+    /// The broker allows 600 key-value reads a minute, extended task or not.
+    /// A site with two sections of about 620 pages each (one folder each)
+    /// must sync inside that, on the first run, on a run that
+    /// changes a page, and on a run that changes none.
+    #[test]
+    fn a_site_of_over_a_thousand_pages_syncs_within_the_key_value_read_quota() {
+        let mut files = Files::new();
+        for i in 0..620 {
+            files.insert(
+                format!("docs/area{}/page{i}.md", i % 25),
+                format!("---\ntitle: Page {i}\n---\n# Page {i}\n\nBody {i}.\n"),
+            );
+        }
+        let f = fake_with(files);
+        let mut c = cfg();
+        c.sections = vec![
+            crate::settings::SectionDef {
+                slug: "engine/0.2".into(),
+                title: "Engine 0.2".into(),
+                folder: vec!["docs".into()],
+                git_ref: None,
+            },
+            crate::settings::SectionDef {
+                slug: "engine/next".into(),
+                title: "Engine next".into(),
+                folder: vec!["docs".into()],
+                git_ref: None,
+            },
+        ];
+        let reads = |f: &RefCell<Fake>| f.borrow().kv_reads.replace(0);
+        let big = |f: &RefCell<Fake>| Budget {
+            deadline_ms: f.borrow().now + 60_000,
+            max_requests: 5000,
+            max_writes: 5000,
+        };
+        let b = big(&f);
+        let first = run(&mut Wrap(&f), &c, None, b).unwrap();
+        assert!(first.finished, "{first:?}");
+        assert!(reads(&f) < 100, "first run read too much");
+        // A page changes: a new commit.
+        {
+            let mut fk = f.borrow_mut();
+            let mut files = fk.commits[SHA1].clone();
+            files.insert("docs/area0/page0.md".into(), "# Changed\n".into());
+            fk.commits.insert(SHA2.into(), files);
+            fk.head = SHA2.into();
+        }
+        let b = big(&f);
+        let second = run(&mut Wrap(&f), &c, None, b).unwrap();
+        assert!(second.finished, "{second:?}");
+        assert!(reads(&f) < 100, "a run after a commit read too much");
+        // Cut short by the request budget, then resumed: still few reads.
+        f.borrow()
+            .kv
+            .borrow_mut()
+            .retain(|k, _| !k.starts_with("scanpack/") && !k.starts_with("sync/"));
+        let tiny = Budget {
+            deadline_ms: f.borrow().now + 60_000,
+            max_requests: 100,
+            max_writes: 5000,
+        };
+        let cut = run(&mut Wrap(&f), &c, None, tiny).unwrap();
+        assert!(!cut.finished);
+        assert!(reads(&f) < 100);
+        let mut done = false;
+        for _ in 0..20 {
+            let b = big(&f);
+            let r = run(&mut Wrap(&f), &c, None, b).unwrap();
+            assert!(reads(&f) < 100, "a resumed run read too much");
+            if r.finished {
+                done = true;
+                break;
+            }
+        }
+        assert!(done);
     }
 
     #[test]
@@ -1708,11 +2158,239 @@ mod tests {
         assert_eq!(product.slug, "engine");
         assert!(product.parent_key.is_none());
         let root = &fk.entries["@section/engine/0.2"].0;
-        assert_eq!(root.slug, "0.2");
+        assert_eq!(root.slug, "0-2");
         assert_eq!(root.parent_key.as_deref(), Some("@section/engine"));
         let calls = &fk.entries["s:engine/0.2:calls.md"].0;
         assert_eq!(calls.parent_key.as_deref(), Some("@section/engine/0.2"));
         assert_eq!(calls.terms, ["doc-section:engine-0-2"]);
+    }
+
+    fn engine_section(files: Files) -> (RefCell<Fake>, Config) {
+        let f = fake_with(files);
+        let mut c = cfg();
+        c.sections = vec![crate::settings::SectionDef {
+            slug: "engine/0.2".into(),
+            title: "Engine 0.2".into(),
+            folder: vec!["api".into()],
+            git_ref: None,
+        }];
+        (f, c)
+    }
+
+    #[test]
+    fn a_root_without_an_index_page_lists_its_children_as_cards() {
+        let mut files = repo_one();
+        files.insert(
+            "api/start/quick.md".into(),
+            "---\ndescription: Run a first query in two minutes.\n---\n# Quickstart\n\nIgnored body.\n".into(),
+        );
+        files.insert(
+            "api/start/second.md".into(),
+            "# Second steps\n\nLoad a *Parquet* file, then <b>query</b> it.\n\nMore.\n".into(),
+        );
+        let (f, c) = engine_section(files);
+        let b = budget(&f);
+        assert!(run(&mut Wrap(&f), &c, None, b).unwrap().finished);
+        let fk = f.borrow();
+        let group = fk
+            .entries
+            .iter()
+            .find(|(k, _)| k.starts_with("@dir/") && k.ends_with("/start"))
+            .map(|(_, v)| &v.0)
+            .expect("the folder gets a generated page");
+        assert!(group.fields_json.contains("\"cards\":true"));
+        let text = &group.blocks_json;
+        assert!(!text.contains("In this section"), "{text}");
+        assert!(text.contains("Quickstart"), "{text}");
+        assert!(text.contains("Run a first query in two minutes."), "{text}");
+        assert!(!text.contains("Ignored body"), "description wins: {text}");
+        assert!(text.contains("Second steps"), "{text}");
+        assert!(
+            text.contains("Load a Parquet file, then query it."),
+            "no description: the first paragraph, as plain text: {text}"
+        );
+        assert!(!text.contains("More."), "{text}");
+        // The root has no index page either: its children are the cards.
+        let root = &fk.entries["@section/engine/0.2"].0;
+        assert!(root.fields_json.contains("\"cards\":true"));
+        assert!(root.blocks_json.contains("Start"), "{}", root.blocks_json);
+        assert!(!root.blocks_json.contains("In this section"));
+    }
+
+    #[test]
+    fn a_root_with_an_index_page_shows_it_and_is_not_a_card_list() {
+        let mut files = repo_one();
+        files.insert(
+            "api/index.md".into(),
+            "# Engine docs\n\nWelcome to the overview text.\n".into(),
+        );
+        files.insert("api/calls.md".into(), "# Calls\n".into());
+        let (f, c) = engine_section(files);
+        let b = budget(&f);
+        assert!(run(&mut Wrap(&f), &c, None, b).unwrap().finished);
+        let fk = f.borrow();
+        let root = &fk.entries["@section/engine/0.2"].0;
+        assert!(
+            root.blocks_json.contains("Welcome to the overview text."),
+            "{}",
+            root.blocks_json
+        );
+        assert!(!root.fields_json.contains("cards"), "{}", root.fields_json);
+        assert!(!root.blocks_json.contains("Documentation for"));
+    }
+
+    #[test]
+    fn pages_from_before_the_sections_were_set_go_before_the_new_ones_are_written() {
+        // First import: no sections yet, so the pages are unversioned.
+        let f = fake_with(repo_one());
+        let b = budget(&f);
+        assert!(run(&mut Wrap(&f), &cfg(), None, b).unwrap().finished);
+        assert!(f
+            .borrow()
+            .entries
+            .keys()
+            .any(|k| k.starts_with("s:") || k.starts_with("p:") || !k.starts_with("@section")));
+        let old: Vec<String> = f.borrow().entries.keys().cloned().collect();
+        // Settings now name a section over another folder; a run that can only
+        // write one entry still removes every stale page.
+        let mut files = repo_one();
+        files.insert("api/calls.md".into(), "# Calls\n".into());
+        files.insert("api/more.md".into(), "# More\n".into());
+        files.insert("other/x.md".into(), "# X\n".into());
+        {
+            let mut fk = f.borrow_mut();
+            fk.commits.insert(SHA2.into(), files);
+            fk.head = SHA2.into();
+        }
+        let (_, mut c) = engine_section(repo_one());
+        // The main folder is now another one: its old pages belong to nobody.
+        c.folder = vec!["other".into()];
+        let tight = |f: &RefCell<Fake>| Budget {
+            deadline_ms: f.borrow().now + 60_000,
+            max_requests: 200,
+            max_writes: 2,
+        };
+        let b = tight(&f);
+        let first = run(&mut Wrap(&f), &c, None, b).unwrap();
+        assert_eq!(
+            first.created, 0,
+            "stale pages go before anything new is written: {first:?}"
+        );
+        assert_eq!(first.deleted, 2, "{first:?}");
+        // Later runs resume where the last stopped and finish.
+        for _ in 0..6 {
+            let b = tight(&f);
+            if run(&mut Wrap(&f), &c, None, b).unwrap().finished {
+                break;
+            }
+        }
+        let keys: Vec<String> = f.borrow().entries.keys().cloned().collect();
+        for k in &old {
+            assert!(!keys.contains(k), "stale {k} still there: {keys:?}");
+        }
+        assert!(keys.iter().any(|k| k.ends_with("x.md")), "{keys:?}");
+    }
+
+    /// The sidebar a reader gets from what the importer wrote: every page is a link.
+    fn sidebar_links(f: &RefCell<Fake>, current_key: &str) -> (usize, usize) {
+        let fk = f.borrow();
+        let ids: BTreeMap<&str, usize> = fk
+            .entries
+            .keys()
+            .enumerate()
+            .map(|(i, k)| (k.as_str(), i + 1))
+            .collect();
+        let tree: Vec<serde_json::Value> = fk
+            .entries
+            .iter()
+            .map(|(k, (e, _))| {
+                serde_json::json!({
+                    "id": ids[k.as_str()].to_string(),
+                    "parent_id": e.parent_key.as_deref().and_then(|p| ids.get(p)).map(ToString::to_string),
+                    "position": e.position, "title": e.title, "slug": e.slug,
+                    "url": format!("/docs/{}", e.slug),
+                    "fields": serde_json::from_str::<serde_json::Value>(&e.fields_json).unwrap(),
+                })
+            })
+            .collect();
+        let mut ancestors = Vec::new();
+        let mut cur = fk.entries[current_key].0.parent_key.clone();
+        while let Some(p) = cur {
+            ancestors.push(ids[p.as_str()].to_string());
+            cur = fk.entries[&p].0.parent_key.clone();
+        }
+        ancestors.reverse();
+        let payload = serde_json::json!({"context": {
+            "entry": {"id": ids[current_key].to_string(), "ancestors": ancestors},
+            "tree": tree, "toc": []}});
+        let page = crate::nav::parse(&payload).expect("a page");
+        let html = crate::nav::sidebar(&page, "Latest", &[]);
+        let visible = fk
+            .entries
+            .values()
+            .filter(|(e, _)| {
+                // Only what hangs under the section the page is in.
+                let mut cur = e.parent_key.as_deref();
+                let mut below = false;
+                while let Some(p) = cur {
+                    if p == "@section/engine/0.2" {
+                        below = true;
+                        break;
+                    }
+                    cur = fk.entries.get(p).and_then(|x| x.0.parent_key.as_deref());
+                }
+                below
+            })
+            .filter(|(e, _)| {
+                let f: serde_json::Value = serde_json::from_str(&e.fields_json).unwrap();
+                ["hide", "section_root", "version_root"]
+                    .iter()
+                    .all(|k| f[*k].as_bool() != Some(true))
+            })
+            .count();
+        (html.matches("docs-nav__link").count(), visible)
+    }
+
+    #[test]
+    fn the_sidebar_lists_every_page_of_a_section() {
+        for with_index in [false, true] {
+            let mut files = repo_one();
+            if with_index {
+                files.insert("api/index.md".into(), "# Engine docs\n\nWelcome.\n".into());
+            }
+            files.insert("api/calls.md".into(), "# Calls\n".into());
+            files.insert("api/start/quick.md".into(), "# Quickstart\n\nGo.\n".into());
+            files.insert("api/start/second.md".into(), "# Second\n\nGo.\n".into());
+            files.insert("api/start/deep/third.md".into(), "# Third\n".into());
+            let (f, c) = engine_section(files);
+            let b = budget(&f);
+            assert!(run(&mut Wrap(&f), &c, None, b).unwrap().finished);
+            let key = "s:engine/0.2:calls.md";
+            let (links, visible) = sidebar_links(&f, key);
+            assert!(visible >= 5, "{visible}");
+            assert_eq!(
+                links, visible,
+                "index={with_index}: every page is a sidebar link"
+            );
+        }
+    }
+
+    #[test]
+    fn a_folder_with_an_index_page_renders_that_page() {
+        let mut files = repo_one();
+        files.insert("api/index.md".into(), "# Top\n".into());
+        files.insert(
+            "api/guides/index.md".into(),
+            "# Guides\n\nThe guides intro text.\n".into(),
+        );
+        files.insert("api/guides/one.md".into(), "# One\n".into());
+        let (f, c) = engine_section(files);
+        let b = budget(&f);
+        assert!(run(&mut Wrap(&f), &c, None, b).unwrap().finished);
+        let fk = f.borrow();
+        let guides = &fk.entries["s:engine/0.2:guides/index.md"].0;
+        assert!(guides.blocks_json.contains("The guides intro text."));
+        assert!(!guides.fields_json.contains("cards"));
     }
 
     #[test]

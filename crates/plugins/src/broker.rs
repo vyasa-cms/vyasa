@@ -114,6 +114,8 @@ pub struct Broker {
     quotas: Quotas,
     /// Per plugin, how many extended scopes are alive (lock-free to drop).
     extended: Arc<std::sync::Mutex<HashMap<i64, Arc<std::sync::atomic::AtomicU32>>>>,
+    /// When each plugin was last refused for a quota (not a missing grant).
+    quota_refused: Arc<std::sync::Mutex<HashMap<i64, std::time::Instant>>>,
 }
 
 impl std::fmt::Debug for Broker {
@@ -133,6 +135,7 @@ impl Broker {
             counters: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             quotas: Quotas::default(),
             extended: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            quota_refused: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
     }
 
@@ -209,11 +212,27 @@ impl Broker {
         // is not. Logging every allowed write at `warn` filled the log
         // with lines reporting that a plugin did exactly what it was
         // granted permission to do.
+        if kind == "quota" {
+            if let Ok(mut m) = self.quota_refused.lock() {
+                m.insert(plugin_id, std::time::Instant::now());
+            }
+        }
         if matches!(kind, "deny" | "quota") {
             tracing::warn!(plugin_id, kind, capability = %capability, "broker {kind}: {detail}");
         } else {
             tracing::debug!(plugin_id, kind, capability = %capability, "broker {kind}: {detail}");
         }
+    }
+
+    /// Whether `plugin_id` was refused for a quota (a limit that resets
+    /// each minute, unlike a missing grant) within the last `window`.
+    #[must_use]
+    pub fn quota_refused_within(&self, plugin_id: i64, window: std::time::Duration) -> bool {
+        self.quota_refused
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&plugin_id).copied())
+            .is_some_and(|at| at.elapsed() <= window)
     }
 
     /// Records a refusal a caller made on its own.

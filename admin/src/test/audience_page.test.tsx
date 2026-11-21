@@ -32,7 +32,7 @@ function mount() {
 beforeEach(() => {
   vi.clearAllMocks();
   mocked.analyticsSummary.mockResolvedValue({ today: 1, total: 10, series: [], top_paths: [], top_referrers: [] });
-  mocked.listSubmissions.mockResolvedValue([{ id: "s1", form: "contact", name: "Ada", email: "ada@x", message: "Hi", created_at: new Date().toISOString() }]);
+  mocked.listSubmissions.mockResolvedValue([{ id: "s1", form: "contact", name: "Ada", email: "ada@x", message: "Hi", data: { company: "Acme" }, created_at: new Date().toISOString() }]);
   mocked.listSubscribers.mockResolvedValue([{ id: "u1", email: "reader@x", status: "confirmed", created_at: new Date().toISOString(), confirmed_at: new Date().toISOString() }]);
 });
 

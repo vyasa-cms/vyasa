@@ -124,3 +124,81 @@ async fn rollback_of_an_unknown_plugin_is_not_found() {
     let err = rollback(&repo, 404).await.unwrap_err().to_string();
     assert!(err.contains("plugin"), "{err}");
 }
+
+#[tokio::test]
+async fn an_upgrade_clears_the_errored_mark_so_the_new_version_can_run() {
+    let (_db, repo) = repo().await;
+    let first = install(
+        &repo,
+        "demo",
+        "1.0.0",
+        b"\0asm-one",
+        "aaa",
+        &caps(&["log:write"]),
+    )
+    .await
+    .expect("first install");
+
+    // What a trap does: errored, with a reason, and still enabled here
+    // (a reason can also be recorded without turning the plugin off).
+    repo.set_enabled(first.id, true).await.unwrap();
+    repo.set_status_reason(first.id, "errored", "crashed during init: boom")
+        .await
+        .unwrap();
+
+    let upgraded = install(
+        &repo,
+        "demo",
+        "1.1.0",
+        b"\0asm-two",
+        "bbb",
+        &caps(&["log:write"]),
+    )
+    .await
+    .expect("upgrade");
+    assert_eq!(upgraded.version, "1.1.0");
+    assert_eq!(
+        upgraded.status, "loaded",
+        "the host refuses errored rows at load"
+    );
+    assert_eq!(upgraded.status_reason, "");
+    assert!(
+        upgraded.enabled,
+        "turning it on or off stays the administrator's choice"
+    );
+}
+
+#[tokio::test]
+async fn an_upgrade_of_a_disabled_errored_plugin_leaves_it_disabled() {
+    let (_db, repo) = repo().await;
+    let first = install(&repo, "demo", "1.0.0", b"\0asm-one", "aaa", &caps(&[]))
+        .await
+        .expect("first install");
+    repo.set_enabled(first.id, false).await.unwrap();
+    repo.set_status_reason(first.id, "errored", "trapped")
+        .await
+        .unwrap();
+
+    let upgraded = install(&repo, "demo", "1.1.0", b"\0asm-two", "bbb", &caps(&[]))
+        .await
+        .expect("upgrade");
+    assert_eq!(upgraded.status, "disabled");
+    assert!(!upgraded.enabled);
+}
+
+#[tokio::test]
+async fn an_upgrade_keeps_a_degraded_status() {
+    let (_db, repo) = repo().await;
+    let first = install(&repo, "demo", "1.0.0", b"\0asm-one", "aaa", &caps(&[]))
+        .await
+        .expect("first install");
+    repo.set_status_reason(first.id, "degraded", "slug clash")
+        .await
+        .unwrap();
+
+    let upgraded = install(&repo, "demo", "1.1.0", b"\0asm-two", "bbb", &caps(&[]))
+        .await
+        .expect("upgrade");
+    assert_eq!(upgraded.status, "degraded");
+    assert_eq!(upgraded.status_reason, "slug clash");
+}

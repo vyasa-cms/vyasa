@@ -34,6 +34,8 @@ pub struct Node {
     pub section_root: bool,
     /// Field `section_label`.
     pub label: String,
+    /// Field `cards`: the page is a generated list of its children.
+    pub cards: bool,
 }
 
 /// One heading of the current page.
@@ -73,6 +75,7 @@ fn node_of(v: &Value) -> Option<Node> {
         version_root: f["version_root"].as_bool().unwrap_or(false),
         section_root: f["section_root"].as_bool().unwrap_or(false),
         label: f["section_label"].as_str().unwrap_or("").to_owned(),
+        cards: f["cards"].as_bool().unwrap_or(false),
     })
 }
 
@@ -81,17 +84,25 @@ fn node_of(v: &Value) -> Option<Node> {
 pub fn parse(payload: &Value) -> Option<Page> {
     let ctx = payload.get("context")?;
     let entry = ctx.get("entry")?;
+    let mut tree: Vec<Node> = ctx["tree"]
+        .as_array()
+        .map(|a| a.iter().filter_map(node_of).collect())
+        .unwrap_or_default();
+    // The tree is what the host could list; when it lacks the page itself
+    // (a tree read that failed or was cut short), the page still knows its
+    // own title, so its heading and trail do not vanish with it.
+    let id = entry["id"].as_str()?;
+    if !tree.iter().any(|n| n.id == id) {
+        tree.extend(node_of(entry));
+    }
     Some(Page {
-        id: entry["id"].as_str()?.to_owned(),
+        id: id.to_owned(),
         ancestors: entry["ancestors"]
             .as_array()?
             .iter()
             .filter_map(|a| a.as_str().map(str::to_owned))
             .collect(),
-        tree: ctx["tree"]
-            .as_array()
-            .map(|a| a.iter().filter_map(node_of).collect())
-            .unwrap_or_default(),
+        tree,
         toc: ctx["toc"]
             .as_array()
             .map(|a| {
@@ -148,6 +159,23 @@ impl Page {
             .chain(std::iter::once(self.id.as_str()))
             .filter_map(|id| self.node(id))
             .rfind(|n| n.section_root)
+    }
+
+    /// Whether `n` hangs anywhere under `ancestor`.
+    fn is_below(&self, n: &Node, ancestor: &str) -> bool {
+        let mut cur = n.parent.as_deref();
+        let mut hops = 0;
+        while let Some(id) = cur {
+            if id == ancestor {
+                return true;
+            }
+            hops += 1;
+            if hops > 64 {
+                break;
+            }
+            cur = self.node(id).and_then(|p| p.parent.as_deref());
+        }
+        false
     }
 
     /// The nodes the sidebar lists at its top level.
@@ -311,11 +339,20 @@ pub fn toc(page: &Page) -> String {
             "<li class=\"docs-toc__l{}\"><a href=\"{}\">{}</a></li>",
             t.level,
             esc(&t.anchor),
-            esc(&t.text)
+            toc_text(&t.text)
         ));
     }
     out.push_str("</ol></nav></details>");
     out
+}
+
+/// A heading's text for the contents list: escaped, except that a
+/// literal `<code>…</code>` pair (the heading's inline code, which arrives
+/// as text) is drawn as code rather than shown as tags.
+fn toc_text(text: &str) -> String {
+    esc(text)
+        .replace("&lt;code&gt;", "<code>")
+        .replace("&lt;/code&gt;", "</code>")
 }
 
 /// Previous and next page in reading order.
@@ -332,7 +369,16 @@ pub fn pager(page: &Page) -> String {
         .checked_sub(1)
         .and_then(|p| flat.get(p))
         .map(|n| link(n, "prev", "Previous"));
-    let next = flat.get(i + 1).map(|n| link(n, "next", "Next"));
+    // A page that is only a list of its children (shown as cards) has them
+    // one click away: Next starts at the page after its subtree.
+    let after = if flat[i].cards {
+        flat.iter()
+            .skip(i + 1)
+            .find(|n| !page.is_below(n, &flat[i].id))
+    } else {
+        flat.get(i + 1)
+    };
+    let next = after.map(|n| link(n, "next", "Next"));
     if prev.is_none() && next.is_none() {
         return String::new();
     }
@@ -349,14 +395,25 @@ pub fn breadcrumbs(page: &Page, home_label: &str) -> String {
     let Some(cur) = page.current() else {
         return String::new();
     };
+    // A section (`Engine 0.2`) is the trail's first entry: its own title and
+    // address replace the generic "Docs" and every group above it, so the
+    // trail reads "Engine 0.2 › Concepts" and repeats nothing.
+    let section = page.section_root();
+    let (home_url, home_text) = match section {
+        Some(sec) => (sec.url.clone(), sec.title.clone()),
+        None => (format!("/{}", page.base()), home_label.to_owned()),
+    };
     let mut out = format!(
-        "<nav class=\"docs-crumbs\" aria-label=\"Breadcrumb\"><ol><li><a href=\"/{}\">{}</a></li>",
-        esc(&page.base()),
-        esc(home_label)
+        "<nav class=\"docs-crumbs\" aria-label=\"Breadcrumb\"><ol><li><a href=\"{}\">{}</a></li>",
+        esc(&home_url),
+        esc(&home_text)
     );
-    for id in &page.ancestors {
+    let start = section
+        .and_then(|sec| page.ancestors.iter().position(|id| *id == sec.id))
+        .map_or(0, |i| i + 1);
+    for id in page.ancestors.iter().skip(start) {
         if let Some(n) = page.node(id) {
-            if n.version_root {
+            if n.version_root || n.section_root {
                 continue;
             }
             out.push_str(&format!(
@@ -590,6 +647,39 @@ mod tests {
     }
 
     #[test]
+    fn a_cards_page_pages_on_to_the_page_after_its_children() {
+        // Guides is only a list of Install and Deploy: Next must not be Install.
+        let mut v = payload("2", &[]);
+        v["context"]["tree"][1]["fields"]["cards"] = json!(true);
+        let html = pager(&parse(&v).unwrap());
+        assert!(!html.contains("/docs/guides/install"), "{html}");
+        assert!(
+            !html.contains("rel=\"next\""),
+            "Guides is the last top page: {html}"
+        );
+        // A page that has its own text keeps its children as Next.
+        let plain = pager(&parse(&payload("2", &[])).unwrap());
+        assert!(plain.contains("href=\"/docs/guides/install\""), "{plain}");
+        // The first child still goes back to the cards page.
+        let mut v = payload("3", &["2"]);
+        v["context"]["tree"][1]["fields"]["cards"] = json!(true);
+        assert!(pager(&parse(&v).unwrap()).contains("href=\"/docs/guides\""));
+    }
+
+    #[test]
+    fn a_page_missing_from_the_tree_still_gets_its_heading() {
+        let mut v = payload("3", &["2"]);
+        v["context"]["entry"]["title"] = json!("Lonely");
+        v["context"]["entry"]["url"] = json!("/docs/lonely");
+        v["context"]["tree"] = json!([]);
+        let html = breadcrumbs(&parse(&v).unwrap(), "Docs");
+        assert!(
+            html.ends_with("<h1 class=\"docs-title\">Lonely</h1>"),
+            "{html}"
+        );
+    }
+
+    #[test]
     fn breadcrumbs_skip_the_version_entry() {
         let p = parse(&payload("10", &["9"])).unwrap();
         let html = breadcrumbs(&p, "Docs");
@@ -597,6 +687,28 @@ mod tests {
         assert!(!html.contains(">v1<"));
         assert!(html.contains("aria-current=\"page\">Old install"));
         assert!(html.ends_with("<h1 class=\"docs-title\">Old install</h1>"));
+    }
+
+    #[test]
+    fn a_section_page_starts_its_trail_at_the_section_and_repeats_nothing() {
+        let mut v = payload("10", &["9"]);
+        for node in v["context"]["tree"].as_array_mut().unwrap() {
+            if node["id"] == "9" {
+                node["fields"]["section_root"] = json!(true);
+                node["title"] = json!("Engine 0.2");
+            }
+        }
+        let html = breadcrumbs(&parse(&v).unwrap(), "Docs");
+        assert!(!html.contains(">Docs<"), "{html}");
+        assert_eq!(html.matches("Engine 0.2").count(), 1, "{html}");
+    }
+
+    #[test]
+    fn a_literal_code_pair_in_a_heading_is_drawn_as_code_in_the_contents() {
+        assert_eq!(
+            toc_text("<code>agg</code> and <b>x</b>"),
+            "<code>agg</code> and &lt;b&gt;x&lt;/b&gt;"
+        );
     }
 
     #[test]

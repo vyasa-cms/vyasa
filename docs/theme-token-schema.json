@@ -321,12 +321,33 @@
       "additionalProperties": false,
       "description": "One `@font-face` declaration.",
       "properties": {
+        "display": {
+          "description": "`font-display`: `auto`, `block`, `swap`, `fallback` or `optional`.\nOmit for the browser's default; `swap` shows text at once in a\nfallback font and switches when the file arrives.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
         "family": {
           "description": "Family name this face registers; must match a\n[`FontChoice::Custom`] usage to have any effect.",
           "type": "string"
         },
         "src": {
           "description": "Web font source; `https://` or a bundled `/theme-assets/fonts/` path, so themes can never\ninject insecure or `javascript:` URLs into rendered pages.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "style": {
+          "description": "`font-style` of this file: `normal`, `italic` or `oblique`.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "weight": {
+          "description": "`font-weight` of this file: a number 1 to 1000 (`\"400\"`), a range for a\nvariable font (`\"100 900\"`) or `normal` / `bold`. Omit for the\nbrowser's default (`normal`).",
           "type": [
             "string",
             "null"

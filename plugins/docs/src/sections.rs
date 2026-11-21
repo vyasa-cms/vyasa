@@ -111,6 +111,14 @@ pub fn default_layouts() -> Value {
 /// to show", which the host reads as such.
 #[must_use]
 pub fn render(payload: &str, settings: &Settings) -> String {
+    render_with(payload, || settings.clone())
+}
+
+/// Like [`render`], but reads the plugin settings only for the sections that
+/// use them: the contents and the pager need none, and every read of the
+/// settings is a key-value read against the host's quota.
+#[must_use]
+pub fn render_with(payload: &str, settings: impl FnOnce() -> Settings) -> String {
     let Ok(req) = serde_json::from_str::<Value>(payload) else {
         return payload.to_owned();
     };
@@ -140,17 +148,11 @@ pub fn render(payload: &str, settings: &Settings) -> String {
         };
     };
     let html = match kind {
-        "docs/sidebar" => nav::sidebar(&page, &settings.latest_label, &settings.unreleased()),
         "docs/toc" => nav::toc(&page),
         "docs/pager" => nav::pager(&page),
-        "docs/breadcrumbs" => nav::breadcrumbs(&page, &settings.docs_title),
-        "docs/version-banner" => nav::banner(&page, &settings.latest_label, &settings.unreleased()),
         _ => {
-            let placeholder = req["settings"]["placeholder"]
-                .as_str()
-                .filter(|p| !p.is_empty())
-                .unwrap_or(&settings.search_placeholder);
-            nav::search(&page, &settings.latest_version, placeholder)
+            let settings = settings();
+            render_with_settings(kind, &req, &page, &settings)
         }
     };
     if html.is_empty() {
@@ -160,8 +162,33 @@ pub fn render(payload: &str, settings: &Settings) -> String {
     }
 }
 
+fn render_with_settings(kind: &str, req: &Value, page: &nav::Page, settings: &Settings) -> String {
+    match kind {
+        "docs/sidebar" => nav::sidebar(page, &settings.latest_label, &settings.unreleased()),
+        "docs/breadcrumbs" => nav::breadcrumbs(page, &settings.docs_title),
+        "docs/version-banner" => nav::banner(page, &settings.latest_label, &settings.unreleased()),
+        _ => {
+            let placeholder = req["settings"]["placeholder"]
+                .as_str()
+                .filter(|p| !p.is_empty())
+                .unwrap_or(&settings.search_placeholder);
+            nav::search(page, &settings.latest_version, placeholder)
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn contents_and_pager_do_not_read_the_plugin_settings() {
+        for kind in ["docs/toc", "docs/pager"] {
+            let out = render_with(&payload(kind, false, true), || {
+                panic!("{kind} read the settings")
+            });
+            assert_ne!(out, payload(kind, false, true));
+        }
+    }
+
     use super::*;
 
     fn payload(kind: &str, editor: bool, with_context: bool) -> String {

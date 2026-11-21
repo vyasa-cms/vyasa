@@ -13,6 +13,6 @@ expression: text
 <!-- search-box -->
 <form class="vy-search" action="/search" method="get" role="search"><input type="search" name="s" placeholder="Search…" aria-label="Search"><button type="submit">Go</button></form>
 <!-- menu -->
-<nav class="vy-nav"><label class="vy-nav-toggle" aria-label="Menu"><input type="checkbox" class="vy-nav-check"></label><ul class="vy-menu"><li><a href="/">Home</a></li><li><a href="/category/rust">Rust</a></li></ul></nav>
+<nav class="vy-nav" aria-label="Main"><label class="vy-nav-toggle" aria-label="Menu"><input type="checkbox" class="vy-nav-check"></label><ul class="vy-menu"><li><a href="/">Home</a></li><li><a href="/category/rust">Rust</a></li></ul></nav>
 <!-- breadcrumbs -->
 <nav class="vy-breadcrumbs" aria-label="Breadcrumb"><ol><li><a href="/">Home</a></li></ol></nav>

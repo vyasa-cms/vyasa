@@ -310,7 +310,13 @@ pub fn parse_sections(text: &str) -> Result<Vec<SectionDef>, String> {
 /// The `register-admin` form.
 #[must_use]
 pub fn admin_form() -> Value {
-    json!({
+    admin_form_with("Last sync: never.")
+}
+
+/// The form with the sync status line in the "Sync now" field's help.
+#[must_use]
+pub fn admin_form_with(status_line: &str) -> Value {
+    let mut form = json!({
         "title": "Documentation",
         "description": "Imports Markdown from a GitHub repository into the Docs section. Pages that come from the repository are read-only here: edit them on GitHub and they follow within the polling interval, or at once through the webhook.",
         "fields": [
@@ -328,7 +334,11 @@ pub fn admin_form() -> Value {
             {"key": "docs_title", "label": "Breadcrumb root", "type": "text", "default": "Docs"},
             {"key": "search_placeholder", "label": "Search placeholder", "type": "text", "default": "Search the docs"}
         ]
-    })
+    });
+    if let Some(fields) = form["fields"].as_array_mut() {
+        fields.insert(0, crate::status::field(status_line));
+    }
+    form
 }
 
 #[cfg(test)]
@@ -469,7 +479,13 @@ mod tests {
     #[test]
     fn the_form_declares_secrets_as_secrets_and_every_key_is_read_back() {
         let form = admin_form();
-        let fields = form["fields"].as_array().unwrap();
+        // `sync_now` is an action, handled by `status::now_action`, never stored.
+        let fields: Vec<_> = form["fields"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|f| f["key"] != "sync_now")
+            .collect();
         let secret: Vec<_> = fields
             .iter()
             .filter(|f| f["type"] == "secret")
@@ -477,13 +493,13 @@ mod tests {
             .collect();
         assert_eq!(secret, ["token", "webhook_secret"]);
         let mut all = serde_json::Map::new();
-        for f in fields {
+        for f in &fields {
             all.insert(f["key"].as_str().unwrap().to_owned(), json!("x"));
         }
         let parsed: Value =
             serde_json::from_str(&Settings::from_json(&Value::Object(all).to_string()).to_json())
                 .unwrap();
-        for f in fields {
+        for f in &fields {
             assert!(
                 parsed.get(f["key"].as_str().unwrap()).is_some(),
                 "{} is not read by Settings",

@@ -1,3 +1,4 @@
+import * as React from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Trash2 } from "lucide-react";
@@ -126,6 +127,16 @@ function AudiencePage() {
                   </p>
                   {s.message !== "" ? (
                     <p className="mt-1 whitespace-pre-wrap text-muted-foreground">{s.message}</p>
+                  ) : null}
+                  {Object.keys(s.data ?? {}).length > 0 ? (
+                    <dl className="mt-1 grid grid-cols-[auto_1fr] gap-x-3 text-xs">
+                      {Object.entries(s.data).map(([key, value]) => (
+                        <React.Fragment key={key}>
+                          <dt className="text-muted-foreground">{key}</dt>
+                          <dd className="wrap-break-word">{String(value)}</dd>
+                        </React.Fragment>
+                      ))}
+                    </dl>
                   ) : null}
                   <p className="mt-1 text-xs text-muted-foreground">
                     {new Date(s.created_at).toLocaleString()}

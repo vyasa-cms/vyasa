@@ -62,6 +62,28 @@
     pre.appendChild(button);
   });
 
+  // Tables scroll sideways inside the article instead of squeezing; cells
+  // that hold only a status word become pills.
+  var pills = {
+    "supported": "ok", "yes": "ok", "done": "ok", "complete": "ok", "stable": "ok",
+    "partial": "partial", "partially supported": "partial", "experimental": "partial",
+    "not yet": "soon", "planned": "soon", "in progress": "soon",
+    "unsupported": "no", "not supported": "no", "no": "no", "n/a": "na"
+  };
+  Array.prototype.forEach.call(doc.querySelectorAll("article table, .docs-body table, main table"), function (table) {
+    if (table.closest(".docs-table") || table.classList.contains("docs-params")) { return; }
+    var wrap = doc.createElement("div");
+    wrap.className = "docs-table";
+    table.parentNode.insertBefore(wrap, table);
+    wrap.appendChild(table);
+    Array.prototype.forEach.call(table.querySelectorAll("tbody td"), function (cell) {
+      var kind = pills[(cell.textContent || "").trim().toLowerCase()];
+      if (kind && !cell.children.length) {
+        cell.innerHTML = "<span class=\"docs-pill docs-pill--" + kind + "\">" + cell.innerHTML + "</span>";
+      }
+    });
+  });
+
   // Highlight the heading being read in "On this page".
   var links = doc.querySelectorAll(".docs-toc a[href^='#']");
   if (links.length && "IntersectionObserver" in window) {

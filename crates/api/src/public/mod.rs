@@ -37,7 +37,12 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route("/{type}/{*rest}", get(routes::custom_entry))
         .route("/archive/{year}/{month}", get(routes::date_archive))
         .route("/category/{slug}", get(routes::category_archive))
+        .route(
+            "/category/{slug}/feed.xml",
+            get(crate::feeds::category_rss_route),
+        )
         .route("/tag/{slug}", get(routes::tag_archive))
+        .route("/tag/{slug}/feed.xml", get(crate::feeds::tag_rss_route))
         .route("/author/{username}", get(routes::author_archive))
         .route("/search", get(routes::search))
         .route("/comment", post(comment_form::submit))
@@ -66,6 +71,10 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route("/favicon.ico", get(crate::public::routes::favicon))
         .route("/logo", get(crate::public::routes::logo))
         .route("/brand/mark.svg", get(crate::public::routes::brand_mark))
+        .route(
+            "/theme-assets/shared.css",
+            get(crate::public::routes::shared_css_route),
+        )
         .route("/custom.css", get(crate::public::routes::custom_css_route))
         .route("/feed.xml", get(crate::feeds::rss_route))
         .route("/atom.xml", get(crate::feeds::atom_route))

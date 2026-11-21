@@ -7,7 +7,41 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Fixed
+- A plugin refresh keeps the plugin's scheduled tasks declared until the new declarations replace them, and a task that was claimed but has no declaration is skipped instead of run on the ordinary budget.
+- A plugin call that runs past its time or fuel limit (an epoch-deadline or fuel trap) no longer disables the plugin for good on the first occurrence: it is marked degraded and stays enabled, and the third such trap within ten minutes disables it as before. A busy server (a deploy publishing pages while a sync runs) could trap a healthy plugin once and take its pages down until an administrator re-enabled it. Any trap now records its reason on the Plugins page; before, a disabled plugin showed no cause. A settings save (or a restart) that a plugin refuses now leaves it degraded and serving on its previous settings, not errored: an errored plugin refuses every later call, so the next settings save could not heal it, and the docs import of a staging deploy left vyasa-docs off until an administrator re-enabled it.
+
+- A page (About, Subscribe, a docs page) is no longer described as an article: it gets `og:type website`, a `WebPage` JSON-LD block and no `article:*` dates.
+- `article:modified_time` and `dateModified` are never earlier than the publication time (a scheduled post is saved before it goes out).
+- Each menu `<nav>` has an accessible name: the block's `label` setting, else the menu's slug.
+
 ### Added
+- A theme's `font_faces` entries take optional `weight`, `style` and `display`, printed as `font-weight`, `font-style` and `font-display` in the `@font-face` rule. Two files of one family (400 and 700, roman and italic) are no longer reported as a duplicate.
+
+### Added
+
+- A theme may bundle `assets/manifest/site.webmanifest`; it is served as `application/manifest+json` under `/theme-assets/manifest/` and linked from every page head.
+
+### Fixed
+
+- A page description taken from an excerpt or `seo_description` never carries markup (a hand-written excerpt with inline HTML left a half tag in `<meta name="description">`).
+- Newest and Oldest order by publication time, so the `latest-posts` block lists the most recently published entry first; a draft sorts by its creation time.
+- `put-entry`: an entry whose `source-hash` is unchanged but whose stored status is `draft` while `published` is asked (or the reverse) now has its status repaired (`updated`) instead of answering `unchanged`; `scheduled`, `private` and `trash` entries are left alone. A root left in draft by an earlier sync kept the docs tree empty.
+
+### Security
+- Dependencies: lettre 0.11.24 (SMTP STARTTLS, dot-stuffing and header-handling advisories) and wasmtime / wasmtime-wasi 50.0.3 (plugin host advisories).
+
+## [0.4.2] - 2026-11-13
+
+### Fixed
+- An upgrade clears a plugin's errored status, and a per-minute quota refusal while applying its settings leaves the plugin degraded instead of errored (#115).
+- A docs entry has one canonical address: a trailing slash or a dotted version segment (`/docs/app/0.2/`) answers with a 301 to the stored address (#117).
+- `ammonia` 4.2.5 and `quinn-udp` 0.5.16, for RUSTSEC-2026-0533 and RUSTSEC-2026-0538 (#118).
+- Docs plugin 0.1.6: re-applying unchanged settings (every site deploy) no longer writes the settings key, and a refused write with settings already stored no longer fails `init`. A deploy right after a sync used to hit the per-minute write quota and leave the plugin errored.
+- Docs plugin 0.1.5: a site of over 600 pages synced never finished, because the importer read one key-value entry per page and the host allows 600 reads a minute even in an extended task. The scan cache is now a few packed entries (about ten reads a run) and is saved however a run ends, so a cut-short run resumes.
+
+### Added
+- The contact path of `POST /form` keeps every other posted field (`company`, `role`, a `wants_contact` checkbox ...) in the submission, at most 20 fields of 1000 characters, and Admin submissions lists them; `GET /api/v1/audience/submissions` returns them as `data` (#119).
 - Docs plugin 0.1.4: a section slug may be `product/version` (`app/2.0`), served at `/docs/app/2.0/` with its own sidebar and search scope; a hidden `product` root is generated when no section of that name exists.
 - Forms can hold each entry until its sender confirms by email (double opt-in). A held entry stays out of the
   inbox, the CSV and the unread counts, the owner is mailed only after the click, and the confirmation mail

@@ -5727,6 +5727,8 @@ export interface components {
              * @description When it arrived.
              */
             created_at: string;
+            /** @description Extra fields the form posted (company, role ...), name to value. */
+            data: unknown;
             /** @description Visitor email. */
             email: string;
             /** @description Form name. */
