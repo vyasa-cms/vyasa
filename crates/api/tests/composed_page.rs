@@ -393,3 +393,37 @@ async fn a_paginated_post_list_on_a_page_reaches_older_posts() {
     assert!(!second.contains("Newest entry"), "{second}");
     assert!(second.contains(r#"href="?page=1" rel="prev""#), "{second}");
 }
+
+#[tokio::test]
+async fn the_shared_stylesheet_is_linked_and_cached_by_its_hash() {
+    let db = TestDb::new().await;
+    seed(db.pool()).await;
+    let server = TestServer::start(common::BIN, &db);
+    let base = server.base();
+    let cookie = login(base);
+    create_page(base, &cookie, &campaign());
+
+    let html = read(http(ureq::get(format!("{base}/launch").as_str()).call()));
+    let href = html
+        .split("href=\"")
+        .map(|s| s.split('"').next().unwrap_or(""))
+        .find(|h| h.starts_with("/theme-assets/shared.css?v="))
+        .unwrap_or_else(|| panic!("the page links the shared stylesheet:\n{html}"));
+
+    let current = http(ureq::get(format!("{base}{href}").as_str()).call());
+    assert_eq!(current.status(), 200);
+    assert_eq!(
+        current.header("content-type"),
+        Some("text/css; charset=utf-8")
+    );
+    assert_eq!(
+        current.header("cache-control"),
+        Some("public, max-age=31536000, immutable"),
+        "the current hash is cached for good"
+    );
+    assert!(!read(current).is_empty(), "the file has rules");
+
+    let stale = http(ureq::get(format!("{base}/theme-assets/shared.css?v=old").as_str()).call());
+    assert_eq!(stale.status(), 200);
+    assert_eq!(stale.header("cache-control"), Some("public, max-age=60"));
+}

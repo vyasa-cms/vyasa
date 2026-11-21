@@ -469,6 +469,8 @@ scroll-driven effects. The base stylesheet zeroes transitions under
 `prefers-reduced-motion`, and a theme's own rules should respect the same
 query.
 
+**Web app manifest.** `assets/manifest/site.webmanifest` (a JSON object; no other name or folder) is served at `/theme-assets/manifest/site.webmanifest` as `application/manifest+json` and linked from every page head with `<link rel="manifest">`, so a theme can offer "Add to Home Screen". Its `icons` may point at `/theme-assets/images/…`.
+
 **Bundled pictures and fonts.** `assets/images/` and `assets/fonts/`
 travel with the package and are served from the site at
 `/theme-assets/images/…` and `/theme-assets/fonts/…` while the theme is
