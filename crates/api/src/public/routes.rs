@@ -136,16 +136,33 @@ async fn load_bundle(state: &AppState) -> Result<std::sync::Arc<ThemeBundle>, R>
         }
         Err(e) => return Err(internal(e)),
     };
-    let bundle = std::sync::Arc::new(
-        bundle_from_docs(
-            &active.tokens,
-            &active.layout,
-            active.templates.as_ref(),
-            active.assets.as_ref(),
-            crate::render_cache::theme_namespace(&active.name, active.version),
-        )
-        .map_err(internal)?,
-    );
+    let mut bundle = bundle_from_docs(
+        &active.tokens,
+        &active.layout,
+        active.templates.as_ref(),
+        active.assets.as_ref(),
+        crate::render_cache::theme_namespace(&active.name, active.version),
+    )
+    .map_err(internal)?;
+    // A theme that bundles a web app manifest has it linked from every
+    // head. Looked up here, once per theme version, never per request.
+    // A failed lookup is an error, not a missing manifest: the bundle is
+    // cached, and one that silently lacked the link would stay so.
+    if let Some(row) = state
+        .themes
+        .file(active.id, vyasa_themes::package::MANIFEST_PATH)
+        .await
+        .map_err(internal)?
+    {
+        use std::fmt::Write as _;
+        let hash = row.sha256.get(..16).unwrap_or(&row.sha256);
+        let _ = write!(
+            bundle.asset_head,
+            "\n<link rel=\"manifest\" href=\"/theme-assets/{}?v={hash}\">",
+            vyasa_themes::package::MANIFEST_PATH
+        );
+    }
+    let bundle = std::sync::Arc::new(bundle);
     state.theme_bundle.put(bundle.clone());
     Ok(bundle)
 }
@@ -1676,6 +1693,7 @@ async fn archive_impl(
         let page_ctx = PageContext {
             title: format!("{} — {taxonomy}", term.name),
             archive_title: Some(term.name.clone()),
+            archive_feed_url: Some(format!("{base}/feed.xml")),
             posts: cards(state_ref, &site, &rows).await,
             pagination_page: page_no,
             pagination_next: has_more.then(|| format!("{base}?page={}", page_no + 1)),
