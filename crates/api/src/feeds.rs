@@ -52,6 +52,20 @@ pub struct RenderedFeed {
     pub content_type: &'static str,
 }
 
+/// The newest published *posts*, for the home feed or one term's. Pages and custom types are not feed items: a
+/// docs import writes hundreds of pages, and without this filter they filled the newest-50 window and pushed every
+/// post out of both feeds. `readable_types` is passed on, but a post type filter already excludes custom types.
+fn feed_filter(term_id: Option<i64>, readable_types: Option<Vec<String>>) -> PostFilter {
+    PostFilter {
+        status: Some(PostStatus::Published),
+        post_type: Some(vyasa_db::content_models::PostType::Post),
+        limit: FEED_ITEM_LIMIT,
+        term_id,
+        readable_types,
+        ..PostFilter::default()
+    }
+}
+
 /// Builds the feed for a listing.
 ///
 /// `term` selects an optional `(taxonomy, slug, name)` for a category or tag
@@ -67,21 +81,7 @@ pub async fn build_feed(
     kind: FeedKind,
     readable_types: Option<Vec<String>>,
 ) -> Result<RenderedFeed, AppError> {
-    // `readable_types`: the custom types served publicly; a type declared
-    // or made non-public never reaches a feed.
-    let filter = PostFilter {
-        status: Some(PostStatus::Published),
-        limit: FEED_ITEM_LIMIT,
-        term_id,
-        readable_types,
-        ..PostFilter::default()
-    };
-    let rows: Vec<_> = posts
-        .list(&filter)
-        .await?
-        .into_iter()
-        .filter(|p| crate::public::page_meta::is_public_type(p.post_type))
-        .collect();
+    let rows = posts.list(&feed_filter(term_id, readable_types)).await?;
     let rendered = render_feed(src, &rows, term, kind);
     Ok(rendered)
 }
@@ -350,6 +350,17 @@ mod tests {
             site_name: "Test",
             tagline: "t",
             base_url: "https://example.test",
+        }
+    }
+
+    #[test]
+    fn the_feed_lists_posts_only_never_pages_or_custom_types() {
+        // A page or a custom-type entry newer than every post must not take a place in the newest-N window.
+        for term_id in [None, Some(7)] {
+            let f = feed_filter(term_id, Some(vec!["doc".to_owned()]));
+            assert_eq!(f.post_type, Some(vyasa_db::content_models::PostType::Post));
+            assert_eq!(f.status, Some(PostStatus::Published));
+            assert_eq!(f.term_id, term_id);
         }
     }
 
