@@ -9,14 +9,6 @@ ignore = [
     # workspace never builds or connects with: Vyasa speaks Postgres only.
     # No fixed rsa release exists yet; revisit when one does.
     "RUSTSEC-2023-0071",
-    # zip 8.6.0 is locked only as a build dependency of utoipa-swagger-ui
-    # 10.0.1 (the latest), whose build script unpacks the pinned Swagger UI
-    # release zip without calling ZipArchive::extract. All three advisories
-    # are about extract() on hostile archives; the workspace itself uses
-    # zip 9. Remove when utoipa-swagger-ui moves to zip 9.
-    "RUSTSEC-2026-0367",
-    "RUSTSEC-2026-0368",
-    "RUSTSEC-2026-0369",
     # libsqlite3-sys 0.30.1 (bundled SQLite < 3.54): locked only through
     # sqlx-sqlite, which sqlx-macros-core pulls in for all drivers. Vyasa
     # speaks Postgres only and never builds or opens SQLite. Revisit when
