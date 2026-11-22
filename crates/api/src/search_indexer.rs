@@ -84,7 +84,7 @@ fn doc_for(
         // Reuses the AI crate's extractor so indexed text matches what a
         // reader actually sees, rather than raw block JSON.
         body: {
-            let mut body = vyasa_ai::assist::extract_text(&blocks, 100_000);
+            let mut body = vyasa_ai::assist::extract_search_text(&blocks, 100_000);
             for (_, value) in fields {
                 body.push('\n');
                 body.push_str(value);
