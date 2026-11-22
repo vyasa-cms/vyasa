@@ -7,6 +7,8 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.4.3] - 2026-11-22
+
 ### Fixed
 - Search finds text in tables, code blocks and quotes, not only paragraphs and headings: a config key in a reference table or an error class in a code block now matches (docs QA-W-4). The AI assist text is unchanged. An existing index keeps its old bodies until it is rebuilt: run `vyasa search reindex` (or `POST /api/v1/search/reindex`, or Site health → Rebuild index) after upgrading.
 - A plugin refresh keeps the plugin's scheduled tasks declared until the new declarations replace them, and a task that was claimed but has no declaration is skipped instead of run on the ordinary budget.
