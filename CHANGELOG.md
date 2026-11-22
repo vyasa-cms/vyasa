@@ -19,6 +19,7 @@ follows [semantic versioning](https://semver.org) as described in
 - Each menu `<nav>` has an accessible name: the block's `label` setting, else the menu's slug.
 
 ### Added
+- `GET /llms-full.txt`: every readable entry's Markdown in one file (the same set as `llms.txt`, each body inline), so a model reads the whole site in one fetch. `llms-full` is now a reserved type slug.
 - A theme's `font_faces` entries take optional `weight`, `style` and `display`, printed as `font-weight`, `font-style` and `font-display` in the `@font-face` rule. Two files of one family (400 and 700, roman and italic) are no longer reported as a duplicate.
 
 ### Added
