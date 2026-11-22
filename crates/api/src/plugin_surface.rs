@@ -522,13 +522,17 @@ async fn declaration(
     plugin_id: i64,
     name: &str,
     which: Declaration,
+    refresh: bool,
 ) -> Option<serde_json::Value> {
     let env = HostEnv::background(std::sync::Arc::clone(&state.broker), state.pool.clone());
-    match state
-        .plugin_host
-        .call_declaration(plugin_id, which, &env)
-        .await
-    {
+    let host = &state.plugin_host;
+    let outcome = if refresh {
+        // A re-read: a slow answer must not count against the plugin (the form from load stays).
+        host.call_declaration_refresh(plugin_id, which, &env).await
+    } else {
+        host.call_declaration(plugin_id, which, &env).await
+    };
+    match outcome {
         V2Outcome::Ok(json) => match serde_json::from_str(&json) {
             Ok(value) => Some(value),
             Err(e) => {
@@ -553,10 +557,15 @@ async fn declaration(
 /// from load stays.
 pub async fn fresh_admin_form(state: &AppState, plugin_id: i64) -> Option<AdminForm> {
     let loaded = state.plugin_surface.admin_form(plugin_id).await?;
-    let Some(form) = declaration(state, plugin_id, &loaded.plugin_name, Declaration::Admin)
-        .await
-        .and_then(|v| parse_admin(plugin_id, &loaded.plugin_name, &v))
-    else {
+    let Some(form) = declaration(
+        state,
+        plugin_id,
+        &loaded.plugin_name,
+        Declaration::Admin,
+        true,
+    )
+    .await
+    .and_then(|v| parse_admin(plugin_id, &loaded.plugin_name, &v)) else {
         return Some(loaded);
     };
     if state
@@ -630,7 +639,7 @@ pub async fn collect(
         state.plugin_surface.note_v2(plugin_id, interest).await;
     }
 
-    if let Some(v) = declaration(state, plugin_id, name, Declaration::Assets).await {
+    if let Some(v) = declaration(state, plugin_id, name, Declaration::Assets, false).await {
         // A script runs in every visitor's browser on every public page,
         // so declaring one is not enough: the operator has to have granted
         // `assets:script`. Stylesheets stay ungated.
@@ -645,11 +654,11 @@ pub async fn collect(
         collect_assets(&mut inner, plugin_id, name, &v, may_script);
         inner.head_html = head_tags(&inner.assets);
     }
-    if let Some(v) = declaration(state, plugin_id, name, Declaration::Admin).await {
+    if let Some(v) = declaration(state, plugin_id, name, Declaration::Admin, false).await {
         let mut inner = state.plugin_surface.inner.write().await;
         collect_admin(&mut inner, plugin_id, name, &v);
     }
-    if let Some(v) = declaration(state, plugin_id, name, Declaration::PostTypes).await {
+    if let Some(v) = declaration(state, plugin_id, name, Declaration::PostTypes, false).await {
         let mut inner = state.plugin_surface.inner.write().await;
         skipped.extend(collect_post_types(&mut inner, plugin_id, name, &v, mode)?);
         // The fields its types declare, owned by the plugin and locked to
@@ -664,7 +673,7 @@ pub async fn collect(
         drop(inner);
         store_declared_fields(state, name, declared).await;
     }
-    if let Some(v) = declaration(state, plugin_id, name, Declaration::Taxonomies).await {
+    if let Some(v) = declaration(state, plugin_id, name, Declaration::Taxonomies, false).await {
         let mut inner = state.plugin_surface.inner.write().await;
         skipped.extend(collect_taxonomies(&mut inner, plugin_id, name, &v, mode)?);
     }
@@ -720,7 +729,7 @@ pub async fn collect(
     // The plugin's tasks stay registered through a refresh (`forget_for_refresh`
     // leaves them), so the runner never sees an enabled plugin without them;
     // the new declarations replace the old in one write.
-    let schedule = declaration(state, plugin_id, name, Declaration::Schedule).await;
+    let schedule = declaration(state, plugin_id, name, Declaration::Schedule, false).await;
     {
         let mut inner = state.plugin_surface.inner.write().await;
         inner.tasks.retain(|t| t.plugin_id != plugin_id);
