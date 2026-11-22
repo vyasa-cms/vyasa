@@ -58,12 +58,13 @@ pub const RESERVED_TYPE_SLUGS: &[&str] = &[
     "brand",
     "registry",
     // File names, by stem: favicon.ico, custom.css, atom.xml, robots.txt,
-    // llms.txt, indexnow.txt (feed.xml and sitemap.xml are above).
+    // llms.txt, llms-full.txt, indexnow.txt (feed.xml and sitemap.xml are above).
     "favicon",
     "custom",
     "atom",
     "robots",
     "llms",
+    "llms-full",
     "indexnow",
     // Health endpoints for container platforms (0.2).
     "healthz",
