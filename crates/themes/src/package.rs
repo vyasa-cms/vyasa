@@ -12,6 +12,7 @@
 //! assets/theme.js    # optional script
 //! assets/images/*    # optional pictures, served at /theme-assets/images/…
 //! assets/fonts/*     # optional web fonts, served at /theme-assets/fonts/…
+//! assets/manifest/site.webmanifest  # optional web app manifest, linked from every page head
 //! screenshot.png     # optional, <=1 MiB
 //! ```
 //!
@@ -89,15 +90,23 @@ pub fn bundled_content_type(path: &str) -> Option<&'static str> {
         ("fonts", "woff") => "font/woff",
         ("fonts", "ttf") => "font/ttf",
         ("fonts", "otf") => "font/otf",
+        ("manifest", "webmanifest") => "application/manifest+json",
         _ => return None,
     })
 }
 
+/// The one path a theme may bundle its web app manifest at.
+pub const MANIFEST_PATH: &str = "manifest/site.webmanifest";
+
 /// Whether `path` (already stripped of `assets/`) is a legal bundled-file
 /// path: `images/` or `fonts/`, at most three segments, each of
-/// `[a-z0-9._-]`, no segment empty or starting with a dot.
+/// `[a-z0-9._-]`, no segment empty or starting with a dot; or exactly
+/// [`MANIFEST_PATH`].
 #[must_use]
 pub fn valid_bundled_path(path: &str) -> bool {
+    if path == MANIFEST_PATH {
+        return true;
+    }
     let segs: Vec<&str> = path.split('/').collect();
     if !(2..=3).contains(&segs.len()) || !matches!(segs[0], "images" | "fonts") {
         return false;
@@ -361,8 +370,8 @@ pub fn parse_vytheme(bytes: &[u8]) -> Result<ParsedTheme, PackageError> {
         if !valid_bundled_path(rest) {
             return Err(err(format!(
                 "unexpected file \"{name}\" — a theme may bundle assets/theme.css, \
-                 assets/theme.js, and files under assets/images/ or assets/fonts/ \
-                 named with lowercase letters, digits, dots, dashes and underscores"
+                 assets/theme.js, assets/manifest/site.webmanifest, and files under \
+                 assets/images/ or assets/fonts/ named with lowercase letters, digits, dots, dashes and underscores"
             )));
         }
         let Some(content_type) = bundled_content_type(rest) else {
@@ -382,6 +391,11 @@ pub fn parse_vytheme(bytes: &[u8]) -> Result<ParsedTheme, PackageError> {
             return Err(err(format!(
                 "bundled files inflate past {MAX_FILES_TOTAL_BYTES} bytes in total"
             )));
+        }
+        if rest == MANIFEST_PATH
+            && serde_json::from_slice::<serde_json::Value>(&bytes).map_or(true, |v| !v.is_object())
+        {
+            return Err(err(format!("\"{name}\" is not a JSON object")));
         }
         if content_type == "image/svg+xml" && !looks_like_svg(&bytes) {
             return Err(err(format!(

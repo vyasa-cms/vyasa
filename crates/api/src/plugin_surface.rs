@@ -366,8 +366,17 @@ impl PluginSurface {
                 .map(|t| t.slug.clone())
                 .collect()
         };
-        self.forget_keeping_types(plugin_id).await;
+        self.forget_keeping(plugin_id, true).await;
         kept
+    }
+
+    /// Drops a plugin's tasks: a refresh that did not collect it again.
+    pub async fn forget_tasks(&self, plugin_id: i64) {
+        self.inner
+            .write()
+            .await
+            .tasks
+            .retain(|t| t.plugin_id != plugin_id);
     }
 
     /// Takes out of the registry the slugs among `kept` that no plugin
@@ -398,11 +407,12 @@ impl PluginSurface {
             .collect();
         vyasa_db::content_models::PostType::unregister_plugin_types(&types);
         drop(inner);
-        self.forget_keeping_types(plugin_id).await;
+        self.forget_keeping(plugin_id, false).await;
     }
 
-    /// [`Self::forget`] without touching the post type registry.
-    async fn forget_keeping_types(&self, plugin_id: i64) {
+    /// [`Self::forget`] without touching the post type registry; with
+    /// `keep_tasks` the plugin's scheduled tasks stay too.
+    async fn forget_keeping(&self, plugin_id: i64, keep_tasks: bool) {
         let mut inner = self.inner.write().await;
         inner.routes.retain(|r| r.plugin_id != plugin_id);
         inner.assets.remove(&plugin_id);
@@ -417,7 +427,13 @@ impl PluginSurface {
         inner.layouts.retain(|slug, _| !owned.contains(slug));
         inner.post_types.retain(|_, t| t.plugin_id != plugin_id);
         inner.taxonomies.retain(|_, t| t.plugin_id != plugin_id);
-        inner.tasks.retain(|t| t.plugin_id != plugin_id);
+        // Sections too: the first declaration of a kind wins, so one left
+        // behind would shadow the refreshed plugin's own (a new version's
+        // `context`, say) until a restart, and outlive a disable.
+        inner.sections.retain(|_, s| s.plugin_id != plugin_id);
+        if !keep_tasks {
+            inner.tasks.retain(|t| t.plugin_id != plugin_id);
+        }
         inner.v2_plugins.retain(|id| *id != plugin_id);
         inner.interests.remove(&plugin_id);
         inner.head_html = head_tags(&inner.assets);
@@ -639,9 +655,16 @@ pub async fn collect(
             collect_layouts(&mut inner, plugin_id, name, &reply);
         }
     }
-    if let Some(v) = declaration(state, plugin_id, name, Declaration::Schedule).await {
+    // The plugin's tasks stay registered through a refresh (`forget_for_refresh`
+    // leaves them), so the runner never sees an enabled plugin without them;
+    // the new declarations replace the old in one write.
+    let schedule = declaration(state, plugin_id, name, Declaration::Schedule).await;
+    {
         let mut inner = state.plugin_surface.inner.write().await;
-        collect_tasks(&mut inner, plugin_id, name, &v);
+        inner.tasks.retain(|t| t.plugin_id != plugin_id);
+        if let Some(v) = schedule {
+            collect_tasks(&mut inner, plugin_id, name, &v);
+        }
     }
     Ok(skipped)
 }
@@ -1401,6 +1424,21 @@ fn collect_tasks(inner: &mut Inner, plugin_id: i64, name: &str, value: &serde_js
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn a_refresh_keeps_the_plugins_tasks_until_forgotten() {
+        let surface = PluginSurface::new();
+        surface.inner.write().await.tasks.push(TaskDecl {
+            plugin_id: 7,
+            name: "sync".into(),
+            every_seconds: 60,
+            extended: true,
+        });
+        surface.forget_for_refresh(7).await;
+        assert_eq!(surface.tasks().await.len(), 1, "kept through the refresh");
+        surface.forget_tasks(7).await;
+        assert!(surface.tasks().await.is_empty());
+    }
+
     #[test]
     fn reserved_and_malformed_post_type_slugs_are_refused() {
         assert!(is_valid_post_type_slug("product"));
@@ -1410,6 +1448,63 @@ mod tests {
         ] {
             assert!(!is_valid_post_type_slug(bad), "{bad}");
         }
+    }
+
+    /// The docs plugin's sections went blank on a live site that had its
+    /// plugin upgraded without a restart: a refresh withdrew everything the
+    /// plugin contributed except its sections, and the first declaration
+    /// of a kind wins, so the old version's declaration (no `context`)
+    /// outlived the upgrade and every section rendered "unresolved".
+    #[tokio::test]
+    async fn a_refresh_replaces_the_plugins_sections_and_keeps_others() {
+        let surface = PluginSurface::new();
+        {
+            let mut inner = surface.inner.write().await;
+            collect_sections(
+                &mut inner,
+                1,
+                "docs",
+                &serde_json::json!([{"kind": "docs/sidebar"}]),
+            );
+            collect_sections(
+                &mut inner,
+                2,
+                "other",
+                &serde_json::json!([{"kind": "other/grid"}]),
+            );
+        }
+        surface.forget_for_refresh(1).await;
+        let kinds: Vec<String> = surface
+            .sections()
+            .await
+            .into_iter()
+            .map(|s| s.kind)
+            .collect();
+        assert_eq!(
+            kinds,
+            ["other/grid"],
+            "the refreshed plugin's kinds are withdrawn"
+        );
+        {
+            let mut inner = surface.inner.write().await;
+            collect_sections(
+                &mut inner,
+                1,
+                "docs",
+                &serde_json::json!([{"kind": "docs/sidebar", "context": ["entry", "tree"]}]),
+            );
+        }
+        let sidebar = surface
+            .sections()
+            .await
+            .into_iter()
+            .find(|s| s.kind == "docs/sidebar")
+            .expect("declared again");
+        assert_eq!(
+            sidebar.context,
+            ["entry", "tree"],
+            "the new declaration wins"
+        );
     }
 
     #[test]

@@ -471,6 +471,20 @@ fn render_comments(nodes: &[CommentNodeData], per_page: u32, depth: usize) -> St
     out
 }
 
+/// The accessible name of a menu's `<nav>`: an explicit label, else the
+/// slug with separators as spaces and a capital first letter.
+fn nav_label(slug: &str, label: Option<&str>) -> String {
+    if let Some(l) = label.map(str::trim).filter(|l| !l.is_empty()) {
+        return l.to_owned();
+    }
+    let spaced = slug.replace(['-', '_'], " ");
+    let mut chars = spaced.trim().chars();
+    chars.next().map_or_else(
+        || "Menu".to_owned(),
+        |c| c.to_uppercase().chain(chars).collect(),
+    )
+}
+
 /// `menu`: renders a named navigation menu.
 pub fn navigation_menu<'a>(
     ctx: &'a ResolveContext<'a>,
@@ -491,9 +505,15 @@ pub fn navigation_menu<'a>(
         // stylesheet says, so the desktop menu was invisible. The label
         // wraps its checkbox rather than pointing at an id, so two menus
         // on one page (header and footer, say) never share one.
+        // Two menus on a page (header and footer) are two navigation
+        // landmarks; a screen reader tells them apart by name, so the
+        // `<nav>` carries one: the block's `label` setting, else the menu's
+        // slug ("main" is "Main", "footer-links" is "Footer links").
+        let label = nav_label(slug, str_of(settings, "label"));
         Ok(BlockPayload::Html(format!(
-            "<nav class=\"vy-nav\"><label class=\"vy-nav-toggle\" aria-label=\"Menu\">\
-             <input type=\"checkbox\" class=\"vy-nav-check\"></label>{html}</nav>"
+            "<nav class=\"vy-nav\" aria-label=\"{}\"><label class=\"vy-nav-toggle\" aria-label=\"Menu\">\
+             <input type=\"checkbox\" class=\"vy-nav-check\"></label>{html}</nav>",
+            esc(&label)
         )))
     })
 }
@@ -630,4 +650,19 @@ pub fn empty<'a>(
     _settings: &'a MapSettings,
 ) -> BoxFut<'a, BlockPayload> {
     Box::pin(std::future::ready(Ok(BlockPayload::Empty)))
+}
+
+#[cfg(test)]
+mod nav_label_tests {
+    use super::nav_label;
+
+    #[test]
+    fn a_nav_is_named_by_its_label_or_its_slug() {
+        assert_eq!(nav_label("main", None), "Main");
+        assert_eq!(nav_label("footer-links", None), "Footer links");
+        assert_eq!(nav_label("site_map", None), "Site map");
+        assert_eq!(nav_label("main", Some("Primary")), "Primary");
+        assert_eq!(nav_label("main", Some("  ")), "Main");
+        assert_eq!(nav_label("", None), "Menu");
+    }
 }
