@@ -7,6 +7,10 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Fixed
+
+- `/sitemap.xml` leaves out an entry marked `seo_noindex` and an entry whose `seo_canonical_path` names another address, so a docs site lists only its latest version and no unreleased or hidden page.
+
 ## [0.4.3] - 2026-11-22
 
 ### Fixed

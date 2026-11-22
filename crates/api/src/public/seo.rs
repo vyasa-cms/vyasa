@@ -97,6 +97,13 @@ pub async fn sitemap(State(state): State<AppState>, headers: HeaderMap) -> Respo
         // every custom-type URL a crawler was handed was a 404. The feeds
         // had the same bug and the same fix.
         let path = pattern.path_for(p);
+        // An entry that asks search engines to skip it (a hidden or
+        // unreleased docs page) or names another address as its canonical
+        // one (an older docs version names the latest) is not advertised:
+        // the sitemap lists the page a crawler should index.
+        if !listed_in_sitemap(&p.meta, &path) {
+            continue;
+        }
         xml.push_str("<url><loc>");
         xml.push_str(&esc(&format!("{base}{path}")));
         // Without a `lastmod` a crawler has no way to tell an edited page
@@ -114,6 +121,21 @@ pub async fn sitemap(State(state): State<AppState>, headers: HeaderMap) -> Respo
         crate::public::cacheable::CRAWLER_MAX_AGE,
         xml,
     )
+}
+
+/// Whether an entry with this `meta` and public `path` belongs in the
+/// sitemap: not `seo_noindex`, and not canonical to some other path.
+fn listed_in_sitemap(meta: &serde_json::Value, path: &str) -> bool {
+    if meta.get("seo_noindex").and_then(serde_json::Value::as_bool) == Some(true) {
+        return false;
+    }
+    match meta
+        .get("seo_canonical_path")
+        .and_then(serde_json::Value::as_str)
+    {
+        Some(c) if !c.is_empty() => c.trim_end_matches('/') == path.trim_end_matches('/'),
+        _ => true,
+    }
 }
 
 /// `GET /robots.txt` — allow all, point at the sitemap.
@@ -304,4 +326,25 @@ fn esc(t: &str) -> String {
 
 fn internal() -> Response {
     (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::listed_in_sitemap;
+    use serde_json::json;
+
+    #[test]
+    fn noindex_and_other_canonicals_stay_out_of_the_sitemap() {
+        assert!(listed_in_sitemap(&json!({}), "/docs/a"));
+        assert!(listed_in_sitemap(&json!({"seo_noindex": false}), "/docs/a"));
+        assert!(!listed_in_sitemap(&json!({"seo_noindex": true}), "/docs/a"));
+        assert!(listed_in_sitemap(
+            &json!({"seo_canonical_path": "/docs/a/"}),
+            "/docs/a"
+        ));
+        assert!(!listed_in_sitemap(
+            &json!({"seo_canonical_path": "/docs/a"}),
+            "/docs/0.2/a"
+        ));
+    }
 }
