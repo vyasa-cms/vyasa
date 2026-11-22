@@ -1246,6 +1246,9 @@ mod refresh_trap_tests {
         )
         .await
         .expect("install");
+        // A new plugin starts disabled; enable it so the assertions below
+        // test the trap handling and not the install default.
+        repo.set_enabled(row.id, true).await.expect("enable");
         repo.set_status(row.id, "loaded").await.expect("status");
         let host = WasmtimeHost::new(repo.clone()).expect("engine");
         for t in [
@@ -1306,6 +1309,8 @@ mod refresh_trap_tests {
         )
         .await
         .expect("install");
+        repo.set_enabled(row.id, true).await.expect("enable");
+        repo.set_status(row.id, "loaded").await.expect("status");
         let host = WasmtimeHost::new(repo.clone()).expect("engine");
         host.on_trap(
             row.id,
