@@ -20,11 +20,12 @@ use crate::render_cache::RenderCache;
 use crate::state::AppState;
 
 /// Subscribes to domain events and purges affected pages for the life of the
-/// process.
+/// process. Runs with or without the render cache: the edge and the social
+/// card URLs need purging either way, and starting it always means turning
+/// cards on needs no restart.
 pub fn spawn(state: &AppState) {
-    let Some(cache) = state.render_cache.clone() else {
-        return;
-    };
+    let cache = state.render_cache.clone();
+    let cards = std::sync::Arc::clone(&state.social_cards);
     let themes = state.themes.clone();
     let purger = std::sync::Arc::clone(&state.cdn);
     let posts = state.posts.clone();
@@ -40,14 +41,18 @@ pub fn spawn(state: &AppState) {
                 // everything costs a re-render; guessing costs correctness.
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                     tracing::warn!("cache invalidator lagged {n} events; purging everything");
-                    cache.invalidate_theme();
+                    if let Some(cache) = &cache {
+                        cache.invalidate_theme();
+                    }
                     purger.purge_all().await;
                     continue;
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             };
 
-            purge(&cache, &themes, &posts, &event, queries.as_ref()).await;
+            if let Some(cache) = &cache {
+                purge(cache, &themes, &posts, &event, queries.as_ref()).await;
+            }
             // The edge holds its own copy, so the same event has to reach
             // it — otherwise turning on `edge_cache_seconds` would mean a
             // correction sits behind a stale page until the TTL expires.
@@ -59,7 +64,15 @@ pub fn spawn(state: &AppState) {
                     vyasa_core::options::PermalinkPattern::DEFAULT.into(),
                 )
             });
-            purge_edge(&purger, &posts, &event, base_url.as_deref(), &pattern).await;
+            purge_edge(
+                &purger,
+                &posts,
+                &cards,
+                &event,
+                base_url.as_deref(),
+                &pattern,
+            )
+            .await;
         }
     });
 }
@@ -127,6 +140,7 @@ async fn purge(
 async fn purge_edge(
     purger: &Arc<dyn Purger>,
     posts: &vyasa_core::post::PostService,
+    cards: &crate::social_card::SocialCards,
     event: &events::Event,
     base_url: Option<&str>,
     pattern: &vyasa_core::options::PermalinkPattern,
@@ -155,12 +169,17 @@ async fn purge_edge(
     // resolving every archive it belongs to; the front page and the feeds
     // cover what changes in practice, and a stale archive page corrects
     // itself at the next event.
-    let paths = [
+    let mut paths = vec![
         pattern.path_for(&post),
         "/".to_owned(),
         "/feed.xml".to_owned(),
         "/atom.xml".to_owned(),
     ];
+    // The entry's served social cards (all of its type's, for a tree: a
+    // child's label is its top ancestor's title). A comment changes no card.
+    if post_id_of(event).is_some() {
+        paths.extend(cards.take_urls(post.id, post.post_type));
+    }
     // Cloudflare's purge takes absolute URLs and answers a path with a
     // 4xx. These were sent as paths, so every targeted purge was refused —
     // silently, since a refusal is only logged — and a correction sat

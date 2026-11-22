@@ -52,12 +52,6 @@ pub struct CardSource {
     pub theme_version: i64,
 }
 
-impl ThemeBundle {
-    /// The usable card layout, when the theme has one.
-    pub(crate) fn card(&self) -> Option<&std::sync::Arc<CardSource>> {
-        self.card.as_ref().and_then(|c| c.as_ref().ok())
-    }
-}
 
 type R = Response;
 
@@ -898,6 +892,13 @@ pub(super) async fn render_single(
             .cloned();
         let path = site.permalinks.path_for(&post);
         let breadcrumbs = breadcrumbs_for(state_ref, &site, &post, &path).await;
+        // The same decision the `/_card/` route makes, through `card_for`.
+        let card = match crate::social_card::cards_enabled(state_ref).await {
+            Some(on) => {
+                crate::social_card::card_for(&on, state_ref, &post, &breadcrumbs, &site.title).await
+            }
+            None => None,
+        };
         let notice = params
             .comment
             .as_deref()
@@ -955,6 +956,7 @@ pub(super) async fn render_single(
             head: page_meta::Head::entry(&post, &path, author)
                 .with_alternates(alternates)
                 .with_breadcrumbs(breadcrumbs)
+                .with_social_card(card)
                 .filtered(state_ref)
                 .await
                 .render(&site),
@@ -1092,7 +1094,7 @@ async fn hreflang_links(state: &AppState, site: &page_meta::SiteContext, post_id
 /// structured data. Empty for an entry at the top of its tree. An ancestor
 /// that is not live (draft, private, password) means no trail, rather than
 /// one that leaks its title or skips a level.
-async fn breadcrumbs_for(
+pub(crate) async fn breadcrumbs_for(
     state: &AppState,
     site: &page_meta::SiteContext,
     post: &PostRow,

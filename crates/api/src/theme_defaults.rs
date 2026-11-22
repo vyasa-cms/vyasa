@@ -102,10 +102,22 @@ fn embedded_sets() -> [ThemeFiles<'static>; 5] {
                 "templates/page.tera",
                 include_str!("../../../themes-starter/docs/templates/page.tera"),
             )),
-            &[(
-                "assets/theme.css",
-                include_bytes!("../../../themes-starter/docs/assets/theme.css"),
-            )],
+            &[
+                (
+                    "assets/theme.css",
+                    include_bytes!("../../../themes-starter/docs/assets/theme.css"),
+                ),
+                (
+                    "assets/images/og/card-bg.png",
+                    include_bytes!("../../../themes-starter/docs/assets/images/og/card-bg.png"),
+                ),
+                (
+                    "assets/fonts/noto-sans-semibold-card.ttf",
+                    include_bytes!(
+                        "../../../themes-starter/docs/assets/fonts/noto-sans-semibold-card.ttf"
+                    ),
+                ),
+            ],
         ),
         (
             "storefront-lite",
