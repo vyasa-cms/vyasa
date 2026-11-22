@@ -260,13 +260,28 @@ fn extract(blocks: &[Block], budget: usize, everything: bool) -> String {
     // keep the words, drop the markup.
     fn push_plain(html: &str, out: &mut String) {
         let mut in_tag = false;
+        let mut tag = String::new();
         let mut words = String::with_capacity(html.len());
         for c in html.chars() {
             match c {
-                '<' => in_tag = true,
-                '>' => in_tag = false,
+                '<' => {
+                    in_tag = true;
+                    tag.clear();
+                }
+                '>' if in_tag => {
+                    in_tag = false;
+                    // A line break separates words: `a<br>b` is two tokens.
+                    if tag
+                        .trim_start_matches('/')
+                        .trim()
+                        .to_ascii_lowercase()
+                        .starts_with("br")
+                    {
+                        words.push(' ');
+                    }
+                }
                 _ if !in_tag => words.push(c),
-                _ => {}
+                _ => tag.push(c),
             }
         }
         out.push_str(

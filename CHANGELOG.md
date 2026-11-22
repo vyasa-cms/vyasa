@@ -8,7 +8,7 @@ follows [semantic versioning](https://semver.org) as described in
 ## [Unreleased]
 
 ### Fixed
-- Search finds text in tables, code blocks and quotes, not only paragraphs and headings: a config key in a reference table or an error class in a code block now matches (docs QA-W-4). The AI assist text is unchanged.
+- Search finds text in tables, code blocks and quotes, not only paragraphs and headings: a config key in a reference table or an error class in a code block now matches (docs QA-W-4). The AI assist text is unchanged. An existing index keeps its old bodies until it is rebuilt: run `vyasa search reindex` (or `POST /api/v1/search/reindex`, or Site health → Rebuild index) after upgrading.
 - A plugin refresh keeps the plugin's scheduled tasks declared until the new declarations replace them, and a task that was claimed but has no declaration is skipped instead of run on the ordinary budget.
 - A plugin call that runs past its time or fuel limit (an epoch-deadline or fuel trap) no longer disables the plugin for good on the first occurrence: it is marked degraded and stays enabled, and the third such trap within ten minutes disables it as before. A busy server (a deploy publishing pages while a sync runs) could trap a healthy plugin once and take its pages down until an administrator re-enabled it. Any trap now records its reason on the Plugins page; before, a disabled plugin showed no cause. A settings save (or a restart) that a plugin refuses now leaves it degraded and serving on its previous settings, not errored: an errored plugin refuses every later call, so the next settings save could not heal it, and the docs import of a staging deploy left vyasa-docs off until an administrator re-enabled it.
 
