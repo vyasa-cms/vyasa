@@ -17,6 +17,8 @@ vi.mock("@/api/plugins", async (importOriginal) => ({
   inspectPlugin: vi.fn(),
   installPlugin: vi.fn(),
   pluginAudit: vi.fn(),
+  getPluginForm: vi.fn(),
+  getPluginSettings: vi.fn(),
 }));
 vi.mock("@/api/client", async (importOriginal) => {
   const original = await importOriginal<{ api: typeof api }>();
@@ -52,6 +54,8 @@ beforeEach(() => {
   vi.clearAllMocks();
   mocked.listPlugins.mockResolvedValue(sample as never);
   mocked.pluginAudit.mockResolvedValue([]);
+  mocked.getPluginForm.mockRejectedValue(new Error("no form"));
+  mocked.getPluginSettings.mockResolvedValue({});
   client.browseRegistry.mockResolvedValue({ configured: true, entries: [{ kind: "plugin", name: "hello", title: "Hello", summary: "", author: "Ada", installed_version: "0.2.0", update_available: true, new_capabilities: [], versions: [{ version: "0.3.0", capabilities: [] }] }] } as never);
   client.getPluginSurface.mockResolvedValue({ blocks: [], routes: [], forms: [], postTypes: [], taxonomies: [], tasks: [] } as never);
 });
@@ -101,6 +105,36 @@ describe("plugin manager", () => {
     const versions = await screen.findByTestId("plugin-versions");
     expect(versions).toHaveTextContent("0.1.0");
     expect(screen.getByRole("button", { name: "Switch to this" })).toBeInTheDocument();
+  });
+
+  it("shows a running plugin's status, its scheduled work and its settings as it declares them now", async () => {
+    const user = userEvent.setup();
+    const form = { pluginId: "2", pluginName: "flaky", title: "Flaky", description: null, fields: [{ key: "sync_now", label: "Sync now", kind: "boolean" as const, help: "Last sync: never.", options: [], default: false }] };
+    client.getPluginSurface.mockResolvedValue({
+      blocks: [], routes: [], postTypes: [], taxonomies: [], forms: [form],
+      tasks: [{ pluginId: "2", name: "sync", everySeconds: 60, lastRunAt: "2026-11-21T09:00:00Z", lastStatus: "failed", lastError: "GitHub answered 403" }],
+    } as never);
+    mocked.getPluginForm.mockResolvedValue({ ...form, fields: [{ ...form.fields[0]!, help: "Last sync: 2 minutes ago, 12 pages." }] });
+    render(makeApp());
+    await user.click(await screen.findByRole("button", { name: "flaky" }));
+    const detail = await screen.findByTestId("plugin-detail");
+    expect(within(detail).getByTestId("plugin-detail-status")).toHaveTextContent("Degraded");
+    const tasks = within(detail).getByTestId("plugin-detail-tasks");
+    expect(tasks).toHaveTextContent("sync");
+    expect(tasks).toHaveTextContent("every minute");
+    expect(tasks).toHaveTextContent("GitHub answered 403");
+    expect(await within(detail).findByText("Last sync: 2 minutes ago, 12 pages.")).toBeInTheDocument();
+    expect(mocked.getPluginForm).toHaveBeenCalledWith("2");
+    expect(within(detail).queryByTestId("plugin-detail-settings-off")).toBeNull();
+  });
+
+  it("says a turned-off plugin's settings come back when it is on", async () => {
+    const user = userEvent.setup();
+    render(makeApp());
+    await user.click(await screen.findByRole("button", { name: "hello" }));
+    const detail = await screen.findByTestId("plugin-detail");
+    expect(within(detail).getByTestId("plugin-detail-status")).toHaveTextContent("Disabled");
+    expect(within(detail).getByTestId("plugin-detail-settings-off")).toHaveTextContent("settings show here while it is on");
   });
 
   it("explains a plugin turned off because an administrator's content type holds its slug", async () => {

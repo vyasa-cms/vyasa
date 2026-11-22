@@ -15,7 +15,7 @@ import {
   setPluginEnabled,
   type PluginSummary,
 } from "@/api/plugins";
-import { PluginSurfacePanels, SettingsForm } from "@/components/plugins/surface";
+import { PluginSurfacePanels, SettingsForm, formatInterval } from "@/components/plugins/surface";
 import { Button } from "@/components/ui/button";
 import { DataList, type Column } from "@/components/ui/data-list";
 import { Modal, useConfirm } from "@/components/ui/dialog";
@@ -196,6 +196,7 @@ function PluginDetail({ plugin, onClose, onRollback, onRemove }: { plugin: Plugi
   const forms = mine(s?.forms);
   const blocks = mine(s?.blocks);
   const routes = mine(s?.routes);
+  const tasks = mine(s?.tasks);
   const counts = plugin.audit ?? {};
   return (
     <Modal open onClose={onClose} size="lg" title={plugin.name} description={`${plugin.version}${plugin.author ? ` · ${plugin.author}` : ""}${plugin.license ? ` · ${plugin.license}` : ""}`} testId="plugin-detail"
@@ -224,7 +225,26 @@ function PluginDetail({ plugin, onClose, onRollback, onRemove }: { plugin: Plugi
           <p className="mt-1 text-xs text-muted-foreground">Uploading a newer package upgrades in place; older versions stay here to switch back to.</p>
         </section>
 
+        <section>
+          <h3 className="mb-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">Status</h3>
+          <p data-testid="plugin-detail-status">
+            <Chip tone={plugin.enabled ? (STATUS_TONE[plugin.status] ?? "neutral") : "neutral"}>{plugin.enabled ? (STATUS_LABEL[plugin.status] ?? plugin.status) : "Disabled"}</Chip>
+          </p>
+          {tasks.length > 0 ? (
+            <ul className="mt-1 divide-y rounded-md border text-xs" data-testid="plugin-detail-tasks">
+              {tasks.map((t) => (
+                <li key={t.name} className="flex flex-wrap items-center gap-2 px-3 py-1.5">
+                  <Chip tone={t.lastStatus === "failed" ? "warning" : "neutral"} dot={false}>{t.name}</Chip>
+                  <span className="text-muted-foreground">every {formatInterval(t.everySeconds)}{t.lastRunAt === null ? " · not run yet" : ` · last ran ${new Date(t.lastRunAt).toLocaleString()}`}</span>
+                  {t.lastError === null ? null : <span className="min-w-0 basis-full break-words text-destructive">{t.lastError}</span>}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
+
         {forms.map((f) => <SettingsForm key={f.pluginId} form={f} />)}
+        {forms.length === 0 && !plugin.enabled ? <p className="text-xs text-muted-foreground" data-testid="plugin-detail-settings-off">A plugin's settings show here while it is on. Anything already saved is kept while it is off.</p> : null}
 
         {blocks.length > 0 || routes.length > 0 ? (
           <section>

@@ -7,6 +7,12 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Fixed
+- A plugin's settings form shows what the plugin declares now, not what it declared when it loaded: the docs plugin's "Last sync" line was frozen at server start. `GET /api/v1/plugins/{id}/form` asks the plugin again; the admin uses it on open, after a save and every minute. Re-reading the form never counts against the plugin: a time or fuel trap there drops the cached instance, keeps the form from load and records no strike.
+
+### Added
+- The plugin detail view shows the plugin's status and its scheduled tasks (interval, last run, last error), and says that a turned-off plugin's settings come back when it is on.
+
 ## [0.4.3] - 2026-11-22
 
 ### Fixed
