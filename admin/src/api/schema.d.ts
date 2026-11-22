@@ -1635,6 +1635,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/plugins/{id}/form": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * `GET /api/v1/plugins/{id}/form` — the plugin's settings form, asked
+         *     for again so live state in it (a sync status line) is current.
+         * @description Same shape as one entry of the surface's `forms`; 404 when the plugin
+         *     is not loaded or declares no form.
+         */
+        get: operations["form"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/plugins/{id}/rollback": {
         parameters: {
             query?: never;
@@ -3833,6 +3855,24 @@ export interface components {
             timezone?: string | null;
             username?: string | null;
         };
+        /** @description One settings field. */
+        AdminField: {
+            /** @description Default value, as JSON. */
+            default: unknown;
+            /** @description Optional help text. */
+            help?: string | null;
+            /** @description Settings key this field reads and writes. */
+            key: string;
+            /**
+             * @description One of `text`, `textarea`, `number`, `boolean`, `select`, `secret`
+             *     (write-only: its value is never returned by a settings read).
+             */
+            kind: string;
+            /** @description Label shown to the operator. */
+            label: string;
+            /** @description Choices, for `select`. */
+            options: string[];
+        };
         /** @description An administrator's content type as stored. */
         AdminType: {
             /**
@@ -5189,6 +5229,19 @@ export interface components {
             posts: unknown[];
             submissions: unknown[];
             subscriptions: unknown[];
+        };
+        /** @description One plugin's settings form, as the plugin declares it now. */
+        PluginFormResponse: {
+            /** @description Optional explanatory paragraph. */
+            description?: string | null;
+            /** @description The fields, in declaration order. */
+            fields: components["schemas"]["AdminField"][];
+            /** @description Owning plugin, as a string id. */
+            pluginId: string;
+            /** @description Owning plugin's name. */
+            pluginName: string;
+            /** @description Heading for the form. */
+            title: string;
         };
         /** @description Response shape for a plugin. */
         PluginResponse: {
@@ -9340,6 +9393,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    form: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                id: number;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Settings form */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PluginFormResponse"];
+                };
+            };
+            /** @description No settings form loaded */
+            404: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ApiErrorBody"];
                 };
             };
         };
