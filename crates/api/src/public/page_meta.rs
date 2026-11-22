@@ -294,6 +294,30 @@ fn pick_canonical(
         .or_else(|| make_absolute(own_path))
 }
 
+/// The picture an entry carries itself: its `og_image`, else `seo_image`,
+/// else `featured_media_url`, else the first image block. The picture the
+/// author already placed, when they have not set a separate social image:
+/// asking someone to nominate an "SEO image" for the photo at the top of
+/// their own post is a question with an obvious answer.
+pub(crate) fn own_image(post: &PostRow) -> Option<String> {
+    let meta = |key: &str| {
+        post.meta
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+    };
+    meta("og_image")
+        .or_else(|| meta("seo_image"))
+        .or_else(|| meta("featured_media_url"))
+        .or_else(|| {
+            serde_json::from_value::<vyasa_core::BlockDocument>(post.content.clone())
+                .ok()
+                .and_then(|doc| vyasa_themes::first_image(&doc.blocks))
+        })
+}
+
 impl Head {
     /// Attaches the entry's ancestors and itself, for `BreadcrumbList`.
     #[must_use]
@@ -340,20 +364,9 @@ impl Head {
             || truncate_words(&excerpt_for(post), DESCRIPTION_CHARS),
             |d| plain_text(&d),
         );
-        // The picture the author already placed, when they have not set a
-        // separate social image. Asking someone to nominate an "SEO image"
-        // for the photo at the top of their own post is a question with an
-        // obvious answer.
         let flag =
             |key: &str| post.meta.get(key).and_then(serde_json::Value::as_bool) == Some(true);
-        let image = meta("og_image")
-            .or_else(|| meta("seo_image"))
-            .or_else(|| meta("featured_media_url"))
-            .or_else(|| {
-                serde_json::from_value::<vyasa_core::BlockDocument>(post.content.clone())
-                    .ok()
-                    .and_then(|doc| vyasa_themes::first_image(&doc.blocks))
-            });
+        let image = own_image(post);
         // A page (About, Subscribe, a docs page) is not an article: it is
         // typed `website` and described as a `WebPage`, and it carries no
         // `article:*` dates.

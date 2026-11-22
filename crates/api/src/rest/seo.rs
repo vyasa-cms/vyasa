@@ -159,3 +159,41 @@ mod redirect_path_tests {
         assert!(!is_site_path(&format!("/{}", "a".repeat(500))));
     }
 }
+
+/// Whether the active theme can draw social cards, for the settings page.
+#[derive(serde::Serialize, utoipa::ToSchema)]
+pub struct SocialCardStatus {
+    /// The active theme declares a card layout and it loads: the
+    /// `social_cards` option takes effect.
+    pub available: bool,
+    /// Why the declared layout cannot be used; `None` when it can, or when
+    /// the theme declares none.
+    pub error: Option<String>,
+    /// The post types the layout covers.
+    pub post_types: Vec<String>,
+}
+
+/// `GET /api/v1/social-cards` — the active theme's card layout status.
+#[utoipa::path(get, path = "/api/v1/social-cards", tag = "seo",
+    security(("session_cookie" = [])),
+    responses((status = 200, description = "Card layout status", body = SocialCardStatus)))]
+pub async fn social_card_status(State(state): State<AppState>) -> ApiResult<Json<SocialCardStatus>> {
+    let card = crate::public::routes::active_card(&state).await?;
+    Ok(Json(match card {
+        Some(Ok(source)) => SocialCardStatus {
+            available: true,
+            error: None,
+            post_types: source.theme.layout().post_types.clone(),
+        },
+        Some(Err(e)) => SocialCardStatus {
+            available: false,
+            error: Some(e),
+            post_types: Vec::new(),
+        },
+        None => SocialCardStatus {
+            available: false,
+            error: None,
+            post_types: Vec::new(),
+        },
+    }))
+}

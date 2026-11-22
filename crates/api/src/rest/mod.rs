@@ -890,6 +890,9 @@ fn ai_routes() -> Guarded {
             r.get(Cap(EditPosts), embed_preview::preview)
         })
         .merge(setup_routes())
+        .at("/social-cards", |r| {
+            r.get(Cap(ManageOptions), seo::social_card_status)
+        })
         .at("/redirects", |r| {
             r.get(Cap(ManageOptions), seo::list_redirects)
                 .post(Cap(ManageOptions), seo::add_redirect)

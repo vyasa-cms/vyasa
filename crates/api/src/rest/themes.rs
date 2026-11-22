@@ -33,6 +33,11 @@ pub struct ThemeResponse {
     pub is_active: bool,
     /// The package manifest's version this row came from, when it did.
     pub package_version: Option<i64>,
+    /// Why the theme's `[social_card]` layout cannot be used: social cards
+    /// stay off while this theme is active. Only on install and activate,
+    /// and only when the theme declares a layout that fails.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub social_card_error: Option<String>,
 }
 
 impl From<ThemeRow> for ThemeResponse {
@@ -43,6 +48,7 @@ impl From<ThemeRow> for ThemeResponse {
             version: i64::from(row.version),
             is_active: row.is_active,
             package_version: row.package_version.map(i64::from),
+            social_card_error: None,
         }
     }
 }
@@ -156,7 +162,9 @@ pub async fn install(
     crate::theme_assets::store_files(&state, row.id, &parsed.files).await?;
     let mut row = row;
     row.package_version = Some(package_version);
-    Ok((StatusCode::CREATED, Json(ThemeResponse::from(row))))
+    let mut out = ThemeResponse::from(row);
+    out.social_card_error = parsed.social_card_error;
+    Ok((StatusCode::CREATED, Json(out)))
 }
 
 /// One bundled file of a theme version, as listed.
@@ -486,9 +494,12 @@ pub async fn activate(
         format!("theme:{}", row.name),
         serde_json::json!({ "version": row.version }),
     );
+    let card = crate::public::routes::load_card(&state, row).await?;
     let mut out = row.clone();
     out.is_active = true;
-    Ok(Json(ThemeResponse::from(out)))
+    let mut out = ThemeResponse::from(out);
+    out.social_card_error = card.and_then(Result::err);
+    Ok(Json(out))
 }
 
 /// Notifies webhook subscribers that the active theme changed.

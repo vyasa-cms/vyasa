@@ -248,6 +248,9 @@ async fn install_starters(
                 continue;
             }
         };
+        if let Some(e) = &parsed.social_card_error {
+            tracing::warn!("embedded theme {}: social cards stay off: {e}", pkg.name);
+        }
         let templates = if parsed.templates.is_empty() {
             None
         } else {
