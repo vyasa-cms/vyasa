@@ -10,6 +10,30 @@ follows [semantic versioning](https://semver.org) as described in
 ### Added
 - Cookieless audience analytics, counted on the server with no cookies, no script and no stored IP address: bots and crawlers on their own line, `X-Vyasa-Internal: 1`, Do Not Track, Global Privacy Control and signed-in sessions not counted; views and unique visitors per day (a visitor is a hash keyed by a secret that lives in memory for one UTC day, and the day's hashes are deleted when the next day starts); a trend per page; referrer, `utm_source`/`utm_medium`/`utm_campaign`, device class and browser family; entry pages, 404s with their referrers, internal search terms, outbound clicks through a `/go/<name>` redirect table, and form and newsletter conversions. The Audience page shows them and manages the redirect table (`GET /api/v1/analytics/links`, `PUT`/`DELETE /api/v1/analytics/links/{name}`). Migration 0057. See [docs/ANALYTICS.md](docs/ANALYTICS.md).
 
+### Fixed
+- A plugin refresh keeps the plugin's scheduled tasks declared until the new declarations replace them, and a task that was claimed but has no declaration is skipped instead of run on the ordinary budget.
+- A plugin call that runs past its time or fuel limit (an epoch-deadline or fuel trap) no longer disables the plugin for good on the first occurrence: it is marked degraded and stays enabled, and the third such trap within ten minutes disables it as before. A busy server (a deploy publishing pages while a sync runs) could trap a healthy plugin once and take its pages down until an administrator re-enabled it. Any trap now records its reason on the Plugins page; before, a disabled plugin showed no cause. A settings save (or a restart) that a plugin refuses now leaves it degraded and serving on its previous settings, not errored: an errored plugin refuses every later call, so the next settings save could not heal it, and the docs import of a staging deploy left vyasa-docs off until an administrator re-enabled it.
+
+- A page (About, Subscribe, a docs page) is no longer described as an article: it gets `og:type website`, a `WebPage` JSON-LD block and no `article:*` dates.
+- `article:modified_time` and `dateModified` are never earlier than the publication time (a scheduled post is saved before it goes out).
+- Each menu `<nav>` has an accessible name: the block's `label` setting, else the menu's slug.
+
+### Added
+- A theme's `font_faces` entries take optional `weight`, `style` and `display`, printed as `font-weight`, `font-style` and `font-display` in the `@font-face` rule. Two files of one family (400 and 700, roman and italic) are no longer reported as a duplicate.
+
+### Added
+
+- A theme may bundle `assets/manifest/site.webmanifest`; it is served as `application/manifest+json` under `/theme-assets/manifest/` and linked from every page head.
+
+### Fixed
+
+- A page description taken from an excerpt or `seo_description` never carries markup (a hand-written excerpt with inline HTML left a half tag in `<meta name="description">`).
+- Newest and Oldest order by publication time, so the `latest-posts` block lists the most recently published entry first; a draft sorts by its creation time.
+- `put-entry`: an entry whose `source-hash` is unchanged but whose stored status is `draft` while `published` is asked (or the reverse) now has its status repaired (`updated`) instead of answering `unchanged`; `scheduled`, `private` and `trash` entries are left alone. A root left in draft by an earlier sync kept the docs tree empty.
+
+### Security
+- Dependencies: lettre 0.11.24 (SMTP STARTTLS, dot-stuffing and header-handling advisories) and wasmtime / wasmtime-wasi 50.0.3 (plugin host advisories).
+
 ## [0.4.2] - 2026-11-13
 
 ### Fixed
