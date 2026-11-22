@@ -7,9 +7,9 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
-### Changed
+### Added
 
-- The default Content-Security-Policy allows scripts from `https://static.cloudflareinsights.com` in addition to `'self'`, so Cloudflare's Web Analytics beacon is not blocked. No other origin is added.
+- `csp_cloudflare_web_analytics` (`VYASA_CSP_CLOUDFLARE_WEB_ANALYTICS=true`, default off): adds `https://static.cloudflareinsights.com` to the Content-Security-Policy `script-src`, so the beacon of Cloudflare's automatic Web Analytics setup is not blocked. It covers the edge-injected tag only; the manual snippet reports to `cloudflareinsights.com`, which `default-src 'self'` still blocks. `script-src` stays `'self'` unless it is set.
 
 ### Fixed
 - A plugin refresh keeps the plugin's scheduled tasks declared until the new declarations replace them, and a task that was claimed but has no declaration is skipped instead of run on the ordinary budget.

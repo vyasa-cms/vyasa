@@ -58,6 +58,7 @@ fn dummy_config() -> VyasaConfig {
         storage: None,
         trusted_proxies: Vec::new(),
         trust_cf_connecting_ip: false,
+        csp_cloudflare_web_analytics: false,
         demo: vyasa_common::config::DemoConfig::default(),
     }
 }

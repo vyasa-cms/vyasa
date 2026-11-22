@@ -375,6 +375,14 @@ pub struct VyasaConfig {
     /// `VYASA_TRUSTED_PROXIES=127.0.0.1,::1` plus this.
     #[serde(default)]
     pub trust_cf_connecting_ip: bool,
+    /// Let `script-src` also allow `https://static.cloudflareinsights.com`
+    /// (`VYASA_CSP_CLOUDFLARE_WEB_ANALYTICS=true`), the origin of Cloudflare's
+    /// Web Analytics beacon. Off by default: `script-src` stays `'self'`.
+    /// Covers Cloudflare's automatic (edge-injected) setup only, whose reports
+    /// go to `/cdn-cgi/rum` on the site's own origin; the manual snippet
+    /// reports to `cloudflareinsights.com`, which `default-src 'self'` blocks.
+    #[serde(default)]
+    pub csp_cloudflare_web_analytics: bool,
     /// Public sandbox mode; off unless configured.
     pub demo: DemoConfig,
 }
@@ -463,6 +471,7 @@ struct RawConfig {
     secret_key: Option<String>,
     trusted_proxies: Option<Vec<String>>,
     trust_cf_connecting_ip: Option<bool>,
+    csp_cloudflare_web_analytics: Option<bool>,
     demo: Option<DemoConfig>,
 }
 
@@ -543,6 +552,7 @@ impl TryFrom<RawConfig> for VyasaConfig {
                 .map(Secret::new),
             trusted_proxies,
             trust_cf_connecting_ip: raw.trust_cf_connecting_ip.unwrap_or(false),
+            csp_cloudflare_web_analytics: raw.csp_cloudflare_web_analytics.unwrap_or(false),
             demo: raw.demo.unwrap_or_default(),
         })
     }

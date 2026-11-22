@@ -316,9 +316,16 @@ in after registering says nothing about whether the address was new.
 ## Headers
 
 Security headers are applied to every response: a CSP with `script-src
-'self' https://static.cloudflareinsights.com` (the one external script origin: Cloudflare's
-Web Analytics beacon), `frame-ancestors 'self'`, `X-Content-Type-Options: nosniff` and a
+'self'`, `frame-ancestors 'self'`, `X-Content-Type-Options: nosniff` and a
 `Referrer-Policy`.
+
+Sites behind Cloudflare that use Web Analytics' automatic setup can set
+`VYASA_CSP_CLOUDFLARE_WEB_ANALYTICS=true` (default off). That adds
+`https://static.cloudflareinsights.com` to `script-src` and nothing else. The
+edge-injected beacon reports to `/cdn-cgi/rum` on the site's own origin, so no
+`connect-src` entry is needed. The manual snippet (`data-cf-beacon` without a
+`version`) reports to `cloudflareinsights.com`, which `default-src 'self'`
+blocks; it is not supported by this setting.
 
 ## Input and output
 
