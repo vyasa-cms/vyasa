@@ -1001,6 +1001,13 @@ async fn a_type_and_its_fields_reach_every_public_surface() {
     assert_eq!(status, 200);
     assert!(llms.contains("/product/gadget.md"), "{llms}");
     assert!(llms.contains("  - Tagline: Shiny"), "{llms}");
+    // llms-full.txt carries the bodies in one file.
+    let (status, full) = get_public(base, "/llms-full.txt");
+    assert_eq!(status, 200, "{full}");
+    assert!(
+        full.contains("Source: ") && full.contains("/product/gadget"),
+        "{full}"
+    );
     // The sitemap lists the archive and the entries.
     let (_, sitemap) = get_public(base, "/sitemap.xml");
     assert!(sitemap.contains("/product/gadget"), "{sitemap}");
