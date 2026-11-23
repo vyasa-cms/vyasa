@@ -9,4 +9,7 @@ regexes = [
     # crates/api/tests/ai_models.rs: a made-up OpenAI key used to check that
     # responses show only a hint of a stored key.
     '''sk-test-abcdef-9876''',
+    # crates/api/src/public/page_meta.rs and social card tests: a made-up
+    # 16-hex-digit card cache key in a /_card/ URL, not a credential.
+    '''0123456789abcdef''',
 ]

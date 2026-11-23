@@ -372,12 +372,12 @@ fn key_changes_with_the_font_file_at_the_same_theme_version() {
     let a = theme_with(layout(), CARD_FONT);
     let b = theme_with(layout(), ASCII_FONT);
     assert_ne!(
-        a.key("krishiv", 3, "Joins", "SQL"),
-        b.key("krishiv", 3, "Joins", "SQL")
+        a.key("acme", 3, "Joins", "SQL"),
+        b.key("acme", 3, "Joins", "SQL")
     );
     assert_eq!(
-        a.key("krishiv", 3, "Joins", "SQL"),
-        theme_with(layout(), CARD_FONT).key("krishiv", 3, "Joins", "SQL")
+        a.key("acme", 3, "Joins", "SQL"),
+        theme_with(layout(), CARD_FONT).key("acme", 3, "Joins", "SQL")
     );
 }
 
@@ -405,8 +405,8 @@ fn alt_fills_placeholders_in_one_pass() {
     let mut l = layout();
     l.alt = "{title} ({label}) on {site}".to_owned();
     assert_eq!(
-        l.alt_text("A {site} B", "Docs", "Krishiv"),
-        "A {site} B (Docs) on Krishiv"
+        l.alt_text("A {site} B", "Docs", "Acme"),
+        "A {site} B (Docs) on Acme"
     );
 }
 

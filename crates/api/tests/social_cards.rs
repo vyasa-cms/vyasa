@@ -118,7 +118,7 @@ async fn seed(pool: &PgPool) {
             Some(PUBLISHED),
             "install",
             "guides/install",
-            "Install Krishiv",
+            "Install Acme",
         ),
         doc_row(DRAFT, None, "draft", "draft", "Draft page"),
         doc_row(PROTECTED, None, "members", "members", "Members"),
@@ -230,7 +230,7 @@ async fn a_docs_page_gets_a_card_and_the_route_serves_it() {
     assert!(html.contains("\n<meta property=\"og:image:height\" content=\"630\">"));
     assert_eq!(
         meta(&html, "og:image:alt").as_deref(),
-        Some("Install Krishiv: Card Docs"),
+        Some("Install Acme: Card Docs"),
         "alt from the theme pattern"
     );
 
