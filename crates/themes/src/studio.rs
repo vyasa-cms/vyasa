@@ -958,7 +958,7 @@ mod asset_tests {
         let assets = ThemeAssets {
             css: String::from("body{}"),
             js: String::from("void 0"),
-            social_card: Some(serde_json::json!({"post_types": ["docs"]})),
+            social_card: Some(serde_json::json!({"post_types": ["doc"]})),
         };
         let stored = serde_json::json!(assets);
         let back = DraftState::from_json_with_assets(

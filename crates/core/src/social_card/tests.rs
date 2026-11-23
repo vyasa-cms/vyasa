@@ -207,7 +207,7 @@ fn an_over_wide_run_at_min_size_is_broken_at_characters() {
 fn a_cjk_title_wraps_between_characters() {
     let f = font(CJK_FONT);
     let title = "数据处理引擎的查询优化器与执行计划分析指南手册第一章节概述数据处理";
-    assert_eq!(title.chars().count(), 32);
+    assert_eq!(title.chars().count(), 33);
     let p = place(&f, &layout(), title, "").unwrap();
     assert!(p.title.len() > 1, "{:?}", p.title);
     assert!(!p.title.iter().any(|l| l.contains(' ')));
