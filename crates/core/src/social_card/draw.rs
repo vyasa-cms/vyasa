@@ -56,8 +56,8 @@ fn blend(img: &mut RgbaImage, ox: f32, oy: f32, gx: u32, gy: u32, coverage: f32,
         return;
     };
     let a = coverage.clamp(0.0, 1.0);
-    for i in 0..3 {
-        p.0[i] = mix(p.0[i], color[i], a);
+    for (dst, src) in p.0.iter_mut().zip(color) {
+        *dst = mix(*dst, src, a);
     }
     p.0[3] = mix(p.0[3], 255, a);
 }

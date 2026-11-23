@@ -8,7 +8,7 @@ required_api = 1
 # SemiBold (SIL OFL 1.1, see crates/core/testdata/social_card/OFL.txt),
 # subset with a `kern` table.
 [social_card]
-post_types = ["docs"]
+post_types = ["doc"]
 background = "images/og/card-bg.png"
 font = "fonts/noto-sans-semibold-card.ttf"
 color = "#F5F5F4"

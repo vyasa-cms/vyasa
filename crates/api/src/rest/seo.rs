@@ -177,7 +177,9 @@ pub struct SocialCardStatus {
 #[utoipa::path(get, path = "/api/v1/social-cards", tag = "seo",
     security(("session_cookie" = [])),
     responses((status = 200, description = "Card layout status", body = SocialCardStatus)))]
-pub async fn social_card_status(State(state): State<AppState>) -> ApiResult<Json<SocialCardStatus>> {
+pub async fn social_card_status(
+    State(state): State<AppState>,
+) -> ApiResult<Json<SocialCardStatus>> {
     let card = crate::public::routes::active_card(&state).await?;
     Ok(Json(match card {
         Some(Ok(source)) => SocialCardStatus {

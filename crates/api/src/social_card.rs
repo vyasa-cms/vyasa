@@ -199,9 +199,7 @@ impl SocialCards {
     pub fn new(max_bytes: u64) -> Self {
         Self {
             cache: moka::sync::Cache::builder()
-                .weigher(|_k: &String, v: &Arc<Vec<u8>>| {
-                    u32::try_from(v.len()).unwrap_or(u32::MAX)
-                })
+                .weigher(|_k: &String, v: &Arc<Vec<u8>>| u32::try_from(v.len()).unwrap_or(u32::MAX))
                 .max_capacity(max_bytes)
                 .build(),
             served: moka::sync::Cache::new(MAX_RECORDED_URLS),
@@ -237,15 +235,12 @@ impl SocialCards {
     }
 
     /// The PNG for `key`: cached, joined to a render in flight, or a new
-    /// render. The render runs in a task of its own, so a dropped request
-    /// neither cancels it nor frees its permit early.
-    async fn png(
-        self: &Arc<Self>,
-        source: Arc<CardSource>,
-        key: &str,
-        title: String,
-        label: String,
-    ) -> Result<Arc<Vec<u8>>, ()> {
+    /// render by `render`. The render runs in a task of its own, so a
+    /// dropped request neither cancels it nor frees its permit early.
+    async fn png<F>(self: &Arc<Self>, key: &str, render: F) -> Result<Arc<Vec<u8>>, ()>
+    where
+        F: FnOnce() -> Result<Vec<u8>, String> + Send + 'static,
+    {
         if let Some(png) = self.cache.get(key) {
             return Ok(png);
         }
@@ -261,7 +256,7 @@ impl SocialCards {
             } else {
                 let (tx, rx) = tokio::sync::watch::channel(None);
                 flight.insert(key.to_owned(), rx.clone());
-                self.spawn_render(tx, source, key.to_owned(), title, label);
+                self.spawn_render(tx, key.to_owned(), render);
                 rx
             }
         };
@@ -269,14 +264,14 @@ impl SocialCards {
         done.clone().unwrap_or(Err(()))
     }
 
-    fn spawn_render(
+    fn spawn_render<F>(
         self: &Arc<Self>,
         tx: tokio::sync::watch::Sender<RenderResult>,
-        source: Arc<CardSource>,
         key: String,
-        title: String,
-        label: String,
-    ) {
+        render: F,
+    ) where
+        F: FnOnce() -> Result<Vec<u8>, String> + Send + 'static,
+    {
         let cards = Arc::clone(self);
         tokio::spawn(async move {
             let started = std::time::Instant::now();
@@ -286,7 +281,7 @@ impl SocialCards {
                     let rendered = tokio::task::spawn_blocking(move || {
                         let _permit = permit;
                         let t = std::time::Instant::now();
-                        source.theme.render(&title, &label).map(|png| (png, t.elapsed()))
+                        render().map(|png| (png, t.elapsed()))
                     })
                     .await;
                     match rendered {
@@ -383,9 +378,11 @@ pub async fn card_route(
         )
             .into_response();
     }
+    let source = Arc::clone(&on.source);
+    let (title, label) = (card.title, card.label);
     let Ok(png) = state
         .social_cards
-        .png(Arc::clone(&on.source), &card.key, card.title, card.label)
+        .png(&card.key, move || source.theme.render(&title, &label))
         .await
     else {
         return status(StatusCode::INTERNAL_SERVER_ERROR);
@@ -408,7 +405,126 @@ pub async fn card_route(
 
 #[cfg(test)]
 mod tests {
-    use super::parse_file;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    use super::{parse_file, SocialCards, MAX_RENDERS};
+
+    const KEY: &str = "0123456789abcdef";
+
+    /// A render that counts its calls and blocks until `gate` opens.
+    fn gated(
+        calls: &Arc<AtomicUsize>,
+        gate: &Arc<std::sync::Barrier>,
+    ) -> impl FnOnce() -> Result<Vec<u8>, String> + Send + 'static {
+        let (calls, gate) = (Arc::clone(calls), Arc::clone(gate));
+        move || {
+            calls.fetch_add(1, Ordering::SeqCst);
+            gate.wait();
+            Ok(vec![1, 2, 3])
+        }
+    }
+
+    async fn until(mut check: impl FnMut() -> bool) {
+        for _ in 0..500 {
+            if check() {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        panic!("condition not reached");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn two_concurrent_misses_render_once() {
+        let cards = Arc::new(SocialCards::new(1 << 20));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let gate = Arc::new(std::sync::Barrier::new(2));
+        let a = tokio::spawn({
+            let (cards, r) = (Arc::clone(&cards), gated(&calls, &gate));
+            async move { cards.png(KEY, r).await }
+        });
+        until(|| calls.load(Ordering::SeqCst) == 1).await;
+        let b = tokio::spawn({
+            let (cards, r) = (Arc::clone(&cards), gated(&calls, &gate));
+            async move { cards.png(KEY, r).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        gate.wait();
+        assert_eq!(*a.await.unwrap().unwrap(), vec![1, 2, 3]);
+        assert_eq!(*b.await.unwrap().unwrap(), vec![1, 2, 3]);
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "one render");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_dropped_request_still_caches_the_card() {
+        let cards = Arc::new(SocialCards::new(1 << 20));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let gate = Arc::new(std::sync::Barrier::new(2));
+        let first = tokio::spawn({
+            let (cards, r) = (Arc::clone(&cards), gated(&calls, &gate));
+            async move { cards.png(KEY, r).await }
+        });
+        until(|| calls.load(Ordering::SeqCst) == 1).await;
+        first.abort();
+        let _ = first.await;
+        let second = tokio::spawn({
+            let (cards, r) = (Arc::clone(&cards), gated(&calls, &gate));
+            async move { cards.png(KEY, r).await }
+        });
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        gate.wait();
+        assert_eq!(*second.await.unwrap().unwrap(), vec![1, 2, 3]);
+        assert_eq!(calls.load(Ordering::SeqCst), 1, "joined the running render");
+        assert!(cards.cache.get(KEY).is_some(), "cached");
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn a_third_render_waits_for_a_permit_even_when_requests_drop() {
+        assert_eq!(MAX_RENDERS, 2);
+        let cards = Arc::new(SocialCards::new(1 << 20));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let gate = Arc::new(std::sync::Barrier::new(3));
+        let keys: [&'static str; 3] = ["000000000000000a", "000000000000000b", "000000000000000c"];
+        let mut tasks = Vec::new();
+        for key in keys.into_iter().take(2) {
+            let (cards, r) = (Arc::clone(&cards), gated(&calls, &gate));
+            tasks.push(tokio::spawn(async move { cards.png(key, r).await }));
+        }
+        until(|| calls.load(Ordering::SeqCst) == 2).await;
+        for t in tasks.drain(..) {
+            t.abort();
+        }
+        let third = tokio::spawn({
+            let (cards, r) = (Arc::clone(&cards), gated(&calls, &gate));
+            async move { cards.png(keys[2], r).await }
+        });
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 2, "no third render yet");
+        gate.wait();
+        // The two finished; the third now runs and waits on its own gate.
+        until(|| calls.load(Ordering::SeqCst) == 3).await;
+        // Open the third render's gate with two more parties.
+        let g1 = Arc::clone(&gate);
+        let g2 = Arc::clone(&gate);
+        let h1 = std::thread::spawn(move || g1.wait());
+        let h2 = std::thread::spawn(move || g2.wait());
+        assert_eq!(*third.await.unwrap().unwrap(), vec![1, 2, 3]);
+        h1.join().unwrap();
+        h2.join().unwrap();
+        for key in keys {
+            assert!(cards.cache.get(key).is_some(), "{key} cached");
+        }
+    }
+
+    #[tokio::test]
+    async fn a_failed_render_is_not_cached() {
+        let cards = Arc::new(SocialCards::new(1 << 20));
+        assert!(cards.png(KEY, || Err("boom".to_owned())).await.is_err());
+        assert!(cards.cache.get(KEY).is_none());
+        assert_eq!(*cards.png(KEY, || Ok(vec![9])).await.unwrap(), vec![9]);
+    }
 
     #[test]
     fn card_paths_parse_strictly() {

@@ -52,7 +52,6 @@ pub struct CardSource {
     pub theme_version: i64,
 }
 
-
 type R = Response;
 
 /// Builds a bundle from stored documents. Templates are installed as one

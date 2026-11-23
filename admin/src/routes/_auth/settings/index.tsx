@@ -408,6 +408,7 @@ const SECTIONS: Section[] = [
     description: "Styles applied on top of your theme.",
     keys: [
       { key: "discourage_indexing", label: "Ask search engines not to index this site", hint: "For staging sites: serves robots.txt Disallow: / and an X-Robots-Tag: noindex header on every response. Off by default.", kind: "toggle" },
+      { key: "social_cards", label: "Generate social cards", hint: "Draws a share image with the entry's title for entries that have no image of their own, using the active theme's card layout. Needs a site address. Off by default.", kind: "toggle" },
       {
         key: "color_scheme",
         label: "Default colour scheme",
@@ -493,6 +494,7 @@ export function SettingsPage() {
   // newsletter; the same call the setup wizard makes.
   const checks = useQuery({ queryKey: ["setup-checks"], queryFn: () => api.setupChecks(), retry: false, staleTime: 60_000 });
   const relay = useQuery({ queryKey: ["mail-settings"], queryFn: () => api.mailSettings(), retry: false });
+  const socialCards = useQuery({ queryKey: ["social-cards"], queryFn: () => api.socialCards(), retry: false });
   const smtp = checks.data?.find((c) => c.name === "smtp");
   const hasRelay = smtp !== undefined && smtp.status === "ok";
 
@@ -707,7 +709,7 @@ export function SettingsPage() {
               <section key={section.id} id={`settings-${section.id}`} className="scroll-mt-4">
                 <Panel title={section.title} description={section.description}>
                   <div className="grid gap-x-8 gap-y-4 2xl:grid-cols-2">
-                    {section.keys.map((k) => (
+                    {section.keys.filter((k) => k.key !== "social_cards" || socialCards.data?.available === true).map((k) => (
                       <div key={k.key} className={cn(k.kind === "css" ? "2xl:col-span-2" : "max-w-[70ch]")}>
                         <Field label={k.label} htmlFor={`opt-${k.key}`} hint={k.hint} error={errors[k.key] ?? null}>
                           <div className={WIDTH[k.kind]}>{control(k)}</div>

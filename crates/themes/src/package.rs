@@ -450,7 +450,6 @@ pub fn parse_vytheme(bytes: &[u8]) -> Result<ParsedTheme, PackageError> {
         .and_then(|section| check_social_card(section, &files).err());
 
     Ok(ParsedTheme {
-        social_card_error,
         manifest,
         tokens_json,
         layout_json,
@@ -458,6 +457,7 @@ pub fn parse_vytheme(bytes: &[u8]) -> Result<ParsedTheme, PackageError> {
         templates,
         screenshot_png,
         files,
+        social_card_error,
     })
 }
 

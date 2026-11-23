@@ -158,7 +158,7 @@ fn wrap(m: &Measure<'_>, toks: &[Token], w: u32) -> Vec<usize> {
             line = cand;
         } else {
             starts.push(i);
-            line = t.text.clone();
+            line.clone_from(&t.text);
         }
     }
     starts

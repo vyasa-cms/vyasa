@@ -1546,6 +1546,10 @@ export const api = {
     return request("/api/v1/media/storage/migrate", { method: "POST" });
   },
 
+  /** Whether the active theme can draw social cards, and for which post types. */
+  socialCards(): Promise<{ available: boolean; error?: string | null; post_types: string[] }> {
+    return request("/api/v1/social-cards");
+  },
   registrySources(): Promise<{ marketplace: SourceInfo; updates: SourceInfo }> {
     return request("/api/v1/registry/sources");
   },

@@ -497,29 +497,7 @@ impl Head {
             self.title.clone()
         };
         out.push_str(&self.social_tags(site, &title));
-        if let Some(image) = self.image.as_ref().and_then(|i| absolute_media(site, i)) {
-            let _ = write!(
-                out,
-                "\n<meta property=\"og:image\" content=\"{}\">",
-                esc(&image)
-            );
-            if let Some(w) = self.image_width {
-                let _ = write!(out, "\n<meta property=\"og:image:width\" content=\"{w}\">");
-            }
-            if let Some(h) = self.image_height {
-                let _ = write!(out, "\n<meta property=\"og:image:height\" content=\"{h}\">");
-            }
-            if let Some(alt) = &self.image_alt {
-                let _ = write!(
-                    out,
-                    "\n<meta property=\"og:image:alt\" content=\"{}\">",
-                    esc(alt)
-                );
-            }
-            out.push_str("\n<meta name=\"twitter:card\" content=\"summary_large_image\">");
-        } else {
-            out.push_str("\n<meta name=\"twitter:card\" content=\"summary\">");
-        }
+        self.image_tags(site, &mut out);
         // `article:*` belongs to `og:type article`; a page has none.
         if self.kind == "article" {
             if let Some(published) = self.published {
@@ -580,6 +558,36 @@ impl Head {
 
     /// The social card tags: title and description for feeds, which fall
     /// back to the search ones.
+    /// `og:image` with its size and alt (a generated card), and the
+    /// matching `twitter:card`.
+    fn image_tags(&self, site: &SiteContext, out: &mut String) {
+        use std::fmt::Write as _;
+        let esc = escape;
+        if let Some(image) = self.image.as_ref().and_then(|i| absolute_media(site, i)) {
+            let _ = write!(
+                out,
+                "\n<meta property=\"og:image\" content=\"{}\">",
+                esc(&image)
+            );
+            if let Some(w) = self.image_width {
+                let _ = write!(out, "\n<meta property=\"og:image:width\" content=\"{w}\">");
+            }
+            if let Some(h) = self.image_height {
+                let _ = write!(out, "\n<meta property=\"og:image:height\" content=\"{h}\">");
+            }
+            if let Some(alt) = &self.image_alt {
+                let _ = write!(
+                    out,
+                    "\n<meta property=\"og:image:alt\" content=\"{}\">",
+                    esc(alt)
+                );
+            }
+            out.push_str("\n<meta name=\"twitter:card\" content=\"summary_large_image\">");
+        } else {
+            out.push_str("\n<meta name=\"twitter:card\" content=\"summary\">");
+        }
+    }
+
     fn social_tags(&self, site: &SiteContext, title: &str) -> String {
         use std::fmt::Write as _;
         let esc = escape;
@@ -851,9 +859,12 @@ mod tests {
         ), "{html}");
         assert!(html.contains("\n<meta property=\"og:image:width\" content=\"1200\">"));
         assert!(html.contains("\n<meta property=\"og:image:height\" content=\"630\">"));
-        assert!(html.contains(
-            "\n<meta property=\"og:image:alt\" content=\"Say &quot;hi&quot; &lt;b&gt;: Site\">"
-        ), "{html}");
+        assert!(
+            html.contains(
+                "\n<meta property=\"og:image:alt\" content=\"Say &quot;hi&quot; &lt;b&gt;: Site\">"
+            ),
+            "{html}"
+        );
         assert!(html.contains("summary_large_image"));
     }
 
@@ -862,7 +873,9 @@ mod tests {
         let mut head = Head::page("/a", "A", "d");
         head.image = Some("/media/x.png".to_owned());
         let before = head.clone().render(&site("https://example.test"));
-        let after = head.with_social_card(None).render(&site("https://example.test"));
+        let after = head
+            .with_social_card(None)
+            .render(&site("https://example.test"));
         assert_eq!(before, after);
         assert!(!after.contains("og:image:width"));
         assert!(!after.contains("og:image:alt"));
