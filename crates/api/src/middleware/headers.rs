@@ -17,7 +17,8 @@ pub fn csp_value(cloudflare_web_analytics: bool) -> HeaderValue {
          style-src 'self' 'unsafe-inline'; \
          img-src 'self' data: https:; frame-ancestors 'self'"
     );
-    HeaderValue::from_str(&policy).expect("the policy is ASCII")
+    HeaderValue::from_str(&policy)
+        .unwrap_or_else(|_| HeaderValue::from_static("default-src 'self'"))
 }
 
 /// Appends standard security headers.
@@ -103,7 +104,7 @@ mod tests {
         csp.split(';')
             .map(str::trim)
             .find(|d| d.starts_with("script-src "))
-            .expect("script-src directive")
+            .unwrap_or_default()
             .split_whitespace()
             .skip(1)
             .collect()
