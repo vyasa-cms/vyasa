@@ -330,6 +330,13 @@ impl CardTheme {
         self.lay_out(title, label).is_some()
     }
 
+    /// The title lines the card would draw (the last one ends in "…" when
+    /// the title was cut), or `None` when [`Self::supports`] is false.
+    #[must_use]
+    pub fn title_lines(&self, title: &str, label: &str) -> Option<Vec<String>> {
+        self.lay_out(title, label).map(|p| p.title)
+    }
+
     fn lay_out(&self, title: &str, label: &str) -> Option<layout::Placed> {
         if title.is_empty()
             || !text::supported(&self.font, title)

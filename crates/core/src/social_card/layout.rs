@@ -220,10 +220,11 @@ fn place_title(font: &FontVec, b: &TitleBox, title: &str) -> Option<(Vec<String>
     if starts.len() <= allowed {
         return Some((lines_of(&toks, &starts), size));
     }
-    let mut lines = lines_of(&toks, &starts[..allowed - 1]);
-    let rest = toks[starts[allowed - 1]..].to_vec();
-    lines.truncate(allowed - 1);
-    lines.push(cut(&m, &rest, b.w)?);
+    // The kept lines end where the cut line starts; `lines_of` would run
+    // the last of them to the end of the title.
+    let keep = starts[allowed - 1];
+    let mut lines = lines_of(&toks[..keep], &starts[..allowed - 1]);
+    lines.push(cut(&m, &toks[keep..], b.w)?);
     Some((lines, size))
 }
 

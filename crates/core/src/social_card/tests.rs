@@ -225,6 +225,7 @@ fn a_short_box_limits_lines_below_max_lines() {
     let p = place(&f, &l, title.trim(), "").unwrap();
     assert_eq!(p.title.len(), 2);
     assert!(p.title[1].ends_with('…'), "{:?}", p.title);
+    assert_is_a_cut_of(&p.title, title.trim());
 }
 
 #[test]
@@ -238,6 +239,29 @@ fn the_last_line_ends_in_an_ellipsis_cut_at_a_space() {
     assert!(last.ends_with('…'));
     let body = last.trim_end_matches('…');
     assert!(body.ends_with("SQL") || body.ends_with("Spark"), "{last}");
+    assert_is_a_cut_of(&p.title, title.trim());
+}
+
+/// The drawn lines, read in order without the ellipsis, are the start of
+/// the title: no line repeats words or runs on past the cut.
+fn assert_is_a_cut_of(lines: &[String], title: &str) {
+    let drawn = lines.join(" ");
+    let drawn = drawn.trim_end_matches('…');
+    assert!(
+        title.starts_with(drawn),
+        "{lines:?} is not a cut of {title:?}"
+    );
+}
+
+#[test]
+fn a_cut_title_keeps_each_word_once_and_every_line_in_the_box() {
+    let f = font(CARD_FONT);
+    let title = "A very long page title that keeps going well past what three lines of the card \
+                 can hold, so the renderer has to cut it and end the last line with an ellipsis";
+    let p = place(&f, &layout(), title, "").unwrap();
+    assert_eq!(p.title.len(), 3, "{:?}", p.title);
+    assert!(p.title[2].ends_with('…'), "{:?}", p.title);
+    assert_is_a_cut_of(&p.title, title);
 }
 
 #[test]

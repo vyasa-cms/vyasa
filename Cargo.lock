@@ -5894,6 +5894,7 @@ dependencies = [
  "chrono",
  "criterion",
  "futures",
+ "image",
  "insta",
  "moka",
  "schemars",

@@ -29,6 +29,7 @@ syntect = { version = "5.3.0", default-features = false, features = ["default-fa
 [dev-dependencies]
 criterion = { version = "0.8", default-features = false, features = ["cargo_bench_support"] }
 futures = "0.3"
+image = { version = "0.25", default-features = false, features = ["png"] }
 insta = { version = "1", features = ["json"] }
 tokio = { version = "1", features = ["sync"] }
 zip = { version = "9", default-features = false, features = ["deflate"] }
