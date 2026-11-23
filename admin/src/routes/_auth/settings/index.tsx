@@ -714,6 +714,11 @@ export function SettingsPage() {
                         <Field label={k.label} htmlFor={`opt-${k.key}`} hint={k.hint} error={errors[k.key] ?? null}>
                           <div className={WIDTH[k.kind]}>{control(k)}</div>
                         </Field>
+                        {k.key === "social_cards" && (socialCards.data?.unknown_post_types?.length ?? 0) > 0 ? (
+                          <p className="mt-1 text-xs text-warning" data-testid="social-cards-unknown-types">
+                            The theme's card layout names post types this site doesn't have: {socialCards.data?.unknown_post_types?.join(", ")}. Entries of those types can't get a card until a plugin or a content type adds them.
+                          </p>
+                        ) : null}
                       </div>
                     ))}
                     {section.id === "updates" ? <SourcesPanel /> : null}

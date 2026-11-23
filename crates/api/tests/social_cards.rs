@@ -26,6 +26,15 @@ const PROTECTED: i64 = 89_104;
 const OWN_IMAGE: i64 = 89_105;
 const NOINDEX: i64 = 89_106;
 const QUOTED: i64 = 89_107;
+/// A blog post with no image of its own: outside the docs layout's scope.
+const PLAIN_POST: i64 = 89_108;
+/// An entry of an administrator's non-public type `note`.
+const NOTE: i64 = 89_109;
+
+const DOCS_MANIFEST: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../themes-starter/docs/manifest.toml"
+));
 
 fn http(r: Result<ureq::Response, ureq::Error>) -> ureq::Response {
     match r {
@@ -133,6 +142,14 @@ async fn seed(pool: &PgPool) {
     .execute(pool)
     .await
     .expect("docs");
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "INSERT INTO posts (id, author_id, type, status, slug, title, content, meta, position, published_at) VALUES \
+         ({PLAIN_POST}, {ADMIN}, 'post', 'published', 'plain-post', 'Plain post', \
+          '{{\"schema_version\":1,\"blocks\":[]}}', '{{}}', 0, now())"
+    )))
+    .execute(pool)
+    .await
+    .expect("post");
     for sql in [
         format!("UPDATE posts SET status = 'draft' WHERE id = {DRAFT}"),
         format!("UPDATE posts SET password_hash = '{hash}' WHERE id = {PROTECTED}"),
@@ -221,6 +238,11 @@ async fn a_docs_page_gets_a_card_and_the_route_serves_it() {
     .unwrap();
     assert_eq!(status["available"], true, "{status}");
     assert_eq!(status["post_types"], json!(["doc"]), "{status}");
+    assert_eq!(
+        status["unknown_post_types"],
+        json!([]),
+        "the docs plugin serves doc"
+    );
 
     // Head: the card URL and its three tags, each on its own line.
     let html = page(base, "/docs/guides/install");
@@ -320,6 +342,204 @@ async fn a_docs_page_gets_a_card_and_the_route_serves_it() {
     let off = page(base, "/docs/guides/install");
     assert!(meta(&off, "og:image:width").is_none(), "no card tags");
     assert_eq!(get(base, &path).status(), 404);
+}
+
+/// The unlock cookie for a protected entry, from the shared `/unlock` form.
+fn unlock(base: &str, id: i64) -> String {
+    let unlocked = http(
+        agent()
+            .post(&format!("{base}/unlock"))
+            .set("Content-Type", "application/x-www-form-urlencoded")
+            .send_string(&format!("post_id={id}&password=pw-secret-1")),
+    );
+    assert!(
+        (300..400).contains(&unlocked.status()),
+        "unlock: {}",
+        unlocked.status()
+    );
+    unlocked
+        .all("set-cookie")
+        .into_iter()
+        .find(|c| c.starts_with("vy_post_"))
+        .expect("unlock cookie")
+        .split(';')
+        .next()
+        .unwrap()
+        .to_owned()
+}
+
+#[tokio::test]
+async fn out_of_scope_and_unlocked_entries_get_no_card() {
+    let db = TestDb::new().await;
+    seed(db.pool()).await;
+    let server = TestServer::start(common::BIN, &db);
+    let base = server.base();
+    let cookie = login(base);
+    activate_docs_theme(base, &cookie);
+    set_options(
+        base,
+        &cookie,
+        &json!({"site_url": "https://docs.example", "social_cards": true}),
+    );
+
+    // A `post` with no image of its own: the docs layout covers `doc`
+    // only, so no card tags and no route.
+    let post = page(base, "/post/plain-post");
+    assert!(meta(&post, "og:image:width").is_none(), "no card tags");
+    assert!(
+        meta(&post, "og:image").is_none_or(|u| !u.contains("/_card/")),
+        "no card URL"
+    );
+    assert_eq!(
+        get(base, &format!("/_card/{PLAIN_POST}-0000000000000000.png")).status(),
+        404
+    );
+
+    // A protected doc unlocked by its cookie: the page shows, the card
+    // does not.
+    let unlock_cookie = unlock(base, PROTECTED);
+    let unlocked = http(
+        agent()
+            .get(&format!("{base}/docs/members"))
+            .set("Cookie", &unlock_cookie)
+            .call(),
+    );
+    assert_eq!(unlocked.status(), 200);
+    let unlocked = unlocked.into_string().unwrap();
+    assert!(meta(&unlocked, "og:image:width").is_none(), "no card tags");
+    assert!(
+        meta(&unlocked, "og:image").is_none_or(|u| !u.contains("/_card/")),
+        "no card URL"
+    );
+}
+
+/// The docs starter's package with its card layout covering `types`.
+fn card_theme_package(types: &str) -> Vec<u8> {
+    use std::io::Write as _;
+    let root = concat!(env!("CARGO_MANIFEST_DIR"), "/../../themes-starter/docs/");
+    let manifest = DOCS_MANIFEST
+        .replace("name = \"docs\"", "name = \"cardtest\"")
+        .replace("post_types = [\"doc\"]", &format!("post_types = {types}"));
+    assert!(manifest.contains(types), "{manifest}");
+    let files = [
+        "tokens.json",
+        "layout.json",
+        "templates/page.tera",
+        "assets/theme.css",
+        "assets/images/og/card-bg.png",
+        "assets/fonts/noto-sans-semibold-card.ttf",
+    ];
+    let mut buf = std::io::Cursor::new(Vec::new());
+    {
+        let mut w = zip::ZipWriter::new(&mut buf);
+        w.start_file("manifest.toml", zip::write::SimpleFileOptions::default())
+            .unwrap();
+        w.write_all(manifest.as_bytes()).unwrap();
+        for name in files {
+            w.start_file(name, zip::write::SimpleFileOptions::default())
+                .unwrap();
+            w.write_all(&std::fs::read(format!("{root}{name}")).unwrap())
+                .unwrap();
+        }
+        w.finish().unwrap();
+    }
+    buf.into_inner()
+}
+
+/// Installs and activates `package`; returns the activation's answer.
+fn install_and_activate(base: &str, cookie: &str, package: &[u8]) -> serde_json::Value {
+    let boundary = "----vyasacards";
+    let mut body = Vec::new();
+    body.extend_from_slice(
+        format!(
+            "--{boundary}\r\nContent-Disposition: form-data; name=\"file\"; \
+             filename=\"t.vytheme\"\r\nContent-Type: application/zip\r\n\r\n"
+        )
+        .as_bytes(),
+    );
+    body.extend_from_slice(package);
+    body.extend_from_slice(format!("\r\n--{boundary}--\r\n").as_bytes());
+    let installed = http(
+        ureq::post(&format!("{base}/api/v1/themes"))
+            .set("Cookie", cookie)
+            .set(
+                "Content-Type",
+                &format!("multipart/form-data; boundary={boundary}"),
+            )
+            .send_bytes(&body),
+    );
+    assert_eq!(installed.status(), 201, "theme install");
+    let installed: serde_json::Value = installed.into_json().unwrap();
+    let id = installed["id"].to_string().trim_matches('"').to_owned();
+    let activated = http(
+        ureq::post(&format!("{base}/api/v1/themes/{id}/activate"))
+            .set("Cookie", cookie)
+            .call(),
+    );
+    assert_eq!(activated.status(), 200, "activate");
+    activated.into_json().unwrap()
+}
+
+#[tokio::test]
+async fn a_non_public_type_gets_no_card_and_an_unknown_type_is_a_notice() {
+    let db = TestDb::new().await;
+    seed(db.pool()).await;
+    let server = TestServer::start(common::BIN, &db);
+    let base = server.base();
+    let cookie = login(base);
+    let created = http(
+        ureq::post(&format!("{base}/api/v1/content-types"))
+            .set("Cookie", &cookie)
+            .send_json(
+                json!({"slug": "note", "singular": "Note", "plural": "Notes", "public": false}),
+            ),
+    );
+    assert_eq!(created.status(), 201, "create note type");
+    sqlx::query(sqlx::AssertSqlSafe(format!(
+        "INSERT INTO posts (id, author_id, type, status, slug, title, content, meta, position, published_at) VALUES \
+         ({NOTE}, {ADMIN}, 'note', 'published', 'a-note', 'A note', \
+          '{{\"schema_version\":1,\"blocks\":[]}}', '{{}}', 0, now())"
+    )))
+    .execute(db.pool())
+    .await
+    .expect("note");
+
+    // `nosuch` is no type the server knows: activation and the status
+    // endpoint name it, and cards stay on.
+    let activated = install_and_activate(
+        base,
+        &cookie,
+        &card_theme_package(r#"["doc", "note", "nosuch"]"#),
+    );
+    assert!(activated.get("social_card_error").is_none(), "{activated}");
+    assert_eq!(
+        activated["social_card_unknown_post_types"],
+        json!(["nosuch"]),
+        "{activated}"
+    );
+    set_options(
+        base,
+        &cookie,
+        &json!({"site_url": "https://docs.example", "social_cards": true}),
+    );
+    let status: serde_json::Value = http(
+        ureq::get(&format!("{base}/api/v1/social-cards"))
+            .set("Cookie", &cookie)
+            .call(),
+    )
+    .into_json()
+    .unwrap();
+    assert_eq!(status["available"], true, "{status}");
+    assert_eq!(status["unknown_post_types"], json!(["nosuch"]), "{status}");
+
+    // In scope, but not publicly openable: no card.
+    assert_eq!(
+        get(base, &format!("/_card/{NOTE}-0000000000000000.png")).status(),
+        404
+    );
+    // A covered public type still gets one.
+    let html = page(base, "/docs/guides/install");
+    assert!(card_path(&html).starts_with(&format!("/_card/{CHILD}-")));
 }
 
 #[tokio::test]

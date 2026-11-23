@@ -556,8 +556,6 @@ impl Head {
         }
     }
 
-    /// The social card tags: title and description for feeds, which fall
-    /// back to the search ones.
     /// `og:image` with its size and alt (a generated card), and the
     /// matching `twitter:card`.
     fn image_tags(&self, site: &SiteContext, out: &mut String) {
@@ -588,6 +586,8 @@ impl Head {
         }
     }
 
+    /// The social card tags: title and description for feeds, which fall
+    /// back to the search ones.
     fn social_tags(&self, site: &SiteContext, title: &str) -> String {
         use std::fmt::Write as _;
         let esc = escape;

@@ -5714,6 +5714,12 @@ export interface components {
             error?: string | null;
             /** @description The post types the layout covers. */
             post_types: string[];
+            /**
+             * @description Covered post types the server does not know (no built-in, plugin
+             *     or administrator type has the name). A notice only: cards stay on,
+             *     but entries of these types cannot exist until one is added.
+             */
+            unknown_post_types: string[];
         };
         /**
          * @description Where the active configuration comes from.
@@ -5925,6 +5931,11 @@ export interface components {
              *     and only when the theme declares a layout that fails.
              */
             social_card_error?: string | null;
+            /**
+             * @description The `[social_card]` layout's post types the server does not know
+             *     (a notice: cards stay on). Only on activate.
+             */
+            social_card_unknown_post_types?: string[];
             /**
              * Format: int64
              * @description Integer version.

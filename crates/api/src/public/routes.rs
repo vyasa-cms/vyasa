@@ -131,24 +131,30 @@ impl BundleCache {
 }
 
 async fn load_bundle(state: &AppState) -> Result<std::sync::Arc<ThemeBundle>, R> {
+    match active_bundle(state).await? {
+        Some(bundle) => Ok(bundle),
+        None => Err((StatusCode::SERVICE_UNAVAILABLE, "no theme activated").into_response()),
+    }
+}
+
+/// The active theme's bundle, `None` when no theme is active.
+async fn active_bundle(state: &AppState) -> Result<Option<std::sync::Arc<ThemeBundle>>, R> {
     let identity = match state.themes.active_identity().await {
         Ok(a) => a,
         Err(e) => return Err(internal(e)),
     };
     let Some((name, version)) = identity else {
-        return Err((StatusCode::SERVICE_UNAVAILABLE, "no theme activated").into_response());
+        return Ok(None);
     };
     let namespace = crate::render_cache::theme_namespace(&name, version);
     if let Some(bundle) = state.theme_bundle.get(&namespace) {
-        return Ok(bundle);
+        return Ok(Some(bundle));
     }
     // Two requests arriving on a fresh theme may both build; both results
     // are identical and the second simply replaces the first.
     let active = match state.themes.get_active().await {
         Ok(Some(a)) => a,
-        Ok(None) => {
-            return Err((StatusCode::SERVICE_UNAVAILABLE, "no theme activated").into_response())
-        }
+        Ok(None) => return Ok(None),
         Err(e) => return Err(internal(e)),
     };
     let mut bundle = bundle_from_docs(
@@ -180,7 +186,7 @@ async fn load_bundle(state: &AppState) -> Result<std::sync::Arc<ThemeBundle>, R>
     bundle.card = load_card(state, &active).await.map_err(internal)?;
     let bundle = std::sync::Arc::new(bundle);
     state.theme_bundle.put(bundle.clone());
-    Ok(bundle)
+    Ok(Some(bundle))
 }
 
 /// The active theme's card layout from the cached bundle: `None` when no
@@ -191,14 +197,11 @@ async fn load_bundle(state: &AppState) -> Result<std::sync::Arc<ThemeBundle>, R>
 pub(crate) async fn active_card(
     state: &AppState,
 ) -> Result<Option<Result<std::sync::Arc<CardSource>, String>>, vyasa_common::AppError> {
-    match state.themes.active_identity().await? {
-        None => Ok(None),
-        Some(_) => match load_bundle(state).await {
-            Ok(bundle) => Ok(bundle.card.clone()),
-            Err(_) => Err(vyasa_common::AppError::internal_msg(
-                "the active theme could not be loaded",
-            )),
-        },
+    match active_bundle(state).await {
+        Ok(bundle) => Ok(bundle.and_then(|b| b.card.clone())),
+        Err(_) => Err(vyasa_common::AppError::internal_msg(
+            "the active theme could not be loaded",
+        )),
     }
 }
 

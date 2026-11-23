@@ -38,6 +38,10 @@ pub struct ThemeResponse {
     /// and only when the theme declares a layout that fails.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub social_card_error: Option<String>,
+    /// The `[social_card]` layout's post types the server does not know
+    /// (a notice: cards stay on). Only on activate.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub social_card_unknown_post_types: Vec<String>,
 }
 
 impl From<ThemeRow> for ThemeResponse {
@@ -49,6 +53,7 @@ impl From<ThemeRow> for ThemeResponse {
             is_active: row.is_active,
             package_version: row.package_version.map(i64::from),
             social_card_error: None,
+            social_card_unknown_post_types: Vec::new(),
         }
     }
 }
@@ -494,11 +499,21 @@ pub async fn activate(
         format!("theme:{}", row.name),
         serde_json::json!({ "version": row.version }),
     );
-    let card = crate::public::routes::load_card(&state, row).await?;
     let mut out = row.clone();
     out.is_active = true;
     let mut out = ThemeResponse::from(out);
-    out.social_card_error = card.and_then(Result::err);
+    // The theme is active by now: a failed card lookup is logged, never
+    // reported as a failed activation.
+    match crate::public::routes::load_card(&state, row).await {
+        Ok(Some(Ok(source))) => {
+            out.social_card_unknown_post_types =
+                crate::social_card::unknown_post_types(&state, &source.theme.layout().post_types)
+                    .await;
+        }
+        Ok(Some(Err(e))) => out.social_card_error = Some(e),
+        Ok(None) => {}
+        Err(e) => tracing::warn!("social card layout of theme {} not checked: {e}", row.name),
+    }
     Ok(Json(out))
 }
 

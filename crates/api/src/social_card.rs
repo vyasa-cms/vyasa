@@ -10,8 +10,9 @@
 //! Design: `vyasa-internal specs/2026-11-22-social-card-renderer-design.md`.
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, PoisonError};
 
+use axum::body::Bytes;
 use axum::extract::{Path, State};
 use axum::http::{header, HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
@@ -59,6 +60,26 @@ pub async fn cards_enabled(state: &AppState) -> Option<CardsOn> {
         Ok(Some(Ok(source))) => Some(CardsOn { source }),
         _ => None,
     }
+}
+
+/// The layout's post types the server does not know: not a built-in type
+/// and not a live plugin or administrator type. Only a notice: cards stay
+/// on, and such a type gets cards once a plugin or an administrator adds
+/// it. Reported so a typo (`docs` for `doc`) does not leave cards
+/// silently missing.
+pub async fn unknown_post_types(state: &AppState, post_types: &[String]) -> Vec<String> {
+    let mut out = Vec::new();
+    for ty in post_types {
+        let built_in = matches!(ty.as_str(), "post" | "page" | "block");
+        if !built_in
+            && crate::entry_fields::served_type(&state.plugin_surface, &state.pool, ty)
+                .await
+                .is_none()
+        {
+            out.push(ty.clone());
+        }
+    }
+    out
 }
 
 /// Conditions 2 to 4, from the loaded row and the plugin surface only: the
@@ -150,6 +171,14 @@ pub async fn card_for(
     })
 }
 
+/// Whether a change to one entry can change the label on other entries'
+/// cards of its type: types with trees, where a child's label is its top
+/// ancestor's title. Pages count, though `is_hierarchical` leaves them
+/// out (they have parents and breadcrumbs).
+fn labels_from_tree(post_type: PostType) -> bool {
+    post_type == PostType::Page || post_type.is_hierarchical()
+}
+
 /// `/_card/{id}-{key}.png`.
 #[must_use]
 pub fn card_path(id: i64, key: &str) -> String {
@@ -173,12 +202,12 @@ fn parse_file(file: &str) -> Option<(i64, &str)> {
     valid_key.then_some((id, key))
 }
 
-type RenderResult = Option<Result<Arc<Vec<u8>>, ()>>;
+type RenderResult = Option<Result<Bytes, ()>>;
 
 /// The process-wide card cache, the in-flight renders and the render
 /// permits.
 pub struct SocialCards {
-    cache: moka::sync::Cache<String, Arc<Vec<u8>>>,
+    cache: moka::sync::Cache<String, Bytes>,
     /// Card path → (entry id, post type), for edge purges.
     served: moka::sync::Cache<String, (i64, &'static str)>,
     in_flight: Mutex<HashMap<String, tokio::sync::watch::Receiver<RenderResult>>>,
@@ -199,7 +228,7 @@ impl SocialCards {
     pub fn new(max_bytes: u64) -> Self {
         Self {
             cache: moka::sync::Cache::builder()
-                .weigher(|_k: &String, v: &Arc<Vec<u8>>| u32::try_from(v.len()).unwrap_or(u32::MAX))
+                .weigher(|_k: &String, v: &Bytes| u32::try_from(v.len()).unwrap_or(u32::MAX))
                 .max_capacity(max_bytes)
                 .build(),
             served: moka::sync::Cache::new(MAX_RECORDED_URLS),
@@ -208,12 +237,25 @@ impl SocialCards {
         }
     }
 
+    /// Records a served card for entry `id` of `ty` with a cached PNG, as a
+    /// 200 from the route would.
+    #[cfg(test)]
+    pub(crate) fn record_served_for_test(&self, id: i64, ty: &'static str, key: &str) {
+        self.served.insert(card_path(id, key), (id, ty));
+        self.cache
+            .insert(key.to_owned(), Bytes::from_static(b"png"));
+    }
+
     /// Takes the served card paths of entry `id`, or of every entry of
-    /// `post_type` when the type is hierarchical (a child's label is its
-    /// top ancestor's title), and drops their cached PNGs.
+    /// its type when that type has trees (a child's label is its top
+    /// ancestor's title), and drops their cached PNGs.
     pub fn take_urls(&self, id: i64, post_type: PostType) -> Vec<String> {
-        let all_of_type = post_type.is_hierarchical();
-        let name = post_type.as_str();
+        self.take_urls_of(id, post_type.as_str(), labels_from_tree(post_type))
+    }
+
+    /// [`Self::take_urls`] with the type's name and whether every card of
+    /// that type goes.
+    fn take_urls_of(&self, id: i64, name: &str, all_of_type: bool) -> Vec<String> {
         let paths: Vec<String> = self
             .served
             .iter()
@@ -237,7 +279,7 @@ impl SocialCards {
     /// The PNG for `key`: cached, joined to a render in flight, or a new
     /// render by `render`. The render runs in a task of its own, so a
     /// dropped request neither cancels it nor frees its permit early.
-    async fn png<F>(self: &Arc<Self>, key: &str, render: F) -> Result<Arc<Vec<u8>>, ()>
+    async fn png<F>(self: &Arc<Self>, key: &str, render: F) -> Result<Bytes, ()>
     where
         F: FnOnce() -> Result<Vec<u8>, String> + Send + 'static,
     {
@@ -245,7 +287,12 @@ impl SocialCards {
             return Ok(png);
         }
         let mut rx = {
-            let mut flight = self.in_flight.lock().map_err(|_| ())?;
+            // A poisoned map still holds valid entries: every critical
+            // section is a single insert, lookup or remove.
+            let mut flight = self
+                .in_flight
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner);
             // Checked again under the lock: a render may have finished
             // between the first look and here.
             if let Some(png) = self.cache.get(key) {
@@ -289,7 +336,7 @@ impl SocialCards {
                             tracing::debug!(
                                 "social card {key}: queued {queued:?}, rendered {took:?}"
                             );
-                            Ok(Arc::new(png))
+                            Ok(Bytes::from(png))
                         }
                         Ok(Err(e)) => {
                             tracing::warn!("social card {key} failed: {e}");
@@ -306,11 +353,13 @@ impl SocialCards {
             // Cache first, then leave the map, then wake the waiters: a
             // request arriving in between finds one or the other.
             if let Ok(png) = &result {
-                cards.cache.insert(key.clone(), Arc::clone(png));
+                cards.cache.insert(key.clone(), png.clone());
             }
-            if let Ok(mut flight) = cards.in_flight.lock() {
-                flight.remove(&key);
-            }
+            cards
+                .in_flight
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .remove(&key);
             let _ = tx.send(Some(result));
         });
     }
@@ -324,7 +373,9 @@ fn status(code: StatusCode) -> Response {
 /// on a matching `If-None-Match`, 302 to the current URL for an old key,
 /// 404 when the entry has no card. The order of work keeps the cost of a
 /// miss low: the path is parsed before any query, the option before the
-/// entry lookup, the scope before the breadcrumb lookups.
+/// entry lookup, the scope before the breadcrumb lookups. An entry in
+/// scope also loads the site context (a few option reads, for the
+/// permalink pattern and the site title) before its breadcrumbs.
 pub async fn card_route(
     State(state): State<AppState>,
     Path(file): Path<String>,
@@ -398,7 +449,7 @@ pub async fn card_route(
             (header::ETAG, etag),
             (header::CACHE_CONTROL, immutable.to_owned()),
         ],
-        png.as_ref().clone(),
+        png,
     )
         .into_response()
 }
@@ -524,6 +575,62 @@ mod tests {
         assert!(cards.png(KEY, || Err("boom".to_owned())).await.is_err());
         assert!(cards.cache.get(KEY).is_none());
         assert_eq!(*cards.png(KEY, || Ok(vec![9])).await.unwrap(), vec![9]);
+    }
+
+    /// Records `/_card/{id}-{key}.png` as served for `id` of `ty`, with a
+    /// cached PNG under `key`.
+    fn serve(cards: &SocialCards, id: i64, ty: &'static str, key: &str) -> String {
+        cards.record_served_for_test(id, ty, key);
+        super::card_path(id, key)
+    }
+
+    #[test]
+    fn an_entry_change_takes_only_its_own_card_urls_and_pngs() {
+        let cards = SocialCards::new(1 << 20);
+        let seven = serve(&cards, 7, "doc", "000000000000000a");
+        let seven_old = serve(&cards, 7, "doc", "000000000000000b");
+        let eight = serve(&cards, 8, "doc", "000000000000000c");
+        let mut taken = cards.take_urls_of(7, "doc", false);
+        taken.sort();
+        let mut want = vec![seven, seven_old];
+        want.sort();
+        assert_eq!(taken, want, "site paths, not absolute URLs");
+        assert!(cards.cache.get("000000000000000a").is_none());
+        assert!(cards.cache.get("000000000000000b").is_none());
+        assert!(
+            cards.cache.get("000000000000000c").is_some(),
+            "8's PNG stays"
+        );
+        assert!(cards.served.get(&eight).is_some(), "8's URL stays");
+        assert!(cards.take_urls_of(7, "doc", false).is_empty(), "taken once");
+    }
+
+    #[test]
+    fn a_tree_type_change_takes_every_card_of_that_type_only() {
+        let cards = SocialCards::new(1 << 20);
+        let seven = serve(&cards, 7, "doc", "000000000000000a");
+        let eight = serve(&cards, 8, "doc", "000000000000000b");
+        let post = serve(&cards, 9, "post", "000000000000000c");
+        let mut taken = cards.take_urls_of(7, "doc", true);
+        taken.sort();
+        let mut want = vec![seven, eight];
+        want.sort();
+        assert_eq!(taken, want);
+        assert!(cards.cache.get("000000000000000a").is_none());
+        assert!(cards.cache.get("000000000000000b").is_none());
+        assert!(
+            cards.cache.get("000000000000000c").is_some(),
+            "other type stays"
+        );
+        assert!(cards.served.get(&post).is_some());
+        assert!(cards.take_urls_of(7, "doc", true).is_empty(), "taken once");
+    }
+
+    #[test]
+    fn pages_purge_like_a_tree() {
+        use vyasa_db::content_models::PostType;
+        assert!(super::labels_from_tree(PostType::Page));
+        assert!(!super::labels_from_tree(PostType::Post));
     }
 
     #[test]
