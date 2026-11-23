@@ -110,6 +110,7 @@ use crate::rest::UserResponse;
         crate::rest::plugins::rollback,
         crate::rest::plugins::inspect,
         crate::rest::plugins::audit,
+        crate::rest::plugins::form,
         crate::rest::plugins::delete,
         crate::rest::plugins::setting_put,
         crate::rest::plugins::setting_get,

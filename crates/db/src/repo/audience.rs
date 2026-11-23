@@ -430,47 +430,98 @@ pub mod dim {
     pub const CONVERSION: &str = "conversion";
 }
 
+/// Distinct keys one (day, dimension) of `audience_counts` may hold; the rest are counted under [`OTHER_KEY`].
+pub const MAX_KEYS_PER_DIM: i64 = 500;
+
+/// The bucket for keys past [`MAX_KEYS_PER_DIM`].
+pub const OTHER_KEY: &str = "(other)";
+
 impl AudienceRepo {
-    /// Adds `by` to the counter of `dim`/`key`/`extra` for today.
+    /// Adds `by` to the counter of `dim`/`key`/`extra` for the UTC day `day`. A key that would be the
+    /// [`MAX_KEYS_PER_DIM`]th distinct one of its (day, dimension) is counted under `(other)` instead, so request
+    /// text (404 paths, tags, search terms) cannot grow the table without bound.
     ///
     /// # Errors
     /// [`AppError::Db`] on failure.
-    pub async fn count(&self, dim: &str, key: &str, extra: &str, by: i64) -> Result<(), AppError> {
+    pub async fn count_on(
+        &self,
+        day: NaiveDate,
+        dim: &str,
+        key: &str,
+        extra: &str,
+        by: i64,
+    ) -> Result<(), AppError> {
         sqlx::query(
             "INSERT INTO audience_counts (day, dim, key, extra, n)
-             VALUES (CURRENT_DATE, $1, $2, $3, $4)
+             SELECT $1, $2,
+                    CASE WHEN EXISTS (SELECT 1 FROM audience_counts WHERE day = $1 AND dim = $2 AND key = $3 AND extra = $4)
+                           OR (SELECT count(*) FROM audience_counts WHERE day = $1 AND dim = $2) < $6
+                         THEN $3 ELSE $7 END,
+                    CASE WHEN EXISTS (SELECT 1 FROM audience_counts WHERE day = $1 AND dim = $2 AND key = $3 AND extra = $4)
+                           OR (SELECT count(*) FROM audience_counts WHERE day = $1 AND dim = $2) < $6
+                         THEN $4 ELSE '' END,
+                    $5
              ON CONFLICT (day, dim, key, extra)
              DO UPDATE SET n = audience_counts.n + EXCLUDED.n",
         )
+        .bind(day)
         .bind(dim)
         .bind(key)
         .bind(extra)
         .bind(by)
+        .bind(MAX_KEYS_PER_DIM)
+        .bind(OTHER_KEY)
         .execute(&self.pool)
         .await
         .map_err(|e| AppError::db(format!("count {dim}: {e}")))?;
         Ok(())
     }
 
-    /// Notes a visitor hash for today. True when it was new today (the caller counts one unique visitor). Rows of
-    /// earlier days are deleted here, so no hash outlives its day.
+    /// [`Self::count_on`] for today (UTC).
     ///
     /// # Errors
     /// [`AppError::Db`] on failure.
-    pub async fn first_visit_today(&self, hash: &[u8]) -> Result<bool, AppError> {
-        sqlx::query("DELETE FROM audience_visitors WHERE day < CURRENT_DATE")
-            .execute(&self.pool)
+    pub async fn count(&self, dim: &str, key: &str, extra: &str, by: i64) -> Result<(), AppError> {
+        self.count_on(chrono::Utc::now().date_naive(), dim, key, extra, by)
             .await
-            .map_err(|e| AppError::db(format!("purge visitors: {e}")))?;
+    }
+
+    /// Notes a visitor hash for the UTC day `day`. True when it was new that day (the caller counts one unique
+    /// visitor).
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn first_visit_on(&self, day: NaiveDate, hash: &[u8]) -> Result<bool, AppError> {
         let done = sqlx::query(
-            "INSERT INTO audience_visitors (day, hash) VALUES (CURRENT_DATE, $1)
+            "INSERT INTO audience_visitors (day, hash) VALUES ($1, $2)
              ON CONFLICT DO NOTHING",
         )
+        .bind(day)
         .bind(hash)
         .execute(&self.pool)
         .await
         .map_err(|e| AppError::db(format!("note visitor: {e}")))?;
         Ok(done.rows_affected() == 1)
+    }
+
+    /// Deletes every visitor hash of a UTC day before `today`, and day counters older than `keep_days`. Run at
+    /// startup and on a timer, so no identifier outlives its day on a quiet site either.
+    ///
+    /// # Errors
+    /// [`AppError::Db`] on failure.
+    pub async fn purge(&self, today: NaiveDate, keep_days: i32) -> Result<(), AppError> {
+        sqlx::query("DELETE FROM audience_visitors WHERE day < $1")
+            .bind(today)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::db(format!("purge visitors: {e}")))?;
+        sqlx::query("DELETE FROM audience_counts WHERE day < $1 - $2::INT")
+            .bind(today)
+            .bind(keep_days)
+            .execute(&self.pool)
+            .await
+            .map_err(|e| AppError::db(format!("purge counts: {e}")))?;
+        Ok(())
     }
 
     /// Daily views, visitors and bot hits for the last `days` days, oldest first.

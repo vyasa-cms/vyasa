@@ -93,7 +93,18 @@ fn thanks_page(site: &str, message: &str) -> Response {
 }
 
 /// Handles one submission.
-pub async fn submit(State(state): State<AppState>, body: String) -> Response {
+pub async fn submit(
+    State(state): State<AppState>,
+    headers: axum::http::HeaderMap,
+    body: String,
+) -> Response {
+    // A conversion is counted only for a visitor the analytics counts at all.
+    let counted = !crate::analytics::opted_out(&headers)
+        && !crate::analytics::is_bot(
+            headers
+                .get(axum::http::header::USER_AGENT)
+                .and_then(|v| v.to_str().ok()),
+        );
     if body.len() > MAX_BODY_BYTES {
         return (StatusCode::PAYLOAD_TOO_LARGE, "form too large").into_response();
     }
@@ -126,7 +137,12 @@ pub async fn submit(State(state): State<AppState>, body: String) -> Response {
         if let Some(def) = crate::forms::by_slug(&state, &form_slug).await {
             let path: String = get("path").chars().take(200).collect();
             return match crate::forms::accept(&state, &def, &fields, &path).await {
-                Ok(msg) => thanks_page(&site, &msg),
+                Ok(msg) => {
+                    if counted {
+                        convert(&state, &def.slug);
+                    }
+                    thanks_page(&site, &msg)
+                }
                 Err(e) => thanks_page(&site, &format!("{e} — go back and try again.")),
             };
         }
@@ -142,7 +158,7 @@ pub async fn submit(State(state): State<AppState>, body: String) -> Response {
     let name: String = get("name").chars().take(120).collect();
 
     if mode == "newsletter" {
-        return subscribe(&state, &site, &email).await;
+        return subscribe(&state, &site, &email, counted).await;
     }
     let form: String = {
         let f = get("form");
@@ -159,7 +175,9 @@ pub async fn submit(State(state): State<AppState>, body: String) -> Response {
         .await
     {
         Ok(_) => {
-            convert(&state, &form);
+            if counted {
+                convert(&state, "contact");
+            }
             thanks_page(&site, "Thanks — your message has been received.")
         }
         Err(err) => {
@@ -189,7 +207,7 @@ fn convert(state: &AppState, name: &str) {
 /// Stores a pending subscriber and sends the confirm link. Without a
 /// configured site URL there is no clickable link to send, so the form
 /// says so instead of pretending.
-async fn subscribe(state: &AppState, site: &str, email: &str) -> Response {
+async fn subscribe(state: &AppState, site: &str, email: &str, counted: bool) -> Response {
     use rand::Rng as _;
     let Ok(base) = state.options_service.site_url().await else {
         return thanks_page(site, "Subscriptions aren't set up yet.");
@@ -222,7 +240,9 @@ async fn subscribe(state: &AppState, site: &str, email: &str) -> Response {
     match queued {
         Ok(_) => {
             state.publisher_notify.notify_one();
-            convert(state, "newsletter");
+            if counted {
+                convert(state, "newsletter");
+            }
             thanks_page(site, "Check your inbox to confirm your subscription.")
         }
         Err(err) => {

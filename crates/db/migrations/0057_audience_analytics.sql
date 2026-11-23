@@ -1,4 +1,4 @@
--- 0057_audience_analytics: cookieless audience analytics beyond the per-path view counter (A1-A6).
+-- 0057_audience_analytics: cookieless audience analytics beyond the per-path view counter.
 --
 -- Aggregates only. `audience_counts` holds one counter per day, dimension and value (bot hits, device and browser
 -- classes, referrer campaign tags, entry pages, 404s with their referrers, search terms, outbound clicks,

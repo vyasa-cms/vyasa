@@ -20,9 +20,16 @@ A `GET` that leaves with an HTML `200` on a public path (not `/admin`, `/api`, `
 | outbound | clicks through `/go/<name>` |
 | conversions | a form or newsletter signup, and `/go/` links marked as one |
 
+## Limits and retention
+
+- One (day, dimension) holds at most 500 distinct keys; the rest are counted under `(other)`.
+- A request counts one value per `utm_*` dimension.
+- Conversions are keyed by a defined form's slug, `contact` or `newsletter`.
+- Visitor hashes are deleted when their UTC day ends (at startup and every ten minutes); day counters are kept 400 days.
+
 ## What is never counted
 
-- Requests with `X-Vyasa-Internal: 1` (link checks, staging QA, our own tools).
+- Requests with `X-Vyasa-Internal: 1` (link checks, staging QA, internal tools).
 - Requests with `DNT: 1` or `Sec-GPC: 1`.
 - Anyone holding a session cookie (a signed-in author or admin).
 
@@ -44,8 +51,8 @@ a target is an absolute `http` or `https` URL. A link marked `conversion` also c
 
 ## Text for a privacy page
 
-> We count visits on our server. No cookies, no tracking scripts, no personal data stored.
+> We count visits on our server. No cookies, no tracking scripts, no IP addresses or user agents stored. Search terms typed into our search box and addresses that were not found are kept as text, without any link to a person.
 
 ## Not yet
 
-Country (needs a GeoIP database file, see the open question in the release notes) and Search Console import (A7).
+Country (needs a GeoIP database file) and Search Console import.

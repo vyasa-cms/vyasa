@@ -224,6 +224,61 @@ pub async fn llms_txt(State(state): State<AppState>, headers: HeaderMap) -> Resp
     )
 }
 
+/// `GET /llms-full.txt` — every readable entry's markdown in one file.
+///
+/// `llms.txt` is the index; this is the same set with each entry's body
+/// inline, so a model reads the whole site in one fetch. Same filter as
+/// the index: published, public type, not password-protected.
+pub async fn llms_full_txt(State(state): State<AppState>, headers: HeaderMap) -> Response {
+    use std::fmt::Write as _;
+    let pattern = crate::permalinks::pattern(&state).await;
+    let base = base_url(&state, &headers).await;
+    let identity = state.options_service.site_identity().await.ok();
+    let filter = PostFilter {
+        status: Some(PostStatus::Published),
+        limit: 500,
+        ..PostFilter::default()
+    };
+    let Ok(rows) = state.posts.list(&filter).await else {
+        return internal();
+    };
+    let title = identity
+        .as_ref()
+        .map(|i| i.title.clone())
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| base.clone());
+    let mut out = format!("# {title}\n");
+    if let Some(tagline) = identity
+        .as_ref()
+        .map(|i| i.tagline.clone())
+        .filter(|t| !t.is_empty())
+    {
+        let _ = write!(out, "\n> {tagline}\n");
+    }
+    let public_custom = crate::policy::PublicTypes::load(&state.plugin_surface, &state.pool).await;
+    for p in rows.iter().filter(|p| public_custom.opens(p.post_type)) {
+        if p.password_hash.is_some() {
+            continue;
+        }
+        let doc: vyasa_core::BlockDocument = serde_json::from_value(p.content.clone())
+            .unwrap_or_else(|_| vyasa_core::BlockDocument::new(Vec::new()));
+        let body = vyasa_themes::blocks_to_markdown(&doc.blocks);
+        let _ = write!(
+            out,
+            "\n---\n\n## {}\n\nSource: {base}{}\n\n{}\n",
+            p.title,
+            pattern.path_for(p),
+            body.trim()
+        );
+    }
+    crate::public::cacheable::cacheable(
+        &headers,
+        "text/plain; charset=utf-8",
+        crate::public::cacheable::CRAWLER_MAX_AGE,
+        out,
+    )
+}
+
 /// `GET /indexnow.txt` — the ownership proof IndexNow pings point at
 /// via `keyLocation`. 404 until the first publish mints a key.
 pub async fn indexnow_key(State(state): State<AppState>, headers: HeaderMap) -> Response {

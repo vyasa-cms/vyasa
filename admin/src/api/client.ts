@@ -1765,6 +1765,11 @@ export const api = {
     return request("/api/v1/plugins/surface");
   },
 
+  /** The plugin's settings form as it declares it now (404 when it has none loaded). */
+  getPluginForm(id: string): Promise<PluginForm> {
+    return request(`/api/v1/plugins/${id}/form`);
+  },
+
   // --- Content types and fields (phase 99) ----------------------------------
 
   /** Built-in types first, then plugins', then administrators'. */

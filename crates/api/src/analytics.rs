@@ -70,24 +70,41 @@ fn countable_path(path: &str) -> bool {
         || path == "/favicon.ico")
 }
 
+/// The authority (host and port, no userinfo) of an `http(s)` URL, or `None`.
+fn authority_of(url: &str) -> Option<&str> {
+    let rest = url
+        .strip_prefix("https://")
+        .or_else(|| url.strip_prefix("http://"))?;
+    let auth = rest.split(['/', '?', '#']).next().unwrap_or("");
+    let auth = auth.rsplit('@').next().unwrap_or(auth);
+    (!auth.is_empty()).then_some(auth)
+}
+
+/// True when the `Referer` names this same host (port included, case-insensitive).
+fn same_site_referrer(referer: Option<&str>, own_host: &str) -> bool {
+    !own_host.is_empty()
+        && referer
+            .and_then(authority_of)
+            .is_some_and(|h| h.eq_ignore_ascii_case(own_host))
+}
+
 /// The referring *host*, and only when it is a different site — the
 /// visitor's journey inside this site is not the analytics' business.
 fn referrer_host(referer: Option<&str>, own_host: &str) -> String {
-    let Some(r) = referer else {
+    let Some(auth) = referer.and_then(authority_of) else {
         return String::new();
     };
-    let host = r
-        .strip_prefix("https://")
-        .or_else(|| r.strip_prefix("http://"))
-        .unwrap_or("")
-        .split(['/', ':', '?'])
-        .next()
-        .unwrap_or("");
-    if host.is_empty() || host.eq_ignore_ascii_case(own_host) {
-        String::new()
-    } else {
-        host.chars().take(100).collect()
+    if same_site_referrer(referer, own_host) {
+        return String::new();
     }
+    let host = auth.rsplit_once(':').map_or(auth, |(h, port)| {
+        if port.bytes().all(|b| b.is_ascii_digit()) {
+            h
+        } else {
+            auth
+        }
+    });
+    host.chars().take(100).collect()
 }
 
 /// Why a request is not counted at all (not even as a bot).
@@ -168,8 +185,11 @@ fn utm_tags(query: &str) -> Vec<(&'static str, String)> {
             "utm_campaign" => dim::UTM_CAMPAIGN,
             _ => continue,
         };
-        if let Some(v) = tag_value(&v) {
-            out.push((d, v));
+        // One value per dimension per request: a query string cannot fan out into many writes.
+        if out.iter().all(|(od, _)| *od != d) {
+            if let Some(v) = tag_value(&v) {
+                out.push((d, v));
+            }
         }
     }
     out
@@ -249,10 +269,33 @@ fn facts(state: &AppState, req: &Request) -> Facts {
             .collect(),
         ua: header("user-agent"),
         referer: header("referer"),
-        host: header("host").unwrap_or_default(),
+        // HTTP/2 carries the host in `:authority`, not in a `Host` header.
+        host: header("host")
+            .or_else(|| req.uri().authority().map(|a| a.as_str().to_owned()))
+            .unwrap_or_default(),
         skip: opted_out(req.headers()),
         client,
     }
+}
+
+/// Counters older than this many days are deleted.
+const KEEP_DAYS: i32 = 400;
+
+/// Spawns the purge: at startup and every ten minutes it deletes visitor hashes of earlier UTC days and day counters
+/// past [`KEEP_DAYS`], so no identifier outlives its day even when no visit arrives to trigger it.
+pub fn spawn_purge(audience: vyasa_db::repo::AudienceRepo) -> tokio::task::JoinHandle<()> {
+    tokio::spawn(async move {
+        let mut tick = tokio::time::interval(std::time::Duration::from_secs(600));
+        loop {
+            tick.tick().await;
+            if let Err(err) = audience
+                .purge(chrono::Utc::now().date_naive(), KEEP_DAYS)
+                .await
+            {
+                tracing::warn!("audience purge failed: {err}");
+            }
+        }
+    })
 }
 
 /// Counts the response on its way out. Never blocks it: the writes are
@@ -292,8 +335,10 @@ async fn record(
     f: &Facts,
     ok: bool,
 ) -> Result<(), vyasa_common::AppError> {
+    // One UTC day for the secret, the visitor row and every counter of this view.
+    let day = chrono::Utc::now().date_naive();
     if is_bot(f.ua.as_deref()) {
-        return audience.count(dim::BOT, "", "", 1).await;
+        return audience.count_on(day, dim::BOT, "", "", 1).await;
     }
     let from_host = referrer_host(f.referer.as_deref(), &f.host);
     if !ok {
@@ -315,27 +360,11 @@ async fn record(
     if let Some(term) = search_term(&f.path, &f.query) {
         audience.count(dim::SEARCH, &term, "", 1).await?;
     }
-    let day = chrono::Utc::now().date_naive();
     let hash = visitor_hash(day, &f.client, ua, &f.host);
-    if audience.first_visit_today(&hash).await? {
+    if audience.first_visit_on(day, &hash).await? {
         audience.count(dim::VISITOR, "", "", 1).await?;
     }
     Ok(())
-}
-
-/// True when the `Referer` names this same host.
-fn same_site_referrer(referer: Option<&str>, own_host: &str) -> bool {
-    let Some(r) = referer else {
-        return false;
-    };
-    let host = r
-        .strip_prefix("https://")
-        .or_else(|| r.strip_prefix("http://"))
-        .unwrap_or("")
-        .split(['/', '?'])
-        .next()
-        .unwrap_or("");
-    !host.is_empty() && host.eq_ignore_ascii_case(own_host)
 }
 
 #[cfg(test)]
@@ -450,6 +479,30 @@ mod tests {
             super::visitor_hash(d1, "a", "bc", "site")
         );
         assert_ne!(a, super::visitor_hash(d2, "203.0.113.7", "UA", "site"));
+    }
+
+    #[test]
+    fn a_host_with_a_port_matches_its_own_referrer() {
+        assert!(super::same_site_referrer(
+            Some("http://localhost:3000/a"),
+            "localhost:3000"
+        ));
+        assert_eq!(
+            super::referrer_host(Some("http://localhost:3000/a"), "localhost:3000"),
+            ""
+        );
+        assert_eq!(
+            super::referrer_host(Some("https://news.example:8443/a"), "blog.example"),
+            "news.example"
+        );
+        // No Host at all: nothing is "same site", and nothing panics.
+        assert!(!super::same_site_referrer(Some("https://x.example/"), ""));
+    }
+
+    #[test]
+    fn one_campaign_value_per_dimension() {
+        let tags = super::utm_tags("utm_source=a&utm_source=b&utm_source=c");
+        assert_eq!(tags, vec![("utm_source", "a".to_owned())]);
     }
 
     #[test]

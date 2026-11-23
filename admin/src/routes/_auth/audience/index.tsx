@@ -156,8 +156,8 @@ function AudiencePage() {
           </div>
         )}
         <p className="border-t p-4 text-xs text-muted-foreground">
-          We count visits on our server. No cookies, no tracking scripts, no personal data stored. Visitors who send
-          Do Not Track or Global Privacy Control, signed-in users and our own tools are not counted.
+          We count visits on our server. No cookies, no tracking scripts, no IP addresses or user agents stored. Visitors who send
+          Do Not Track or Global Privacy Control, signed-in users and internal tools are not counted.
         </p>
       </Panel>
 

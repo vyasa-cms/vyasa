@@ -221,6 +221,7 @@ const BLIND_ROUTES: &[(&str, &str)] = &[
     ("/plugins", "POST"),
     ("/plugins/inspect", "POST"),
     ("/plugins/{id}", "DELETE"),
+    ("/plugins/{id}/form", "GET"),
     ("/plugins/{id}/rollback", "POST"),
     ("/post-types/{type}/tree", "GET"),
     ("/post-types/{type}/tree", "PUT"),

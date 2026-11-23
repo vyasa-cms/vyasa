@@ -1121,3 +1121,62 @@ async fn webhook_fanout_matches_subscribed_events() {
         .expect("no subscribers")
         .is_empty());
 }
+
+#[tokio::test]
+async fn audience_counters_cap_keys_purge_and_report() {
+    use vyasa_db::repo::audience::{dim, MAX_KEYS_PER_DIM, OTHER_KEY};
+    use vyasa_db::repo::AudienceRepo;
+
+    let db = TestDb::new().await;
+    let repo = AudienceRepo::new(db.pool().clone());
+    let today = chrono::Utc::now().date_naive();
+
+    // count: the same key adds up; a new key past the cap lands in (other), an existing one keeps counting.
+    repo.count(dim::SEARCH, "rust", "", 1).await.expect("one");
+    repo.count(dim::SEARCH, "rust", "", 2).await.expect("two");
+    for i in 0..MAX_KEYS_PER_DIM {
+        repo.count_on(today, dim::NOT_FOUND, &format!("/p{i}"), "", 1)
+            .await
+            .expect("fill");
+    }
+    repo.count(dim::NOT_FOUND, "/one-too-many", "x.example", 4)
+        .await
+        .expect("over");
+    repo.count(dim::NOT_FOUND, "/p0", "", 1)
+        .await
+        .expect("existing");
+    let top = repo.top_of(dim::SEARCH, 7, 10).await.expect("top");
+    assert_eq!(top, [("rust".to_owned(), String::new(), 3)]);
+    let nf = repo.top_of(dim::NOT_FOUND, 7, 1000).await.expect("nf");
+    assert_eq!(i64::try_from(nf.len()).expect("len"), MAX_KEYS_PER_DIM + 1);
+    assert!(nf
+        .iter()
+        .any(|(k, e, n)| k == OTHER_KEY && e.is_empty() && *n == 4));
+    assert!(nf.iter().any(|(k, _, n)| k == "/p0" && *n == 2));
+
+    // first_visit_on: new once per day; purge drops earlier days' hashes and old counters.
+    let yesterday = today.pred_opt().expect("day");
+    assert!(repo.first_visit_on(yesterday, b"h1").await.expect("y"));
+    assert!(repo.first_visit_on(today, b"h1").await.expect("t"));
+    assert!(!repo.first_visit_on(today, b"h1").await.expect("again"));
+    repo.purge(today, 400).await.expect("purge");
+    assert!(repo.first_visit_on(yesterday, b"h1").await.expect("gone"));
+    assert!(!repo.first_visit_on(today, b"h1").await.expect("kept"));
+    let old = today - chrono::Duration::days(500);
+    repo.count_on(old, dim::SEARCH, "ancient", "", 1)
+        .await
+        .expect("old");
+    repo.purge(today, 400).await.expect("purge counts");
+    let all = repo.top_of(dim::SEARCH, 1000, 10).await.expect("all");
+    assert!(all.iter().all(|(k, _, _)| k != "ancient"));
+
+    // Reports: daily traffic and path trends read what was recorded.
+    repo.record_view("/a", "").await.expect("v");
+    repo.count(dim::VISITOR, "", "", 1).await.expect("visitor");
+    repo.count(dim::BOT, "", "", 1).await.expect("bot");
+    let days = repo.daily_traffic(7).await.expect("traffic");
+    let last = days.last().expect("today");
+    assert_eq!((last.views, last.visitors, last.bots), (1, 1, 1));
+    let trends = repo.path_trends(7, 5).await.expect("trends");
+    assert_eq!(trends, [("/a".to_owned(), 1, 0)]);
+}

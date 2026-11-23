@@ -78,6 +78,7 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route("/healthz", get(health::healthz))
         .route("/readyz", get(health::readyz))
         .route("/llms.txt", get(seo::llms_txt))
+        .route("/llms-full.txt", get(seo::llms_full_txt))
         .route("/indexnow.txt", get(seo::indexnow_key))
         // A marketplace this site hosts. Both 404 unless the operator
         // has put files in `registry_dir`.
