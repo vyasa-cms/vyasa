@@ -22,6 +22,20 @@ async fn base_url(state: &AppState, headers: &HeaderMap) -> String {
 use vyasa_db::content_models::PostStatus;
 use vyasa_db::repo::PostFilter;
 
+/// An entry that asks search engines to skip it (`seo_noindex`), or that
+/// names another page of this site as its canonical (an older docs
+/// version), is not listed: the sitemap names the pages worth indexing,
+/// and a crawler sent to a page that points elsewhere wastes the visit.
+fn kept_out_of_sitemap(meta: &serde_json::Value) -> bool {
+    let noindex = meta.get("seo_noindex").and_then(serde_json::Value::as_bool) == Some(true);
+    let canonical_elsewhere = ["seo_canonical_path", "seo_canonical"].iter().any(|k| {
+        meta.get(*k)
+            .and_then(serde_json::Value::as_str)
+            .is_some_and(|v| !v.trim().is_empty())
+    });
+    noindex || canonical_elsewhere
+}
+
 /// `GET /sitemap.xml` — published posts and pages.
 pub async fn sitemap(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let pattern = crate::permalinks::pattern(&state).await;
@@ -88,7 +102,7 @@ pub async fn sitemap(State(state): State<AppState>, headers: HeaderMap) -> Respo
     for p in &rows {
         // A protected entry is `noindex` when fetched, so listing it only
         // sends a crawler to a page that then refuses to be indexed.
-        if p.password_hash.is_some() {
+        if p.password_hash.is_some() || kept_out_of_sitemap(&p.meta) {
             continue;
         }
         // The one permalink rule, not a second copy of it. The copy here
@@ -304,4 +318,29 @@ fn esc(t: &str) -> String {
 
 fn internal() -> Response {
     (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::kept_out_of_sitemap;
+    use serde_json::json;
+
+    #[test]
+    fn noindex_and_canonical_elsewhere_stay_out_of_the_sitemap() {
+        assert!(kept_out_of_sitemap(&json!({"seo_noindex": true})));
+        assert!(kept_out_of_sitemap(
+            &json!({"seo_canonical_path": "/docs/a"})
+        ));
+        assert!(kept_out_of_sitemap(
+            &json!({"seo_canonical": "https://x.test/a"})
+        ));
+    }
+
+    #[test]
+    fn an_ordinary_entry_is_listed() {
+        assert!(!kept_out_of_sitemap(&json!({})));
+        assert!(!kept_out_of_sitemap(&json!({"seo_noindex": false})));
+        assert!(!kept_out_of_sitemap(&json!({"seo_canonical_path": "  "})));
+        assert!(!kept_out_of_sitemap(&json!({"seo_noindex": "yes"})));
+    }
 }

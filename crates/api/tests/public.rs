@@ -395,6 +395,39 @@ async fn polled_documents_carry_a_validator_and_a_lifetime() {
     }
 }
 
+/// A noindex page and an older docs version (canonical to the latest) are
+/// not advertised to crawlers.
+#[tokio::test]
+async fn the_sitemap_omits_noindex_and_canonical_elsewhere_entries() {
+    let db = TestDb::new().await;
+    seed_admin(db.pool()).await;
+    for (id, slug, meta) in [
+        (82110, "sm-listed", "{}"),
+        (82111, "sm-noindex", r#"{"seo_noindex":true}"#),
+        (82112, "sm-older", r#"{"seo_canonical_path":"/sm-listed"}"#),
+    ] {
+        sqlx::query(
+            "INSERT INTO posts (id, author_id, type, status, slug, title, content, meta, published_at)
+             VALUES ($1, 82001, 'post', 'published', $2, $2,
+                     '{\"schema_version\":1,\"blocks\":[]}', $3::jsonb, now())",
+        )
+        .bind(id)
+        .bind(slug)
+        .bind(meta)
+        .execute(db.pool())
+        .await
+        .expect("post");
+    }
+    let server = TestServer::start(common::BIN, &db);
+    let base = server.base();
+    let xml = body_text(http(
+        ureq::get(format!("{base}/sitemap.xml").as_str()).call(),
+    ));
+    assert!(xml.contains("sm-listed"), "{xml}");
+    assert!(!xml.contains("sm-noindex"), "{xml}");
+    assert!(!xml.contains("sm-older"), "{xml}");
+}
+
 /// The sitemap has to name the page the site is actually at.
 #[tokio::test]
 async fn the_sitemap_lists_the_home_page_and_says_when_things_changed() {
