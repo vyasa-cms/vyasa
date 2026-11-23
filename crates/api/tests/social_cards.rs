@@ -543,7 +543,7 @@ async fn a_non_public_type_gets_no_card_and_an_unknown_type_is_a_notice() {
 }
 
 #[tokio::test]
-async fn no_site_url_means_no_image_tags() {
+async fn no_site_url_means_the_card_uses_the_request_origin() {
     let db = TestDb::new().await;
     seed(db.pool()).await;
     let server = TestServer::start(common::BIN, &db);
@@ -551,10 +551,15 @@ async fn no_site_url_means_no_image_tags() {
     let cookie = login(base);
     activate_docs_theme(base, &cookie);
     set_options(base, &cookie, &json!({"social_cards": true}));
+    // A site with no URL set takes the request's own origin, as the
+    // canonical link and an entry's own image already do, so the card
+    // is still an absolute URL that serves.
     let html = page(base, "/docs/guides/install");
+    let image = meta(&html, "og:image").expect("og:image from the request origin");
     assert!(
-        meta(&html, "og:image").is_none(),
-        "no og:image without a site URL"
+        image.starts_with(&format!("{base}/_card/")),
+        "{image} is not on {base}"
     );
-    assert!(meta(&html, "og:image:width").is_none());
+    assert_eq!(meta(&html, "og:image:width").as_deref(), Some("1200"));
+    assert_eq!(get(base, &card_path(&html)).status(), 200);
 }
