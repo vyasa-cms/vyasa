@@ -11,8 +11,6 @@ follows [semantic versioning](https://semver.org) as described in
 
 ### Fixed
 - Docs plugin 0.1.12: the sidebar, pager and breadcrumbs no longer scan the whole page tree for every node (a quadratic walk). On a site with several docs versions (about 3,000 pages) a section render ran past the plugin's time limit and the repeated traps disabled the plugin. The tree is indexed once per render.
-
-### Fixed
 - A plugin's settings form shows what the plugin declares now, not what it declared when it loaded: the docs plugin's "Last sync" line was frozen at server start. `GET /api/v1/plugins/{id}/form` asks the plugin again; the admin uses it on open, after a save and every minute. Re-reading the form never counts against the plugin: a time or fuel trap there drops the cached instance, keeps the form from load and records no strike.
 
 ### Added
