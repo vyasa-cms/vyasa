@@ -231,6 +231,8 @@ struct Inner {
 #[derive(Default)]
 pub struct PluginSurface {
     inner: tokio::sync::RwLock<Inner>,
+    /// Last good section HTML, shared by the per-render section registries.
+    last_good: std::sync::Arc<crate::plugin_sections::LastGood>,
 }
 
 impl PluginSurface {
@@ -238,6 +240,11 @@ impl PluginSurface {
     #[must_use]
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// The store a failed section render falls back to.
+    pub fn last_good(&self) -> std::sync::Arc<crate::plugin_sections::LastGood> {
+        std::sync::Arc::clone(&self.last_good)
     }
 
     /// Routes, for matching an incoming request.
@@ -467,6 +474,7 @@ impl PluginSurface {
         // behind would shadow the refreshed plugin's own (a new version's
         // `context`, say) until a restart, and outlive a disable.
         inner.sections.retain(|_, s| s.plugin_id != plugin_id);
+        self.last_good.forget_plugin(plugin_id);
         if !keep_tasks {
             inner.tasks.retain(|t| t.plugin_id != plugin_id);
         }
@@ -1769,6 +1777,7 @@ mod tests {
         .expect("collected");
         let surface = PluginSurface {
             inner: tokio::sync::RwLock::new(inner),
+            last_good: Default::default(),
         };
         futures::executor::block_on(async {
             let kept = surface.forget_for_refresh(7).await;
@@ -1862,6 +1871,7 @@ mod tests {
 
         let surface = PluginSurface {
             inner: tokio::sync::RwLock::new(inner),
+            last_good: Default::default(),
         };
         futures::executor::block_on(async {
             surface
@@ -1900,6 +1910,7 @@ mod tests {
         );
         let surface = PluginSurface {
             inner: tokio::sync::RwLock::new(inner),
+            last_good: Default::default(),
         };
         futures::executor::block_on(async {
             assert!(
@@ -1939,6 +1950,7 @@ mod tests {
         collect_admin(&mut inner, 1, "p", &declared);
         let surface = PluginSurface {
             inner: tokio::sync::RwLock::new(inner),
+            last_good: Default::default(),
         };
         futures::executor::block_on(async {
             // Disabled while it was asked: the form stays gone.
@@ -1992,6 +2004,7 @@ mod tests {
 
         let surface = PluginSurface {
             inner: tokio::sync::RwLock::new(inner),
+            last_good: Default::default(),
         };
         futures::executor::block_on(async {
             let hash = head

@@ -95,13 +95,72 @@ pub struct PluginSection {
     host: Arc<vyasa_plugins::host::WasmtimeHost>,
     broker: Arc<vyasa_plugins::broker::Broker>,
     pool: sqlx::PgPool,
-    /// Last good HTML per (post, settings): a render that fails (a trap, a
-    /// timeout) serves this instead of an empty hole.
-    last_good: std::sync::Mutex<std::collections::HashMap<String, String>>,
+    /// Shared with the plugin surface: the registry is rebuilt on every
+    /// render, so the last good HTML cannot live on the adapter.
+    last_good: Arc<LastGood>,
 }
 
-/// Entries kept per section; the map is cleared past this rather than evicted.
-const LAST_GOOD_CAP: usize = 512;
+/// Bytes of last-good HTML kept across all sections; past this the store is
+/// cleared rather than evicted.
+const LAST_GOOD_BYTES: usize = 8 * 1024 * 1024;
+
+/// Key of one cached render: plugin, kind, post, editor flag, settings.
+type LastGoodKey = (i64, String, String, bool, String);
+
+/// Last good HTML per (plugin, kind, post, editor, settings): a render that
+/// fails (a trap, a timeout) serves this instead of an empty hole. Studio
+/// previews (`editor`) are keyed apart so a public request never gets one.
+#[derive(Default)]
+pub struct LastGood {
+    inner: std::sync::Mutex<LastGoodInner>,
+}
+
+#[derive(Default)]
+struct LastGoodInner {
+    map: std::collections::HashMap<LastGoodKey, String>,
+    bytes: usize,
+}
+
+impl LastGood {
+    fn get(&self, key: &LastGoodKey) -> Option<String> {
+        self.inner.lock().ok()?.map.get(key).cloned()
+    }
+
+    fn put(&self, key: LastGoodKey, html: &str) {
+        self.put_capped(key, html, LAST_GOOD_BYTES);
+    }
+
+    fn put_capped(&self, key: LastGoodKey, html: &str, cap: usize) {
+        if html.len() > cap {
+            return;
+        }
+        let Ok(mut g) = self.inner.lock() else { return };
+        if let Some(old) = g.map.remove(&key) {
+            g.bytes -= old.len();
+        }
+        if g.bytes + html.len() > cap {
+            g.map.clear();
+            g.bytes = 0;
+        }
+        g.bytes += html.len();
+        g.map.insert(key, html.to_owned());
+    }
+
+    /// Drops every entry of one plugin (its sections were dropped).
+    pub fn forget_plugin(&self, plugin_id: i64) {
+        if let Ok(mut g) = self.inner.lock() {
+            let mut freed = 0;
+            g.map.retain(|k, v| {
+                let keep = k.0 != plugin_id;
+                if !keep {
+                    freed += v.len();
+                }
+                keep
+            });
+            g.bytes -= freed;
+        }
+    }
+}
 
 impl PluginSection {
     /// Builds the adapter, or `None` when the intern table is full — in
@@ -126,7 +185,7 @@ impl PluginSection {
             host: Arc::clone(&state.plugin_host),
             broker: Arc::clone(&state.broker),
             pool: state.pool.clone(),
-            last_good: std::sync::Mutex::new(std::collections::HashMap::new()),
+            last_good: state.plugin_surface.last_good(),
         })
     }
 }
@@ -226,10 +285,12 @@ impl DynamicBlock for PluginSection {
                     payload["context"] = context;
                 }
             }
-            let cache_key = format!(
-                "{}|{}",
+            let cache_key: LastGoodKey = (
+                self.decl.plugin_id,
+                self.decl.kind.clone(),
                 ctx.post_id.map(|p| p.to_string()).unwrap_or_default(),
-                payload["settings"]
+                ctx.editor,
+                payload["settings"].to_string(),
             );
             let payload = payload.to_string();
 
@@ -250,11 +311,7 @@ impl DynamicBlock for PluginSection {
             let html = match reply {
                 V2Outcome::Ok(html) if html != payload && !html.trim().is_empty() => html,
                 V2Outcome::Failed(_) => {
-                    let stale = self
-                        .last_good
-                        .lock()
-                        .ok()
-                        .and_then(|m| m.get(&cache_key).cloned());
+                    let stale = self.last_good.get(&cache_key);
                     if let Some(html) = stale {
                         return Ok(BlockPayload::Html(format!(
                             "<div class=\"vy-plugin-section\" data-plugin=\"{}\">{}</div>",
@@ -274,12 +331,7 @@ impl DynamicBlock for PluginSection {
                     )));
                 }
             };
-            if let Ok(mut m) = self.last_good.lock() {
-                if m.len() >= LAST_GOOD_CAP {
-                    m.clear();
-                }
-                m.insert(cache_key, html.clone());
-            }
+            self.last_good.put(cache_key, &html);
             // Same widened allowlist plugin blocks pass through, wrapped so
             // the theme's custom properties cascade into the markup. The
             // wrapper attribute is `data-plugin`, not `data-section` —
@@ -365,6 +417,47 @@ pub async fn registry_with_plugins(state: &AppState) -> DynBlockRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn key(plugin: i64, editor: bool) -> LastGoodKey {
+        (plugin, "docs/sidebar".into(), "7".into(), editor, "{}".into())
+    }
+
+    #[test]
+    fn an_empty_store_has_nothing_to_serve() {
+        assert!(LastGood::default().get(&key(1, false)).is_none());
+    }
+
+    #[test]
+    fn a_failed_render_reads_back_the_last_good_one_from_the_shared_store() {
+        // The registry is rebuilt per render; the store outlives it.
+        let shared = Arc::new(LastGood::default());
+        shared.put(key(1, false), "<nav>ok</nav>");
+        let again = Arc::clone(&shared);
+        assert_eq!(again.get(&key(1, false)).as_deref(), Some("<nav>ok</nav>"));
+    }
+
+    #[test]
+    fn a_studio_preview_is_never_served_to_the_public() {
+        let s = LastGood::default();
+        s.put(key(1, true), "<nav>draft</nav>");
+        assert!(s.get(&key(1, false)).is_none());
+        assert!(s.get(&key(1, true)).is_some());
+    }
+
+    #[test]
+    fn the_store_is_bounded_by_bytes_and_forgets_a_plugin() {
+        let s = LastGood::default();
+        s.put_capped(key(1, false), "aaaa", 10);
+        s.put_capped(key(2, false), "bbbbbb", 10);
+        s.put_capped(key(3, false), "cccccc", 10);
+        assert!(s.get(&key(1, false)).is_none(), "cleared past the cap");
+        assert!(s.get(&key(3, false)).is_some());
+        s.put_capped(key(9, false), &"x".repeat(11), 10);
+        assert!(s.get(&key(9, false)).is_none(), "one entry over the cap is not kept");
+        s.forget_plugin(3);
+        assert!(s.get(&key(3, false)).is_none());
+        assert_eq!(s.inner.lock().unwrap().bytes, 0);
+    }
 
     fn node(id: i64, parent: Option<i64>, title: &str) -> TreeNodeData {
         TreeNodeData {

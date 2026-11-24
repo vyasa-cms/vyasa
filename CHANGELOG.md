@@ -8,6 +8,7 @@ follows [semantic versioning](https://semver.org) as described in
 ## [Unreleased]
 
 ### Fixed
+- A plugin section whose render fails (a trap or a timeout) serves its last good HTML for that post and settings instead of an empty hole. The copy is kept per plugin, kind, post, studio-preview flag and settings, bounded to 8 MiB, and dropped when the plugin's sections are.
 - Docs plugin 0.1.12: the sidebar, pager and breadcrumbs no longer scan the whole page tree for every node (a quadratic walk). On a site with several docs versions (about 3,000 pages) a section render ran past the plugin's time limit and the repeated traps disabled the plugin. The tree is indexed once per render.
 
 ### Fixed
