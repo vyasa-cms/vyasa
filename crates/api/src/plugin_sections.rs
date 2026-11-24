@@ -419,7 +419,13 @@ mod tests {
     use super::*;
 
     fn key(plugin: i64, editor: bool) -> LastGoodKey {
-        (plugin, "docs/sidebar".into(), "7".into(), editor, "{}".into())
+        (
+            plugin,
+            "docs/sidebar".into(),
+            "7".into(),
+            editor,
+            "{}".into(),
+        )
     }
 
     #[test]
@@ -453,7 +459,10 @@ mod tests {
         assert!(s.get(&key(1, false)).is_none(), "cleared past the cap");
         assert!(s.get(&key(3, false)).is_some());
         s.put_capped(key(9, false), &"x".repeat(11), 10);
-        assert!(s.get(&key(9, false)).is_none(), "one entry over the cap is not kept");
+        assert!(
+            s.get(&key(9, false)).is_none(),
+            "one entry over the cap is not kept"
+        );
         s.forget_plugin(3);
         assert!(s.get(&key(3, false)).is_none());
         assert_eq!(s.inner.lock().unwrap().bytes, 0);
