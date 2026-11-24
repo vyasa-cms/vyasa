@@ -294,6 +294,30 @@ fn pick_canonical(
         .or_else(|| make_absolute(own_path))
 }
 
+/// Whether the head would name another address than the entry's own as its
+/// canonical, by the rule `pick_canonical` applies: an absolute `seo_canonical`
+/// is used only when it starts with `http://` or `https://`, a
+/// `seo_canonical_path` only when it starts with `/` and not `//`, and either
+/// one that equals the entry's own address is a self canonical. The sitemap
+/// uses this so it never disagrees with the head.
+pub(crate) fn canonical_is_elsewhere(meta: &serde_json::Value, base: &str, own_path: &str) -> bool {
+    let get = |k: &str| {
+        meta.get(k)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+    };
+    let same = |a: &str, b: &str| a.trim_end_matches('/') == b.trim_end_matches('/');
+    if let Some(abs) =
+        get("seo_canonical").filter(|c| c.starts_with("https://") || c.starts_with("http://"))
+    {
+        return !same(abs, &format!("{base}{own_path}"));
+    }
+    get("seo_canonical_path")
+        .filter(|p| p.starts_with('/') && !p.starts_with("//"))
+        .is_some_and(|p| !same(p, own_path))
+}
+
 impl Head {
     /// Attaches the entry's ancestors and itself, for `BreadcrumbList`.
     #[must_use]
