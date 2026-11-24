@@ -99,6 +99,10 @@ pub struct ThemeAssets {
     /// Script source, or empty for none.
     #[serde(default)]
     pub js: String,
+    /// The manifest's `[social_card]` section, kept as stored so a studio
+    /// edit of the stylesheet or script carries the card layout over.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub social_card: Option<Value>,
 }
 
 /// Largest stylesheet a theme may ship.
@@ -110,7 +114,7 @@ impl ThemeAssets {
     /// Whether either half is set.
     #[must_use]
     pub fn is_empty(&self) -> bool {
-        self.css.trim().is_empty() && self.js.trim().is_empty()
+        self.css.trim().is_empty() && self.js.trim().is_empty() && self.social_card.is_none()
     }
 
     /// Checks the sizes.
@@ -398,6 +402,7 @@ pub fn apply_with(
                 let next_assets = ThemeAssets {
                     css: css.clone(),
                     js: js.clone(),
+                    social_card: next.assets.social_card.clone(),
                 };
                 match next_assets.validate() {
                     Ok(()) => {
@@ -953,6 +958,7 @@ mod asset_tests {
         let assets = ThemeAssets {
             css: String::from("body{}"),
             js: String::from("void 0"),
+            social_card: Some(serde_json::json!({"post_types": ["doc"]})),
         };
         let stored = serde_json::json!(assets);
         let back = DraftState::from_json_with_assets(

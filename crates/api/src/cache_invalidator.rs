@@ -20,11 +20,12 @@ use crate::render_cache::RenderCache;
 use crate::state::AppState;
 
 /// Subscribes to domain events and purges affected pages for the life of the
-/// process.
+/// process. Runs with or without the render cache: the edge and the social
+/// card URLs need purging either way, and starting it always means turning
+/// cards on needs no restart.
 pub fn spawn(state: &AppState) {
-    let Some(cache) = state.render_cache.clone() else {
-        return;
-    };
+    let cache = state.render_cache.clone();
+    let cards = std::sync::Arc::clone(&state.social_cards);
     let themes = state.themes.clone();
     let purger = std::sync::Arc::clone(&state.cdn);
     let posts = state.posts.clone();
@@ -41,7 +42,9 @@ pub fn spawn(state: &AppState) {
                 // everything costs a re-render; guessing costs correctness.
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(n)) => {
                     tracing::warn!("cache invalidator lagged {n} events; purging everything");
-                    cache.invalidate_theme();
+                    if let Some(cache) = &cache {
+                        cache.invalidate_theme();
+                    }
                     purger.purge_all().await;
                     continue;
                 }
@@ -52,15 +55,17 @@ pub fn spawn(state: &AppState) {
                 Some(id) => linked_entries(&repo, id).await,
                 None => Some(Vec::new()),
             };
-            purge(
-                &cache,
-                &themes,
-                &posts,
-                &event,
-                queries.as_ref(),
-                linked.as_deref(),
-            )
-            .await;
+            if let Some(cache) = &cache {
+                purge(
+                    cache,
+                    &themes,
+                    &posts,
+                    &event,
+                    queries.as_ref(),
+                    linked.as_deref(),
+                )
+                .await;
+            }
             // The edge holds its own copy, so the same event has to reach
             // it — otherwise turning on `edge_cache_seconds` would mean a
             // correction sits behind a stale page until the TTL expires.
@@ -75,6 +80,7 @@ pub fn spawn(state: &AppState) {
             purge_edge(
                 &purger,
                 &posts,
+                &cards,
                 &event,
                 base_url.as_deref(),
                 &pattern,
@@ -184,6 +190,7 @@ async fn purge(
 async fn purge_edge(
     purger: &Arc<dyn Purger>,
     posts: &vyasa_core::post::PostService,
+    cards: &crate::social_card::SocialCards,
     event: &events::Event,
     base_url: Option<&str>,
     pattern: &vyasa_core::options::PermalinkPattern,
@@ -209,13 +216,26 @@ async fn purge_edge(
         purger.purge_all().await;
         return;
     };
+    purge_entry_edge(purger, cards, event, &post, base_url, pattern, linked).await;
+}
+
+/// [`purge_edge`] for an event about `post`, once its row is loaded.
+async fn purge_entry_edge(
+    purger: &Arc<dyn Purger>,
+    cards: &crate::social_card::SocialCards,
+    event: &events::Event,
+    post: &vyasa_db::content_models::PostRow,
+    base_url: Option<&str>,
+    pattern: &vyasa_core::options::PermalinkPattern,
+    linked: &[vyasa_db::content_models::PostRow],
+) {
     // The listings an entry appears on. Deriving the exact set would mean
     // resolving every archive it belongs to; the front page and the feeds
     // cover what changes in practice, and a stale archive page corrects
     // itself at the next event.
     // Plus the pages that link to it as a neighbour or a related entry.
-    let paths: Vec<String> = [
-        pattern.path_for(&post),
+    let mut paths: Vec<String> = [
+        pattern.path_for(post),
         "/".to_owned(),
         "/feed.xml".to_owned(),
         "/atom.xml".to_owned(),
@@ -223,6 +243,11 @@ async fn purge_edge(
     .into_iter()
     .chain(linked.iter().map(|row| pattern.path_for(row)))
     .collect();
+    // The entry's served social cards (all of its type's, for a tree: a
+    // child's label is its top ancestor's title). A comment changes no card.
+    if post_id_of(event).is_some() {
+        paths.extend(cards.take_urls(post.id, post.post_type));
+    }
     // Cloudflare's purge takes absolute URLs and answers a path with a
     // 4xx. These were sent as paths, so every targeted purge was refused —
     // silently, since a refusal is only logged — and a correction sat
@@ -265,6 +290,113 @@ mod edge_url_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A `Purger` that records what it was asked to drop.
+    #[derive(Default)]
+    struct Recording {
+        urls: std::sync::Mutex<Vec<String>>,
+        all: std::sync::atomic::AtomicBool,
+    }
+
+    impl Purger for Recording {
+        fn purge<'a>(
+            &'a self,
+            urls: Vec<String>,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            self.urls.lock().unwrap().extend(urls);
+            Box::pin(async {})
+        }
+
+        fn purge_all<'a>(
+            &'a self,
+        ) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send + 'a>> {
+            self.all.store(true, std::sync::atomic::Ordering::SeqCst);
+            Box::pin(async {})
+        }
+    }
+
+    fn row(id: i64) -> vyasa_db::content_models::PostRow {
+        let now = chrono::Utc::now();
+        vyasa_db::content_models::PostRow {
+            id,
+            sticky: false,
+            lang: String::new(),
+            translation_group: None,
+            post_type: vyasa_db::content_models::PostType::Post,
+            status: vyasa_db::content_models::PostStatus::Published,
+            slug: "hello".to_owned(),
+            title: "Hello".to_owned(),
+            content: serde_json::json!([]),
+            layout: None,
+            excerpt: None,
+            author_id: 1,
+            parent_id: None,
+            meta: serde_json::json!({}),
+            published_at: Some(now),
+            scheduled_for: None,
+            password_hash: None,
+            created_at: now,
+            updated_at: now,
+            path: None,
+            position: 0,
+        }
+    }
+
+    /// Runs `purge_entry_edge` for `event` on entry 7, which has a served
+    /// card; returns the purged URLs and the cards it leaves.
+    async fn edge_purge_of(
+        event: &events::Event,
+    ) -> (Vec<String>, crate::social_card::SocialCards) {
+        let recording = Arc::new(Recording::default());
+        let purger: Arc<dyn Purger> = recording.clone();
+        let cards = crate::social_card::SocialCards::new(1 << 20);
+        cards.record_served_for_test(7, "post", "0123456789abcdef");
+        let pattern = vyasa_core::options::PermalinkPattern(
+            vyasa_core::options::PermalinkPattern::DEFAULT.into(),
+        );
+        purge_entry_edge(
+            &purger,
+            &cards,
+            event,
+            &row(7),
+            Some("https://site/"),
+            &pattern,
+            &[],
+        )
+        .await;
+        assert!(!recording.all.load(std::sync::atomic::Ordering::SeqCst));
+        let urls = recording.urls.lock().unwrap().clone();
+        (urls, cards)
+    }
+
+    #[tokio::test]
+    async fn an_entry_change_purges_its_card_url_at_the_edge() {
+        let (urls, cards) =
+            edge_purge_of(&events::Event::Updated(events::PostUpdated { post_id: 7 })).await;
+        assert!(
+            urls.contains(&"https://site/_card/7-0123456789abcdef.png".to_owned()),
+            "{urls:?}"
+        );
+        assert!(cards
+            .take_urls(7, vyasa_db::content_models::PostType::Post)
+            .is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_comment_leaves_the_card_alone() {
+        let comment = events::Event::CommentAdded(events::CommentAdded {
+            comment_id: 1,
+            post_id: 7,
+        });
+        let (urls, cards) = edge_purge_of(&comment).await;
+        assert!(!urls.iter().any(|u| u.contains("/_card/")), "{urls:?}");
+        assert_eq!(
+            cards
+                .take_urls(7, vyasa_db::content_models::PostType::Post)
+                .len(),
+            1
+        );
+    }
 
     fn published(id: i64) -> events::Event {
         events::Event::Published(events::PostPublished {
