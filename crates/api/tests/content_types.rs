@@ -714,6 +714,10 @@ fn theme_package() -> Vec<u8> {
 <span class="gone">G=[{{ entry.fields.gone }}]</span>
 {{ sections | safe }}</body></html>"#;
     let archive = r"<html><body><ul>{% for p in posts %}<li>{{ p.title }}|{{ p.fields.price }}|{{ p.fields.gone }}</li>{% endfor %}</ul></body></html>";
+    // Cards with their picture, pin and machine date, and the pinned list.
+    let cards = r"<html><body>{% for p in posts %}<li>{{ p.title }}|{% if p.image %}{{ p.image.url | safe }}|{{ p.image.width }}x{{ p.image.height }}|{{ p.image.alt }}{% else %}none{% endif %}|{{ p.sticky }}|{{ p.iso_date }}</li><t>{{ p.title }}:{% for t in p.terms %}[{{ t.name }}]{% endfor %}</t>{% endfor %}{% for f in featured %}<b>F={{ f.title }}</b>{% endfor %}{% for c in categories %}<c>{{ c.name }}={{ c.count }}@{{ c.url | safe }}</c>{% endfor %}</body></html>";
+    // An entry's neighbours and related entries.
+    let reading = r"<html><body>N={% if newer %}{{ newer.title }}{% endif %}|O={% if older %}{{ older.title }}{% endif %}|R={% for r in related %}[{{ r.title }}]{% endfor %}|</body></html>";
     let mut buf = std::io::Cursor::new(Vec::new());
     {
         let mut w = zip::ZipWriter::new(&mut buf);
@@ -723,6 +727,8 @@ fn theme_package() -> Vec<u8> {
             ("layout.json", layout.as_bytes()),
             ("templates/single-product.tera", single.as_bytes()),
             ("templates/archive-product.tera", archive.as_bytes()),
+            ("templates/archive-gizmo.tera", cards.as_bytes()),
+            ("templates/single-gizmo.tera", reading.as_bytes()),
         ] {
             w.start_file(name, zip::write::SimpleFileOptions::default())
                 .unwrap();
@@ -2494,4 +2500,158 @@ async fn every_entry_response_serves_only_the_fields_the_type_defines() {
     );
     assert_eq!(status, 200, "{body}");
     check("revision restore", &body);
+}
+
+#[tokio::test]
+async fn an_archive_card_carries_its_picture_and_the_pinned_entries_are_featured() {
+    let db = TestDb::new().await;
+    let (admin, _editor) = admin_and_editor(db.pool()).await;
+    // 1200x630 with a medium rendition: the card gets the rendition's size.
+    sqlx::query(
+        "INSERT INTO media (id, owner_id, file_name, mime, byte_size, path, alt, width, height, derivatives)
+         VALUES (99003, $1, 'card.png', 'image/png', 10, 'x/card.png', 'A card', 1200, 630,
+                 '{\"medium\": {\"path\": \"x/medium_card.png\", \"width\": 768}}')",
+    )
+    .bind(admin.id)
+    .execute(db.pool())
+    .await
+    .expect("media");
+    // A document is not a picture.
+    sqlx::query(
+        "INSERT INTO media (id, owner_id, file_name, mime, byte_size, path)
+         VALUES (99004, $1, 'notes.pdf', 'application/pdf', 10, 'x/notes.pdf')",
+    )
+    .bind(admin.id)
+    .execute(db.pool())
+    .await
+    .expect("pdf");
+    sqlx::query("INSERT INTO options (key, value) VALUES ('posts_per_page', '2')")
+        .execute(db.pool())
+        .await
+        .expect("per page");
+    let server = TestServer::start(common::BIN, &db);
+    let base = server.base();
+    let a = login(base, &admin);
+    install_theme(base, &a);
+    create_type(base, &a, "gizmo", "Gizmo", "Gizmos");
+    // Oldest first, so the newest-first listing is the reverse.
+    let mut ids = Vec::new();
+    for (slug, sticky, media) in [
+        ("old-pinned", true, Some("99003")),
+        ("plain", false, Some("99004")),
+        ("unknown-media", false, Some("123456")),
+        ("new-pinned", true, None),
+    ] {
+        let mut body = json!({"type": "gizmo", "title": slug, "slug": slug, "content": doc("g"),
+                              "status": "published", "sticky": sticky});
+        if let Some(id) = media {
+            body["meta"] = json!({"featured_media_id": id});
+        }
+        ids.push(publish(base, &a, body)["id"].as_i64().unwrap());
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    // Two categories on published entries, one only on a draft (never listed).
+    let draft = publish(
+        base,
+        &a,
+        json!({"type": "gizmo", "title": "draft", "slug": "draft", "content": doc("d")}),
+    )["id"]
+        .as_i64()
+        .unwrap();
+    for (id, name) in [
+        (99_501_i64, "Zeta"),
+        (99_502, "Alpha"),
+        (99_503, "Drafts only"),
+    ] {
+        sqlx::query("INSERT INTO terms (id, taxonomy, name, slug) VALUES ($1, 'category', $2, lower(replace($2, ' ', '-')))")
+            .bind(id)
+            .bind(name)
+            .execute(db.pool())
+            .await
+            .expect("term");
+    }
+    for (post, term) in [
+        (ids[0], 99_501_i64),
+        (ids[0], 99_502),
+        (ids[3], 99_502),
+        (draft, 99_503),
+    ] {
+        sqlx::query("INSERT INTO term_relationships (post_id, term_id) VALUES ($1, $2)")
+            .bind(post)
+            .bind(term)
+            .execute(db.pool())
+            .await
+            .expect("relationship");
+    }
+
+    let (status, first) = get_public(base, "/gizmo");
+    assert_eq!(status, 200, "{first}");
+    // The listing keeps its plain order; pins are not moved up.
+    assert!(first.contains("<li>new-pinned|none|true|"), "{first}");
+    assert!(first.contains("<li>unknown-media|none|false|"), "{first}");
+    assert!(!first.contains("<li>old-pinned"), "{first}");
+    // The featured list: pinned entries only, newest first, from every page.
+    let new_at = first.find("<b>F=new-pinned</b>").expect(&first);
+    let old_at = first.find("<b>F=old-pinned</b>").expect(&first);
+    assert!(new_at < old_at, "{first}");
+    assert!(!first.contains("F=plain"), "{first}");
+    // An RFC 3339 date for <time datetime>.
+    let iso = first.split("<li>new-pinned|none|true|").nth(1).unwrap();
+    assert!(iso.starts_with("20") && iso[..20].ends_with('Z'), "{first}");
+
+    // Each card's terms, by name; the category bar lists published ones only.
+    assert!(first.contains("<t>new-pinned:[Alpha]</t>"), "{first}");
+    assert!(first.contains("<t>unknown-media:</t>"), "{first}");
+    assert!(
+        first.contains("<c>Alpha=2@/category/alpha</c><c>Zeta=1@/category/zeta</c>"),
+        "{first}"
+    );
+    assert!(!first.contains("Drafts only"), "{first}");
+
+    let (status, second) = get_public(base, "/gizmo?page=2");
+    assert_eq!(status, 200, "{second}");
+    assert!(
+        second
+            .contains("<li>old-pinned|/api/v1/media/99003/raw?variant=medium|768x403|A card|true|"),
+        "{second}"
+    );
+    // A document as featured media gives no picture.
+    assert!(second.contains("<li>plain|none|false|"), "{second}");
+    // Later pages carry no featured list.
+    assert!(!second.contains("<b>F="), "{second}");
+    assert!(
+        second.contains("<t>old-pinned:[Alpha][Zeta]</t>"),
+        "{second}"
+    );
+
+    // An entry links to its published neighbours of the type (a later
+    // draft is not one) and to the published entries sharing a term.
+    for (slug, want) in [
+        ("old-pinned", "N=plain|O=|R=[new-pinned]|"),
+        ("plain", "N=unknown-media|O=old-pinned|R=|"),
+        ("new-pinned", "N=|O=unknown-media|R=[old-pinned]|"),
+    ] {
+        let (status, page) = get_public(base, &format!("/gizmo/{slug}"));
+        assert_eq!(status, 200, "{page}");
+        assert!(page.contains(want), "{slug}: {page}");
+    }
+    // Publishing the draft makes it the newest entry: the page that was
+    // newest, cached above, is dropped and now links to it.
+    let (status, body) = call(
+        "PUT",
+        base,
+        &a,
+        &format!("/api/v1/posts/{draft}"),
+        Some(json!({"status": "published"})),
+    );
+    assert_eq!(status, 200, "{body}");
+    let mut page = String::new();
+    for _ in 0..50 {
+        page = get_public(base, "/gizmo/new-pinned").1;
+        if page.contains("N=draft|") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    assert!(page.contains("N=draft|O=unknown-media|"), "{page}");
 }

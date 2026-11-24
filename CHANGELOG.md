@@ -12,6 +12,8 @@ follows [semantic versioning](https://semver.org) as described in
 
 ### Added
 - The plugin detail view shows the plugin's status and its scheduled tasks (interval, last run, last error), and says that a turned-off plugin's settings come back when it is on.
+- Archive templates can draw blog cards: each entry in `posts` carries `image` (the featured media's URL, width, height and alt, or none), `sticky`, `iso_date` and its `terms`; `featured` lists the pinned entries and `categories` lists the categories with an entry count and archive URL.
+- Entry pages of flat post types get `newer`, `older` (the neighbouring published entries of the same type and language) and `related` (up to three entries sharing the most terms, newest first). Publishing or changing an entry drops the cached pages of its neighbours and related entries only, not every page.
 
 ## [0.4.3] - 2026-11-22
 

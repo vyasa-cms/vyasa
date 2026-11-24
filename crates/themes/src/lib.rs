@@ -39,7 +39,8 @@ pub use layout::{
     Credit, Layout, MapSettings, Screen, Section, TemplateType, STATIC_REGIONS,
 };
 pub use render::{
-    render_page, shared_css, PageContext, PostCard, RenderRequest, SiteMeta, TermLink,
+    render_page, shared_css, CardImage, PageContext, PostCard, RenderRequest, SiteMeta, TermCount,
+    TermLink,
 };
 pub use renderer::blocks::RESOLVED_ATTR as PLUGIN_BLOCK_RESOLVED_ATTR;
 pub use renderer::embed::{resolve_embed as resolve_embed_url, EmbedOutcome};

@@ -124,6 +124,7 @@ impl QueryRoot {
             offset: u32::try_from(offset)
                 .map_err(|_| async_graphql::Error::new("cursor too large"))?,
             sticky_first: false,
+            sticky: None,
             readable_types: crate::policy::readable_custom_types(
                 &gql.state,
                 gql.principal.as_ref(),
