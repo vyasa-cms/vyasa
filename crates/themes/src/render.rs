@@ -477,6 +477,12 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
         "newer": page.newer.as_ref().map(card_json),
         "older": page.older.as_ref().map(card_json),
         "related": page.related.iter().map(card_json).collect::<Vec<_>>(),
+        // The entry's headings (`level`, `anchor`, `text`), numbered as the
+        // renderer numbers them, so a theme can draw an "on this page" list
+        // outside the content. Empty on pages that render no entry.
+        "toc": content_blocks.map(crate::toc_of).unwrap_or_default().iter().map(|t| serde_json::json!({
+            "level": t.level, "anchor": t.anchor, "text": t.text,
+        })).collect::<Vec<_>>(),
         "entry": page.entry,
         "pagination": {
             "page": page.pagination_page,
