@@ -85,7 +85,8 @@ pub async fn redirect_on_not_found(
         }
     }
     let response = next.run(request).await;
-    if !is_get || response.status() != StatusCode::NOT_FOUND {
+    // Card addresses are never renamed, and a card 404 runs no queries.
+    if !is_get || response.status() != StatusCode::NOT_FOUND || path.starts_with("/_card/") {
         return response;
     }
     let pattern = crate::permalinks::pattern(&state).await;

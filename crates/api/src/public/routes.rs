@@ -36,6 +36,20 @@ pub struct ThemeBundle {
     /// theme overrides a template that prints `base_css` itself: such a
     /// template has no `<link>` for the file, so the rules stay inline.
     shared_css: Option<(String, String)>,
+    /// The theme's social card layout with its files loaded: `None` when
+    /// the theme declares none, `Some(Err)` with the reason when the
+    /// declared one cannot be used (cards stay off, pages still render).
+    card: Option<Result<std::sync::Arc<CardSource>, String>>,
+}
+
+/// A loaded card layout and the theme identity its keys carry.
+pub struct CardSource {
+    /// The layout, font and background.
+    pub theme: vyasa_core::social_card::CardTheme,
+    /// The active theme's name.
+    pub theme_name: String,
+    /// The active theme's version.
+    pub theme_version: i64,
 }
 
 type R = Response;
@@ -78,6 +92,7 @@ fn bundle_from_docs(
         asset_head: crate::theme_assets::head_tags(assets),
         version,
         engine,
+        card: None,
     })
 }
 
@@ -116,24 +131,30 @@ impl BundleCache {
 }
 
 async fn load_bundle(state: &AppState) -> Result<std::sync::Arc<ThemeBundle>, R> {
+    match active_bundle(state).await? {
+        Some(bundle) => Ok(bundle),
+        None => Err((StatusCode::SERVICE_UNAVAILABLE, "no theme activated").into_response()),
+    }
+}
+
+/// The active theme's bundle, `None` when no theme is active.
+async fn active_bundle(state: &AppState) -> Result<Option<std::sync::Arc<ThemeBundle>>, R> {
     let identity = match state.themes.active_identity().await {
         Ok(a) => a,
         Err(e) => return Err(internal(e)),
     };
     let Some((name, version)) = identity else {
-        return Err((StatusCode::SERVICE_UNAVAILABLE, "no theme activated").into_response());
+        return Ok(None);
     };
     let namespace = crate::render_cache::theme_namespace(&name, version);
     if let Some(bundle) = state.theme_bundle.get(&namespace) {
-        return Ok(bundle);
+        return Ok(Some(bundle));
     }
     // Two requests arriving on a fresh theme may both build; both results
     // are identical and the second simply replaces the first.
     let active = match state.themes.get_active().await {
         Ok(Some(a)) => a,
-        Ok(None) => {
-            return Err((StatusCode::SERVICE_UNAVAILABLE, "no theme activated").into_response())
-        }
+        Ok(None) => return Ok(None),
         Err(e) => return Err(internal(e)),
     };
     let mut bundle = bundle_from_docs(
@@ -162,9 +183,62 @@ async fn load_bundle(state: &AppState) -> Result<std::sync::Arc<ThemeBundle>, R>
             vyasa_themes::package::MANIFEST_PATH
         );
     }
+    bundle.card = load_card(state, &active).await.map_err(internal)?;
     let bundle = std::sync::Arc::new(bundle);
     state.theme_bundle.put(bundle.clone());
-    Ok(bundle)
+    Ok(Some(bundle))
+}
+
+/// The active theme's card layout from the cached bundle: `None` when no
+/// theme is active or it declares no layout.
+///
+/// # Errors
+/// A failed theme or file lookup.
+pub(crate) async fn active_card(
+    state: &AppState,
+) -> Result<Option<Result<std::sync::Arc<CardSource>, String>>, vyasa_common::AppError> {
+    match active_bundle(state).await {
+        Ok(bundle) => Ok(bundle.and_then(|b| b.card.clone())),
+        Err(_) => Err(vyasa_common::AppError::internal_msg(
+            "the active theme could not be loaded",
+        )),
+    }
+}
+
+/// The active theme's card layout with its two files, once per theme
+/// version. A layout that cannot be used is `Some(Err)`, never a failed
+/// bundle; a failed file lookup is an error, as for the manifest above.
+pub(crate) async fn load_card(
+    state: &AppState,
+    active: &vyasa_db::repo::themes::ThemeRow,
+) -> Result<Option<Result<std::sync::Arc<CardSource>, String>>, vyasa_common::AppError> {
+    let Some(section) = active
+        .assets
+        .as_ref()
+        .and_then(|a| a.get(vyasa_themes::package::SOCIAL_CARD_KEY))
+    else {
+        return Ok(None);
+    };
+    let mut files = std::collections::HashMap::new();
+    for key in ["background", "font"] {
+        if let Some(path) = section.get(key).and_then(serde_json::Value::as_str) {
+            if let Some(row) = state.themes.file(active.id, path).await? {
+                files.insert(path.to_owned(), row.bytes);
+            }
+        }
+    }
+    let loaded = vyasa_themes::package::load_social_card(section, |path| files.get(path).cloned())
+        .map(|theme| {
+            std::sync::Arc::new(CardSource {
+                theme,
+                theme_name: active.name.clone(),
+                theme_version: i64::from(active.version),
+            })
+        });
+    if let Err(e) = &loaded {
+        tracing::warn!("social cards stay off for theme {}: {e}", active.name);
+    }
+    Ok(Some(loaded))
 }
 
 fn internal(e: impl std::fmt::Display) -> R {
@@ -820,6 +894,13 @@ pub(super) async fn render_single(
             .cloned();
         let path = site.permalinks.path_for(&post);
         let breadcrumbs = breadcrumbs_for(state_ref, &site, &post, &path).await;
+        // The same decision the `/_card/` route makes, through `card_for`.
+        let card = match crate::social_card::cards_enabled(state_ref).await {
+            Some(on) => {
+                crate::social_card::card_for(&on, state_ref, &post, &breadcrumbs, &site.title).await
+            }
+            None => None,
+        };
         let notice = params
             .comment
             .as_deref()
@@ -877,6 +958,7 @@ pub(super) async fn render_single(
             head: page_meta::Head::entry(&post, &path, author)
                 .with_alternates(alternates)
                 .with_breadcrumbs(breadcrumbs)
+                .with_social_card(card)
                 .filtered(state_ref)
                 .await
                 .render(&site),
@@ -1014,7 +1096,7 @@ async fn hreflang_links(state: &AppState, site: &page_meta::SiteContext, post_id
 /// structured data. Empty for an entry at the top of its tree. An ancestor
 /// that is not live (draft, private, password) means no trail, rather than
 /// one that leaks its title or skips a level.
-async fn breadcrumbs_for(
+pub(crate) async fn breadcrumbs_for(
     state: &AppState,
     site: &page_meta::SiteContext,
     post: &PostRow,

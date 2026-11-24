@@ -2896,6 +2896,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/social-cards": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** `GET /api/v1/social-cards` — the active theme's card layout status. */
+        get: operations["social_card_status"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/terms": {
         parameters: {
             query?: never;
@@ -4739,6 +4756,11 @@ export interface components {
             name: string;
             /** @description True when a plugin needs enabling before it does anything. */
             needs_enabling: boolean;
+            /**
+             * @description Why a theme's `[social_card]` layout cannot be used (cards stay off
+             *     while it is active).
+             */
+            social_card_error?: string | null;
             /** @description Version installed. */
             version: string;
         };
@@ -5678,6 +5700,27 @@ export interface components {
             /** @description The address answers and it is this server. */
             site_url_verified: boolean;
         };
+        /** @description Whether the active theme can draw social cards, for the settings page. */
+        SocialCardStatus: {
+            /**
+             * @description The active theme declares a card layout and it loads: the
+             *     `social_cards` option takes effect.
+             */
+            available: boolean;
+            /**
+             * @description Why the declared layout cannot be used; `None` when it can, or when
+             *     the theme declares none.
+             */
+            error?: string | null;
+            /** @description The post types the layout covers. */
+            post_types: string[];
+            /**
+             * @description Covered post types the server does not know (no built-in, plugin
+             *     or administrator type has the name). A notice only: cards stay on,
+             *     but entries of these types cannot exist until one is added.
+             */
+            unknown_post_types: string[];
+        };
         /**
          * @description Where the active configuration comes from.
          * @enum {string}
@@ -5882,6 +5925,17 @@ export interface components {
              * @description The package manifest's version this row came from, when it did.
              */
             package_version?: number | null;
+            /**
+             * @description Why the theme's `[social_card]` layout cannot be used: social cards
+             *     stay off while this theme is active. Only on install and activate,
+             *     and only when the theme declares a layout that fails.
+             */
+            social_card_error?: string | null;
+            /**
+             * @description The `[social_card]` layout's post types the server does not know
+             *     (a notice: cards stay on). Only on activate.
+             */
+            social_card_unknown_post_types?: string[];
             /**
              * Format: int64
              * @description Integer version.
@@ -12136,6 +12190,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ApiErrorBody"];
+                };
+            };
+        };
+    };
+    social_card_status: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Card layout status */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SocialCardStatus"];
                 };
             };
         };
