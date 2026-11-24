@@ -7,6 +7,9 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Changed
+- The declared minimum supported Rust version is 1.97 (was 1.85, which no longer built: the plugin host's wasmtime needs 1.97); the pinned toolchain stays 1.99. CI checks that the workspace builds on 1.97.
+
 ### Fixed
 - Docs plugin 0.1.12: the sidebar, pager and breadcrumbs no longer scan the whole page tree for every node (a quadratic walk). On a site with several docs versions (about 3,000 pages) a section render ran past the plugin's time limit and the repeated traps disabled the plugin. The tree is indexed once per render.
 
