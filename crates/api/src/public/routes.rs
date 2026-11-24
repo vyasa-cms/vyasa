@@ -6,9 +6,9 @@ use axum::response::{Html, IntoResponse, Redirect, Response};
 
 use serde::Deserialize;
 
-use vyasa_db::content_models::PostRow;
+use vyasa_db::content_models::{MediaRow, PostRow};
 use vyasa_db::content_models::{PostStatus, PostType};
-use vyasa_db::repo::{PostFilter, PostsRepo};
+use vyasa_db::repo::{MediaRepo, PostFilter, PostsRepo};
 use vyasa_themes::{
     cache, keys, CachedPage, Engine, Layout, PageContext, PostCard, RenderRequest, SiteMeta,
     TemplateType, TokenSet,
@@ -330,20 +330,186 @@ async fn cards(state: &AppState, site: &page_meta::SiteContext, rows: &[PostRow]
         .iter()
         .map(|(d, meta)| resolved.render(&site.permalinks, d, meta))
         .collect();
+    let images = card_images(state, rows).await;
+    let mut terms = card_terms(state, rows).await;
     rows.iter()
         .zip(titles)
         .zip(excerpts)
         .zip(fields)
-        .map(|(((p, title), excerpt), fields)| PostCard {
-            title,
-            url: site.permalinks.path_for(p),
-            excerpt: escape_text(&excerpt),
-            snippet: String::new(),
-            author: authors.get(&p.author_id).cloned().unwrap_or_default(),
-            date: site.date(p.published_at.unwrap_or(p.created_at)),
-            fields,
+        .zip(images)
+        .map(|((((p, title), excerpt), fields), image)| {
+            let when = p.published_at.unwrap_or(p.created_at);
+            PostCard {
+                title,
+                url: site.permalinks.path_for(p),
+                excerpt: escape_text(&excerpt),
+                snippet: String::new(),
+                author: authors.get(&p.author_id).cloned().unwrap_or_default(),
+                date: site.date(when),
+                fields,
+                iso_date: when.to_rfc3339_opts(chrono::SecondsFormat::Secs, true),
+                image,
+                sticky: p.sticky,
+                terms: terms.remove(&p.id).unwrap_or_default(),
+            }
         })
         .collect()
+}
+
+/// How many related entries an entry's page shows.
+pub(crate) const RELATED_ON_ENTRY: u32 = 3;
+
+/// Whether an entry's page links to its neighbours and related entries:
+/// an entry of a flat type that has listings (posts and flat custom types).
+/// Pages, reusable blocks and hierarchical types (whose tree gives the
+/// order) do not.
+pub(crate) fn shows_reading_links(post_type: PostType) -> bool {
+    !matches!(post_type, PostType::Page | PostType::Block) && !post_type.is_hierarchical()
+}
+
+/// The newer and older neighbours and the related entries an entry's page
+/// links to, as cards. A failed lookup leaves that part out.
+async fn reading_on(
+    state: &AppState,
+    site: &page_meta::SiteContext,
+    post: &PostRow,
+) -> (Option<PostCard>, Option<PostCard>, Vec<PostCard>) {
+    if !shows_reading_links(post.post_type) {
+        return (None, None, Vec::new());
+    }
+    let repo = vyasa_db::repo::PostsRepo::new(state.pool.clone());
+    let (newer, older) = repo.neighbours(post).await.unwrap_or_default();
+    let related = repo
+        .related_by_terms(post, RELATED_ON_ENTRY)
+        .await
+        .unwrap_or_default();
+    let (has_newer, has_older) = (newer.is_some(), older.is_some());
+    let rows: Vec<PostRow> = newer.into_iter().chain(older).chain(related).collect();
+    let mut all = cards(state, site, &rows).await.into_iter();
+    let newer = if has_newer { all.next() } else { None };
+    let older = if has_older { all.next() } else { None };
+    (newer, older, all.collect())
+}
+
+/// Each row's categories and tags (by taxonomy, then name), in one query
+/// for the whole listing. A failed lookup leaves the cards without terms.
+async fn card_terms(
+    state: &AppState,
+    rows: &[PostRow],
+) -> std::collections::HashMap<i64, Vec<vyasa_themes::TermLink>> {
+    let ids: Vec<i64> = rows.iter().map(|p| p.id).collect();
+    let mut out: std::collections::HashMap<i64, Vec<vyasa_themes::TermLink>> =
+        std::collections::HashMap::new();
+    for (post_id, term) in vyasa_db::repo::TermsRepo::new(state.pool.clone())
+        .terms_for_posts(&ids)
+        .await
+        .unwrap_or_default()
+    {
+        let taxonomy = term.taxonomy.as_str();
+        out.entry(post_id)
+            .or_default()
+            .push(vyasa_themes::TermLink {
+                name: term.name,
+                url: format!("/{taxonomy}/{}", term.slug),
+                taxonomy: taxonomy.to_owned(),
+            });
+    }
+    out
+}
+
+/// The categories filing a published entry of `post_type`, for a listing's
+/// category bar. A failed lookup gives none.
+async fn category_counts(state: &AppState, post_type: &str) -> Vec<vyasa_themes::TermCount> {
+    vyasa_db::repo::TermsRepo::new(state.pool.clone())
+        .published_counts(vyasa_db::content_models::Taxonomy::Category, post_type)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|t| vyasa_themes::TermCount {
+            url: format!("/category/{}", t.term.slug),
+            name: t.term.name,
+            count: t.post_count,
+        })
+        .collect()
+}
+
+/// The media id in an entry's `meta.featured_media_id` (a decimal string,
+/// or a number from an older writer).
+fn featured_media_id(meta: &serde_json::Value) -> Option<i64> {
+    match meta.get("featured_media_id")? {
+        serde_json::Value::String(s) => s.trim().parse().ok(),
+        serde_json::Value::Number(n) => n.as_i64(),
+        _ => None,
+    }
+}
+
+/// Each row's featured image for its card, in one query for the whole
+/// listing. An id naming a trashed or missing item, or something that is
+/// not an image, gives no picture.
+async fn card_images(state: &AppState, rows: &[PostRow]) -> Vec<Option<vyasa_themes::CardImage>> {
+    let mut ids: Vec<i64> = rows
+        .iter()
+        .filter_map(|p| featured_media_id(&p.meta))
+        .collect();
+    ids.sort_unstable();
+    ids.dedup();
+    let media: std::collections::HashMap<i64, MediaRow> = MediaRepo::new(state.pool.clone())
+        .get_many_live(&ids)
+        .await
+        .unwrap_or_default()
+        .into_iter()
+        .map(|m| (m.id, m))
+        .collect();
+    rows.iter()
+        .map(|p| {
+            featured_media_id(&p.meta)
+                .and_then(|id| media.get(&id))
+                .filter(|m| m.mime.starts_with("image/"))
+                .map(card_image)
+        })
+        .collect()
+}
+
+/// A card picture: the medium rendition (768 px wide) when the upload has
+/// one, the original otherwise, with the size of what the URL serves so a
+/// template can reserve the space before it loads.
+fn card_image(m: &MediaRow) -> vyasa_themes::CardImage {
+    let width = m
+        .width
+        .and_then(|w| u32::try_from(w).ok())
+        .filter(|w| *w > 0);
+    let height = m
+        .height
+        .and_then(|h| u32::try_from(h).ok())
+        .filter(|h| *h > 0);
+    let medium = m
+        .derivatives
+        .get("medium")
+        .and_then(|d| d.get("width"))
+        .and_then(serde_json::Value::as_u64)
+        .and_then(|w| u32::try_from(w).ok())
+        .filter(|w| *w > 0);
+    let (url, width, height) = match medium {
+        Some(mw) => {
+            // The rendition keeps the original's aspect ratio.
+            let mh = width.zip(height).and_then(|(w, h)| {
+                u32::try_from((u64::from(h) * u64::from(mw) + u64::from(w) / 2) / u64::from(w)).ok()
+            });
+            (
+                format!("/api/v1/media/{}/raw?variant=medium", m.id),
+                Some(mw),
+                mh,
+            )
+        }
+        None => (format!("/api/v1/media/{}/raw", m.id), width, height),
+    };
+    vyasa_themes::CardImage {
+        url,
+        width,
+        height,
+        alt: m.alt.clone().unwrap_or_default(),
+        blurhash: m.blurhash.clone(),
+    }
 }
 
 /// The `entry` object a single template reads: id, title, type and the
@@ -945,6 +1111,7 @@ pub(super) async fn render_single(
                 ));
             }
         }
+        let (newer, older, related) = reading_on(state_ref, &site, &post).await;
         let page_ctx = PageContext {
             title: post.title.clone(),
             post_title: Some(post.title.clone()),
@@ -979,6 +1146,9 @@ pub(super) async fn render_single(
             },
             entry: Some(entry_context(state_ref, &post).await),
             entry_slug: Some(post.slug.clone()),
+            newer,
+            older,
+            related,
             // Which page a paginated listing on this entry shows.
             pagination_page: params.page.unwrap_or(1).max(1),
             ..PageContext::default()
@@ -1443,6 +1613,9 @@ fn search_address(type_slug: &str, params: &EntryParams) -> String {
     to
 }
 
+/// At most this many pinned entries in a type archive's `featured` list.
+const FEATURED_MAX: u32 = 6;
+
 /// The listing for one registered post type.
 async fn custom_archive(
     state: &AppState,
@@ -1477,10 +1650,29 @@ async fn custom_archive(
         let mut rows = state.posts.list(&filter).await.map_err(internal)?;
         let has_more = rows.len() > per_page as usize;
         rows.truncate(per_page as usize);
+        // The type's pinned entries, newest first, for a "Featured" block
+        // on the first page; the listing itself keeps its plain order.
+        let featured_rows = if page_no == 1 {
+            state
+                .posts
+                .list(&PostFilter {
+                    status: Some(PostStatus::Published),
+                    post_type: Some(post_type),
+                    sticky: Some(true),
+                    limit: FEATURED_MAX,
+                    ..PostFilter::default()
+                })
+                .await
+                .map_err(internal)?
+        } else {
+            Vec::new()
+        };
         let page_ctx = PageContext {
             title: plural.clone(),
             archive_title: Some(plural.clone()),
             posts: cards(state, &site, &rows).await,
+            featured: cards(state, &site, &featured_rows).await,
+            categories: category_counts(state, post_type.as_str()).await,
             pagination_page: page_no,
             pagination_next: has_more.then(|| format!("{base}?page={}", page_no + 1)),
             pagination_prev: (page_no > 1).then(|| format!("{base}?page={}", page_no - 1)),
@@ -1777,6 +1969,12 @@ async fn archive_impl(
             archive_title: Some(term.name.clone()),
             archive_feed_url: Some(format!("{base}/feed.xml")),
             posts: cards(state_ref, &site, &rows).await,
+            // A category archive offers the other categories, as /blog does.
+            categories: if taxonomy == "category" {
+                category_counts(state_ref, PostType::Post.as_str()).await
+            } else {
+                Vec::new()
+            },
             pagination_page: page_no,
             pagination_next: has_more.then(|| format!("{base}?page={}", page_no + 1)),
             pagination_prev: (page_no > 1).then(|| format!("{base}?page={}", page_no - 1)),
@@ -2821,5 +3019,81 @@ mod canonical_entry_path_tests {
             canonical_entry_path("docs", "engine/next").as_deref(),
             Some("/docs/engine/next")
         );
+    }
+}
+
+#[cfg(test)]
+mod card_image_tests {
+    use super::{card_image, featured_media_id};
+    use vyasa_db::content_models::{MediaRow, MediaStorage};
+
+    fn media(width: Option<i32>, height: Option<i32>, derivatives: serde_json::Value) -> MediaRow {
+        MediaRow {
+            id: 42,
+            owner_id: 1,
+            file_name: "card.png".into(),
+            mime: "image/png".into(),
+            byte_size: 10,
+            storage: MediaStorage::Local,
+            path: "1/1/card.png".into(),
+            width,
+            height,
+            blurhash: Some("LEHV6n".into()),
+            alt: Some("A card".into()),
+            trashed_at: None,
+            caption: None,
+            derivatives,
+            created_at: chrono::Utc::now(),
+            sha256: None,
+            focal_x: None,
+            focal_y: None,
+        }
+    }
+
+    #[test]
+    fn the_medium_rendition_is_used_with_its_own_size() {
+        let img = card_image(&media(
+            Some(1200),
+            Some(630),
+            serde_json::json!({"medium": {"path": "1/1/medium_card.png", "width": 768}}),
+        ));
+        assert_eq!(img.url, "/api/v1/media/42/raw?variant=medium");
+        assert_eq!((img.width, img.height), (Some(768), Some(403)));
+        assert_eq!(img.alt, "A card");
+        assert_eq!(img.blurhash.as_deref(), Some("LEHV6n"));
+    }
+
+    #[test]
+    fn without_a_rendition_the_original_and_its_size_are_used() {
+        let img = card_image(&media(Some(300), Some(200), serde_json::json!({})));
+        assert_eq!(img.url, "/api/v1/media/42/raw");
+        assert_eq!((img.width, img.height), (Some(300), Some(200)));
+    }
+
+    #[test]
+    fn an_unknown_original_size_leaves_the_height_unknown() {
+        let img = card_image(&media(
+            None,
+            None,
+            serde_json::json!({"medium": {"width": 768}}),
+        ));
+        assert_eq!((img.width, img.height), (Some(768), None));
+    }
+
+    #[test]
+    fn a_featured_id_is_read_as_a_string_or_a_number() {
+        assert_eq!(
+            featured_media_id(&(serde_json::json!({"featured_media_id": "7"}))),
+            Some(7)
+        );
+        assert_eq!(
+            featured_media_id(&(serde_json::json!({"featured_media_id": 8}))),
+            Some(8)
+        );
+        assert_eq!(
+            featured_media_id(&(serde_json::json!({"featured_media_id": ""}))),
+            None
+        );
+        assert_eq!(featured_media_id(&(serde_json::json!({}))), None);
     }
 }

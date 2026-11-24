@@ -31,6 +31,7 @@ pub fn spawn(state: &AppState) {
     let posts = state.posts.clone();
     let queries = std::sync::Arc::clone(&state.content_queries);
     let options = state.options_service.clone();
+    let repo = vyasa_db::repo::PostsRepo::new(state.pool.clone());
     let mut rx = events::subscribe();
 
     tokio::spawn(async move {
@@ -50,8 +51,20 @@ pub fn spawn(state: &AppState) {
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             };
 
+            let linked = match post_id_of(&event) {
+                Some(id) => linked_entries(&repo, id).await,
+                None => Some(Vec::new()),
+            };
             if let Some(cache) = &cache {
-                purge(cache, &themes, &posts, &event, queries.as_ref()).await;
+                purge(
+                    cache,
+                    &themes,
+                    &posts,
+                    &event,
+                    queries.as_ref(),
+                    linked.as_deref(),
+                )
+                .await;
             }
             // The edge holds its own copy, so the same event has to reach
             // it — otherwise turning on `edge_cache_seconds` would mean a
@@ -71,6 +84,7 @@ pub fn spawn(state: &AppState) {
                 &event,
                 base_url.as_deref(),
                 &pattern,
+                linked.as_deref().unwrap_or_default(),
             )
             .await;
         }
@@ -97,12 +111,34 @@ fn purges_singles(hierarchical: bool, event: &events::Event) -> bool {
     hierarchical && post_id_of(event).is_some()
 }
 
+/// The entries whose pages show entry `id` as a neighbour or a related
+/// entry: its newer and older neighbours and its related entries (the
+/// relation is symmetric enough that these are the pages naming it). Empty
+/// for a type whose pages show no such links; `None` when the entry cannot
+/// be read (a hard delete), so the caller cannot know which pages name it.
+async fn linked_entries(
+    repo: &vyasa_db::repo::PostsRepo,
+    id: i64,
+) -> Option<Vec<vyasa_db::content_models::PostRow>> {
+    let post = repo.get(id).await.ok()?;
+    if !crate::public::routes::shows_reading_links(post.post_type) {
+        return Some(Vec::new());
+    }
+    let (newer, older) = repo.neighbours(&post).await.ok()?;
+    let related = repo
+        .related_by_terms(&post, crate::public::routes::RELATED_ON_ENTRY)
+        .await
+        .ok()?;
+    Some(newer.into_iter().chain(older).chain(related).collect())
+}
+
 async fn purge(
     cache: &Arc<RenderCache>,
     themes: &vyasa_db::repo::themes::ThemesRepo,
     posts: &vyasa_core::post::PostService,
     event: &events::Event,
     queries: &dyn vyasa_themes::ContentQueries,
+    linked: Option<&[vyasa_db::content_models::PostRow]>,
 ) {
     // Cache keys are namespaced by the active theme version, so a purge needs
     // to know which namespace to sweep. If the theme cannot be read there is
@@ -113,6 +149,20 @@ async fn purge(
             let purged = cache.apply_domain_event(event, &namespace);
             if !purged.is_empty() {
                 tracing::debug!("render cache purged {} key groups", purged.len());
+            }
+            // The pages linking to the entry as a neighbour or a related
+            // entry show its title and address; when they cannot be named,
+            // every entry page goes.
+            match linked {
+                Some(rows) => {
+                    for row in rows {
+                        cache
+                            .invalidate_entry(&namespace, row.path.as_deref().unwrap_or(&row.slug));
+                    }
+                }
+                None => {
+                    cache.invalidate_entries(&namespace);
+                }
             }
             // A tree changes every page that shows it, not only the
             // entry's own.
@@ -144,6 +194,7 @@ async fn purge_edge(
     event: &events::Event,
     base_url: Option<&str>,
     pattern: &vyasa_core::options::PermalinkPattern,
+    linked: &[vyasa_db::content_models::PostRow],
 ) {
     let post_id = match event {
         events::Event::Published(e) => e.post_id,
@@ -165,7 +216,7 @@ async fn purge_edge(
         purger.purge_all().await;
         return;
     };
-    purge_entry_edge(purger, cards, event, &post, base_url, pattern).await;
+    purge_entry_edge(purger, cards, event, &post, base_url, pattern, linked).await;
 }
 
 /// [`purge_edge`] for an event about `post`, once its row is loaded.
@@ -176,17 +227,22 @@ async fn purge_entry_edge(
     post: &vyasa_db::content_models::PostRow,
     base_url: Option<&str>,
     pattern: &vyasa_core::options::PermalinkPattern,
+    linked: &[vyasa_db::content_models::PostRow],
 ) {
     // The listings an entry appears on. Deriving the exact set would mean
     // resolving every archive it belongs to; the front page and the feeds
     // cover what changes in practice, and a stale archive page corrects
     // itself at the next event.
-    let mut paths = vec![
+    // Plus the pages that link to it as a neighbour or a related entry.
+    let mut paths: Vec<String> = [
         pattern.path_for(post),
         "/".to_owned(),
         "/feed.xml".to_owned(),
         "/atom.xml".to_owned(),
-    ];
+    ]
+    .into_iter()
+    .chain(linked.iter().map(|row| pattern.path_for(row)))
+    .collect();
     // The entry's served social cards (all of its type's, for a tree: a
     // child's label is its top ancestor's title). A comment changes no card.
     if post_id_of(event).is_some() {
@@ -305,6 +361,7 @@ mod tests {
             &row(7),
             Some("https://site/"),
             &pattern,
+            &[],
         )
         .await;
         assert!(!recording.all.load(std::sync::atomic::Ordering::SeqCst));

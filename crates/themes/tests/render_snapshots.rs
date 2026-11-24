@@ -394,6 +394,7 @@ fn end_to_end_page_render() {
                     author: "Ada".into(),
                     date: "Aug 23, 2026".into(),
                     fields: serde_json::Map::new(),
+                    ..vyasa_themes::PostCard::default()
                 }],
                 pagination_page: 1,
                 pagination_next: Some("/page/2".into()),

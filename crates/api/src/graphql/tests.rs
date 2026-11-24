@@ -858,6 +858,7 @@ async fn subscription_post_published_and_updated() {
                 limit: 1,
                 offset: 0,
                 sticky_first: false,
+                sticky: None,
                 readable_types: None,
             })
             .await

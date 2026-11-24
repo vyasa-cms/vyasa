@@ -344,6 +344,76 @@ impl TermsRepo {
             .map_err(|err| AppError::db(format!("list post terms failed: {err}")))
     }
 
+    /// The terms of many posts at once, as `(post_id, term)` pairs ordered
+    /// by post, taxonomy and name: one query for a whole listing.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Db`] on database failure.
+    pub async fn terms_for_posts(&self, post_ids: &[i64]) -> Result<Vec<(i64, TermRow)>, AppError> {
+        if post_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let rows: Vec<PostTermRow> = sqlx::query_as(
+            "SELECT tr.post_id, t.id, t.taxonomy, t.name, t.slug, t.parent_id, t.meta, t.created_at
+             FROM term_relationships tr JOIN terms t ON t.id = tr.term_id
+             WHERE tr.post_id = ANY($1)
+             ORDER BY tr.post_id, t.taxonomy, t.name",
+        )
+        .bind(post_ids)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| AppError::db(format!("listing terms failed: {err}")))?;
+        Ok(rows
+            .into_iter()
+            .map(|r| {
+                (
+                    r.post_id,
+                    TermRow {
+                        id: r.id,
+                        taxonomy: r.taxonomy,
+                        name: r.name,
+                        slug: r.slug,
+                        parent_id: r.parent_id,
+                        meta: r.meta,
+                        created_at: r.created_at,
+                    },
+                )
+            })
+            .collect())
+    }
+
+    /// The terms of one taxonomy that file at least one published,
+    /// unprotected entry of `post_type`, with that count, by name: what a
+    /// listing can link to without leading to an empty archive.
+    ///
+    /// # Errors
+    ///
+    /// Returns [`AppError::Db`] on database failure.
+    pub async fn published_counts(
+        &self,
+        taxonomy: Taxonomy,
+        post_type: &str,
+    ) -> Result<Vec<TermWithCount>, AppError> {
+        let rows = sqlx::query_as::<_, TermCountRow>(
+            "SELECT t.id, t.taxonomy, t.name, t.slug, t.parent_id, t.meta, t.created_at,
+                    COUNT(*)::bigint AS post_count
+             FROM terms t
+             JOIN term_relationships tr ON tr.term_id = t.id
+             JOIN posts p ON p.id = tr.post_id
+             WHERE t.taxonomy = $1 AND p.type = $2
+               AND p.status = 'published' AND p.password_hash IS NULL
+             GROUP BY t.id
+             ORDER BY t.name ASC",
+        )
+        .bind(taxonomy.as_str())
+        .bind(post_type)
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| AppError::db(format!("term counts failed: {err}")))?;
+        Ok(rows.into_iter().map(TermWithCount::from).collect())
+    }
+
     /// Checks if a term id exists.
     ///
     /// # Errors
@@ -462,6 +532,18 @@ pub struct TermWithCount {
     pub term: TermRow,
     /// Number of posts assigned to this term.
     pub post_count: i64,
+}
+
+#[derive(sqlx::FromRow)]
+struct PostTermRow {
+    post_id: i64,
+    id: i64,
+    taxonomy: Taxonomy,
+    name: String,
+    slug: String,
+    parent_id: Option<i64>,
+    meta: serde_json::Value,
+    created_at: chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(sqlx::FromRow)]
