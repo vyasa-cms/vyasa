@@ -57,6 +57,7 @@ pub const RESERVED_TYPE_SLUGS: &[&str] = &[
     "logo",
     "brand",
     "registry",
+    "_card",
     // File names, by stem: favicon.ico, custom.css, atom.xml, robots.txt,
     // llms.txt, llms-full.txt, indexnow.txt (feed.xml and sitemap.xml are above).
     "favicon",

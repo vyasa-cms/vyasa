@@ -196,6 +196,7 @@ plugin's own route, public, decided by the plugin.
 | GET | /setup/verify-url | public |
 | GET | /site-health | manage_options |
 | POST | /site-health/cleanup | manage_options |
+| GET | /social-cards | manage_options |
 | GET | /terms | authenticated |
 | POST | /terms | manage_categories |
 | POST | /terms/merge | manage_categories |

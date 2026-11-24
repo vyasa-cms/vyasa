@@ -245,6 +245,12 @@ pub struct Head {
     pub kind: &'static str,
     /// Absolute image URL for social cards.
     pub image: Option<String>,
+    /// `og:image:width`, set only for a generated card.
+    pub image_width: Option<u32>,
+    /// `og:image:height`, set only for a generated card.
+    pub image_height: Option<u32>,
+    /// `og:image:alt`, set only for a generated card.
+    pub image_alt: Option<String>,
     /// Publication timestamp for `article:published_time`.
     pub published: Option<DateTime<Utc>>,
     /// Last-modified timestamp.
@@ -318,7 +324,45 @@ pub(crate) fn canonical_is_elsewhere(meta: &serde_json::Value, base: &str, own_p
         .is_some_and(|p| !same(p, own_path))
 }
 
+/// The picture an entry carries itself: its `og_image`, else `seo_image`,
+/// else `featured_media_url`, else the first image block. The picture the
+/// author already placed, when they have not set a separate social image:
+/// asking someone to nominate an "SEO image" for the photo at the top of
+/// their own post is a question with an obvious answer.
+pub(crate) fn own_image(post: &PostRow) -> Option<String> {
+    let meta = |key: &str| {
+        post.meta
+            .get(key)
+            .and_then(serde_json::Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+    };
+    meta("og_image")
+        .or_else(|| meta("seo_image"))
+        .or_else(|| meta("featured_media_url"))
+        .or_else(|| {
+            serde_json::from_value::<vyasa_core::BlockDocument>(post.content.clone())
+                .ok()
+                .and_then(|doc| vyasa_themes::first_image(&doc.blocks))
+        })
+}
+
 impl Head {
+    /// Points the image at the entry's generated card, with its size and
+    /// alt text; `None` leaves the head as it is. Takes `card_for`'s
+    /// answer and decides nothing itself.
+    #[must_use]
+    pub fn with_social_card(mut self, card: Option<crate::social_card::Card>) -> Self {
+        if let Some(card) = card {
+            self.image = Some(card.url);
+            self.image_width = Some(vyasa_core::social_card::WIDTH);
+            self.image_height = Some(vyasa_core::social_card::HEIGHT);
+            self.image_alt = Some(card.alt);
+        }
+        self
+    }
+
     /// Attaches the entry's ancestors and itself, for `BreadcrumbList`.
     #[must_use]
     pub fn with_breadcrumbs(mut self, breadcrumbs: Vec<(String, String)>) -> Self {
@@ -364,20 +408,9 @@ impl Head {
             || truncate_words(&excerpt_for(post), DESCRIPTION_CHARS),
             |d| plain_text(&d),
         );
-        // The picture the author already placed, when they have not set a
-        // separate social image. Asking someone to nominate an "SEO image"
-        // for the photo at the top of their own post is a question with an
-        // obvious answer.
         let flag =
             |key: &str| post.meta.get(key).and_then(serde_json::Value::as_bool) == Some(true);
-        let image = meta("og_image")
-            .or_else(|| meta("seo_image"))
-            .or_else(|| meta("featured_media_url"))
-            .or_else(|| {
-                serde_json::from_value::<vyasa_core::BlockDocument>(post.content.clone())
-                    .ok()
-                    .and_then(|doc| vyasa_themes::first_image(&doc.blocks))
-            });
+        let image = own_image(post);
         // A page (About, Subscribe, a docs page) is not an article: it is
         // typed `website` and described as a `WebPage`, and it carries no
         // `article:*` dates.
@@ -389,6 +422,9 @@ impl Head {
             kind: if web_page { "website" } else { "article" },
             web_page,
             image,
+            image_width: None,
+            image_height: None,
+            image_alt: None,
             published: post.published_at,
             // Never earlier than the publication time: a scheduled post is
             // saved before it goes out, so `updated_at` can predate
@@ -485,16 +521,7 @@ impl Head {
             self.title.clone()
         };
         out.push_str(&self.social_tags(site, &title));
-        if let Some(image) = self.image.as_ref().and_then(|i| absolute_media(site, i)) {
-            let _ = write!(
-                out,
-                "\n<meta property=\"og:image\" content=\"{}\">\
-                 \n<meta name=\"twitter:card\" content=\"summary_large_image\">",
-                esc(&image)
-            );
-        } else {
-            out.push_str("\n<meta name=\"twitter:card\" content=\"summary\">");
-        }
+        self.image_tags(site, &mut out);
         // `article:*` belongs to `og:type article`; a page has none.
         if self.kind == "article" {
             if let Some(published) = self.published {
@@ -550,6 +577,36 @@ impl Head {
             (false, true) => "\n<meta name=\"robots\" content=\"noindex\">",
             (true, false) => "\n<meta name=\"robots\" content=\"nofollow\">",
             (true, true) => "",
+        }
+    }
+
+    /// `og:image` with its size and alt (a generated card), and the
+    /// matching `twitter:card`.
+    fn image_tags(&self, site: &SiteContext, out: &mut String) {
+        use std::fmt::Write as _;
+        let esc = escape;
+        if let Some(image) = self.image.as_ref().and_then(|i| absolute_media(site, i)) {
+            let _ = write!(
+                out,
+                "\n<meta property=\"og:image\" content=\"{}\">",
+                esc(&image)
+            );
+            if let Some(w) = self.image_width {
+                let _ = write!(out, "\n<meta property=\"og:image:width\" content=\"{w}\">");
+            }
+            if let Some(h) = self.image_height {
+                let _ = write!(out, "\n<meta property=\"og:image:height\" content=\"{h}\">");
+            }
+            if let Some(alt) = &self.image_alt {
+                let _ = write!(
+                    out,
+                    "\n<meta property=\"og:image:alt\" content=\"{}\">",
+                    esc(alt)
+                );
+            }
+            out.push_str("\n<meta name=\"twitter:card\" content=\"summary_large_image\">");
+        } else {
+            out.push_str("\n<meta name=\"twitter:card\" content=\"summary\">");
         }
     }
 
@@ -789,6 +846,72 @@ mod tests {
     }
 
     use super::*;
+
+    fn site(base_url: &str) -> SiteContext {
+        SiteContext {
+            base_url: base_url.to_owned(),
+            title: "Site".to_owned(),
+            tagline: String::new(),
+            date_format: "%Y-%m-%d".to_owned(),
+            timezone: chrono_tz::UTC,
+            permalinks: vyasa_core::options::PermalinkPattern(
+                vyasa_core::options::PermalinkPattern::DEFAULT.into(),
+            ),
+            per_page: 10,
+            favicon_media_id: None,
+            plugin_head: String::new(),
+        }
+    }
+
+    fn card() -> crate::social_card::Card {
+        crate::social_card::Card {
+            url: "/_card/7-0123456789abcdef.png".to_owned(),
+            key: "0123456789abcdef".to_owned(),
+            alt: r#"Say "hi" <b>: Site"#.to_owned(),
+            title: r#"Say "hi" <b>"#.to_owned(),
+            label: String::new(),
+        }
+    }
+
+    #[test]
+    fn a_card_sets_the_image_and_its_three_tags_each_on_a_line() {
+        let html = Head::page("/docs/a", "A", "d")
+            .with_social_card(Some(card()))
+            .render(&site("https://example.test"));
+        assert!(html.contains(
+            "\n<meta property=\"og:image\" content=\"https://example.test/_card/7-0123456789abcdef.png\">"
+        ), "{html}");
+        assert!(html.contains("\n<meta property=\"og:image:width\" content=\"1200\">"));
+        assert!(html.contains("\n<meta property=\"og:image:height\" content=\"630\">"));
+        assert!(
+            html.contains(
+                "\n<meta property=\"og:image:alt\" content=\"Say &quot;hi&quot; &lt;b&gt;: Site\">"
+            ),
+            "{html}"
+        );
+        assert!(html.contains("summary_large_image"));
+    }
+
+    #[test]
+    fn no_card_and_an_own_image_keep_todays_tags() {
+        let mut head = Head::page("/a", "A", "d");
+        head.image = Some("/media/x.png".to_owned());
+        let before = head.clone().render(&site("https://example.test"));
+        let after = head
+            .with_social_card(None)
+            .render(&site("https://example.test"));
+        assert_eq!(before, after);
+        assert!(!after.contains("og:image:width"));
+        assert!(!after.contains("og:image:alt"));
+    }
+
+    #[test]
+    fn no_site_url_means_no_image_tags_at_all() {
+        let html = Head::page("/a", "A", "d")
+            .with_social_card(Some(card()))
+            .render(&site(""));
+        assert!(!html.contains("og:image"), "{html}");
+    }
 
     #[test]
     fn truncation_stops_at_a_word_and_marks_the_cut() {

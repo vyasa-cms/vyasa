@@ -51,8 +51,25 @@ type ThemeFiles<'a> = (
     &'a [(&'a str, &'a [u8])],
 );
 
+/// The docs starter's bundled files: its stylesheet and its social card
+/// background and font.
+const DOCS_FILES: &[(&str, &[u8])] = &[
+    (
+        "assets/theme.css",
+        include_bytes!("../../../themes-starter/docs/assets/theme.css"),
+    ),
+    (
+        "assets/images/og/card-bg.png",
+        include_bytes!("../../../themes-starter/docs/assets/images/og/card-bg.png"),
+    ),
+    (
+        "assets/fonts/noto-sans-semibold-card.ttf",
+        include_bytes!("../../../themes-starter/docs/assets/fonts/noto-sans-semibold-card.ttf"),
+    ),
+];
+
 fn embedded_sets() -> [ThemeFiles<'static>; 5] {
-    let sets: [ThemeFiles; 5] = [
+    [
         (
             "blog",
             include_str!("../../../themes-starter/blog/manifest.toml"),
@@ -102,10 +119,7 @@ fn embedded_sets() -> [ThemeFiles<'static>; 5] {
                 "templates/page.tera",
                 include_str!("../../../themes-starter/docs/templates/page.tera"),
             )),
-            &[(
-                "assets/theme.css",
-                include_bytes!("../../../themes-starter/docs/assets/theme.css"),
-            )],
+            DOCS_FILES,
         ),
         (
             "storefront-lite",
@@ -140,9 +154,7 @@ fn embedded_sets() -> [ThemeFiles<'static>; 5] {
                 include_bytes!("../../../themes-starter/technology/assets/theme.css"),
             )],
         ),
-    ];
-
-    sets
+    ]
 }
 
 /// Build portable packages from the five embedded starter directories.
@@ -248,6 +260,9 @@ async fn install_starters(
                 continue;
             }
         };
+        if let Some(e) = &parsed.social_card_error {
+            tracing::warn!("embedded theme {}: social cards stay off: {e}", pkg.name);
+        }
         let templates = if parsed.templates.is_empty() {
             None
         } else {
