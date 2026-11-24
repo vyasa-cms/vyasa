@@ -12,6 +12,15 @@ follows [semantic versioning](https://semver.org) as described in
 - `csp_cloudflare_web_analytics` (`VYASA_CSP_CLOUDFLARE_WEB_ANALYTICS=true`, default off): adds `https://static.cloudflareinsights.com` to the Content-Security-Policy `script-src`, so the beacon of Cloudflare's automatic Web Analytics setup is not blocked. It covers the edge-injected tag only; the manual snippet reports to `cloudflareinsights.com`, which `default-src 'self'` still blocks. `script-src` stays `'self'` unless it is set.
 
 ### Fixed
+- A plugin's settings form shows what the plugin declares now, not what it declared when it loaded: the docs plugin's "Last sync" line was frozen at server start. `GET /api/v1/plugins/{id}/form` asks the plugin again; the admin uses it on open, after a save and every minute. Re-reading the form never counts against the plugin: a time or fuel trap there drops the cached instance, keeps the form from load and records no strike.
+
+### Added
+- The plugin detail view shows the plugin's status and its scheduled tasks (interval, last run, last error), and says that a turned-off plugin's settings come back when it is on.
+
+## [0.4.3] - 2026-11-22
+
+### Fixed
+- Search finds text in tables, code blocks and quotes, not only paragraphs and headings: a config key in a reference table or an error class in a code block now matches (docs QA-W-4). The AI assist text is unchanged. An existing index keeps its old bodies until it is rebuilt: run `vyasa search reindex` (or `POST /api/v1/search/reindex`, or Site health → Rebuild index) after upgrading.
 - A plugin refresh keeps the plugin's scheduled tasks declared until the new declarations replace them, and a task that was claimed but has no declaration is skipped instead of run on the ordinary budget.
 - A plugin call that runs past its time or fuel limit (an epoch-deadline or fuel trap) no longer disables the plugin for good on the first occurrence: it is marked degraded and stays enabled, and the third such trap within ten minutes disables it as before. A busy server (a deploy publishing pages while a sync runs) could trap a healthy plugin once and take its pages down until an administrator re-enabled it. Any trap now records its reason on the Plugins page; before, a disabled plugin showed no cause. A settings save (or a restart) that a plugin refuses now leaves it degraded and serving on its previous settings, not errored: an errored plugin refuses every later call, so the next settings save could not heal it, and the docs import of a staging deploy left vyasa-docs off until an administrator re-enabled it.
 
@@ -20,6 +29,7 @@ follows [semantic versioning](https://semver.org) as described in
 - Each menu `<nav>` has an accessible name: the block's `label` setting, else the menu's slug.
 
 ### Added
+- `GET /llms-full.txt`: every readable entry's Markdown in one file (the same set as `llms.txt`, each body inline), so a model reads the whole site in one fetch. `llms-full` is now a reserved type slug.
 - A theme's `font_faces` entries take optional `weight`, `style` and `display`, printed as `font-weight`, `font-style` and `font-display` in the `@font-face` rule. Two files of one family (400 and 700, roman and italic) are no longer reported as a duplicate.
 
 ### Added
