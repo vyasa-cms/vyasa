@@ -95,7 +95,13 @@ pub struct PluginSection {
     host: Arc<vyasa_plugins::host::WasmtimeHost>,
     broker: Arc<vyasa_plugins::broker::Broker>,
     pool: sqlx::PgPool,
+    /// Last good HTML per (post, settings): a render that fails (a trap, a
+    /// timeout) serves this instead of an empty hole.
+    last_good: std::sync::Mutex<std::collections::HashMap<String, String>>,
 }
+
+/// Entries kept per section; the map is cleared past this rather than evicted.
+const LAST_GOOD_CAP: usize = 512;
 
 impl PluginSection {
     /// Builds the adapter, or `None` when the intern table is full — in
@@ -120,6 +126,7 @@ impl PluginSection {
             host: Arc::clone(&state.plugin_host),
             broker: Arc::clone(&state.broker),
             pool: state.pool.clone(),
+            last_good: std::sync::Mutex::new(std::collections::HashMap::new()),
         })
     }
 }
@@ -219,6 +226,11 @@ impl DynamicBlock for PluginSection {
                     payload["context"] = context;
                 }
             }
+            let cache_key = format!(
+                "{}|{}",
+                ctx.post_id.map(|p| p.to_string()).unwrap_or_default(),
+                payload["settings"]
+            );
             let payload = payload.to_string();
 
             let env = HostEnv::background(Arc::clone(&self.broker), self.pool.clone());
@@ -237,13 +249,37 @@ impl DynamicBlock for PluginSection {
             // of erroring — one broken section must not take the page down.
             let html = match reply {
                 V2Outcome::Ok(html) if html != payload && !html.trim().is_empty() => html,
-                V2Outcome::Ok(_) | V2Outcome::Unsupported | V2Outcome::Failed(_) => {
+                V2Outcome::Failed(_) => {
+                    let stale = self
+                        .last_good
+                        .lock()
+                        .ok()
+                        .and_then(|m| m.get(&cache_key).cloned());
+                    if let Some(html) = stale {
+                        return Ok(BlockPayload::Html(format!(
+                            "<div class=\"vy-plugin-section\" data-plugin=\"{}\">{}</div>",
+                            vyasa_themes::renderer::esc(&self.decl.kind),
+                            vyasa_themes::renderer::sanitize_plugin_html(&html)
+                        )));
+                    }
+                    return Ok(BlockPayload::Html(format!(
+                        "<!-- vyasa: unresolved plugin section {} -->",
+                        vyasa_themes::renderer::esc(&self.decl.kind)
+                    )));
+                }
+                V2Outcome::Ok(_) | V2Outcome::Unsupported => {
                     return Ok(BlockPayload::Html(format!(
                         "<!-- vyasa: unresolved plugin section {} -->",
                         vyasa_themes::renderer::esc(&self.decl.kind)
                     )));
                 }
             };
+            if let Ok(mut m) = self.last_good.lock() {
+                if m.len() >= LAST_GOOD_CAP {
+                    m.clear();
+                }
+                m.insert(cache_key, html.clone());
+            }
             // Same widened allowlist plugin blocks pass through, wrapped so
             // the theme's custom properties cascade into the markup. The
             // wrapper attribute is `data-plugin`, not `data-section` —
