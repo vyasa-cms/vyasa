@@ -2542,12 +2542,19 @@ async fn an_archive_card_carries_its_picture_and_the_pinned_entries_are_featured
         ("unknown-media", false, Some("123456")),
         ("new-pinned", true, None),
     ] {
-        let mut body = json!({"type": "gizmo", "title": slug, "slug": slug, "content": doc("g"),
-                              "status": "published", "sticky": sticky});
-        if let Some(id) = media {
-            body["meta"] = json!({"featured_media_id": id});
+        let body = json!({"type": "gizmo", "title": slug, "slug": slug, "content": doc("g"),
+                          "status": "published", "sticky": sticky});
+        let id = publish(base, &a, body)["id"].as_i64().unwrap();
+        // Create takes no meta; set it as an importer would, before any page is cached.
+        if let Some(media) = media {
+            sqlx::query("UPDATE posts SET meta = jsonb_build_object('featured_media_id', $2::text) WHERE id = $1")
+                .bind(id)
+                .bind(media)
+                .execute(db.pool())
+                .await
+                .expect("meta");
         }
-        ids.push(publish(base, &a, body)["id"].as_i64().unwrap());
+        ids.push(id);
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     // Two categories on published entries, one only on a draft (never listed).
