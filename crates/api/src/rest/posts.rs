@@ -684,6 +684,7 @@ pub async fn list(
         limit: per_page,
         offset,
         sticky_first: false,
+        sticky: None,
         readable_types: policy::readable_custom_types(&state, Some(&principal)).await,
     };
     let repo = vyasa_db::repo::PostsRepo::new(state.pool.clone());

@@ -13,6 +13,7 @@ pub mod menu;
 pub mod notify;
 pub mod options;
 pub mod post;
+pub mod social_card;
 pub mod taxonomy;
 pub mod user;
 pub mod webhooks;

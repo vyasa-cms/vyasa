@@ -2,3 +2,17 @@ name = "docs"
 version = 5
 author = "Vyasa Team"
 required_api = 1
+
+# A generated Open Graph card per docs page without an image of its own,
+# drawn when the site turns `social_cards` on. The font is Noto Sans
+# SemiBold (SIL OFL 1.1, see crates/core/testdata/social_card/OFL.txt),
+# subset with a `kern` table.
+[social_card]
+post_types = ["doc"]
+background = "images/og/card-bg.png"
+font = "fonts/noto-sans-semibold-card.ttf"
+color = "#F5F5F4"
+label_color = "#93C5FD"
+title = { x = 80, y = 200, w = 1040, h = 300, size = 72, min_size = 44, max_lines = 3 }
+label = { x = 80, y = 120, w = 1040, size = 32 }
+alt = "{title}: {site}"

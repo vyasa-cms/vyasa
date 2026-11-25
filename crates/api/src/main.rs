@@ -73,6 +73,7 @@ mod seed;
 mod seo;
 mod setup;
 mod signing;
+mod social_card;
 mod state;
 mod theme_assets;
 mod theme_assistant;

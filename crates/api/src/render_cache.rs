@@ -83,6 +83,14 @@ impl RenderCache {
         self.inner.invalidate_terms(theme_version)
     }
 
+    /// Drops the cached page of one entry, every revision of it. `address`
+    /// is the entry's path, or its slug when it has none (as the render
+    /// path keys it).
+    pub fn invalidate_entry(&self, theme_version: &str, address: &str) -> usize {
+        self.inner
+            .invalidate_prefix(&format!("t{theme_version}:single:{address}:r"))
+    }
+
     /// Entry-page purge after a comment's visibility changes.
     ///
     /// Approving a comment in the admin used to have no effect on the
