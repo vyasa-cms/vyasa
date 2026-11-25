@@ -1777,7 +1777,7 @@ mod tests {
         .expect("collected");
         let surface = PluginSurface {
             inner: tokio::sync::RwLock::new(inner),
-            last_good: Default::default(),
+            last_good: std::sync::Arc::default(),
         };
         futures::executor::block_on(async {
             let kept = surface.forget_for_refresh(7).await;
@@ -1871,7 +1871,7 @@ mod tests {
 
         let surface = PluginSurface {
             inner: tokio::sync::RwLock::new(inner),
-            last_good: Default::default(),
+            last_good: std::sync::Arc::default(),
         };
         futures::executor::block_on(async {
             surface
@@ -1910,7 +1910,7 @@ mod tests {
         );
         let surface = PluginSurface {
             inner: tokio::sync::RwLock::new(inner),
-            last_good: Default::default(),
+            last_good: std::sync::Arc::default(),
         };
         futures::executor::block_on(async {
             assert!(
@@ -1950,7 +1950,7 @@ mod tests {
         collect_admin(&mut inner, 1, "p", &declared);
         let surface = PluginSurface {
             inner: tokio::sync::RwLock::new(inner),
-            last_good: Default::default(),
+            last_good: std::sync::Arc::default(),
         };
         futures::executor::block_on(async {
             // Disabled while it was asked: the form stays gone.
@@ -2004,7 +2004,7 @@ mod tests {
 
         let surface = PluginSurface {
             inner: tokio::sync::RwLock::new(inner),
-            last_good: Default::default(),
+            last_good: std::sync::Arc::default(),
         };
         futures::executor::block_on(async {
             let hash = head
