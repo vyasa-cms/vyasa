@@ -308,41 +308,52 @@ impl DynamicBlock for PluginSection {
             // mine"; empty is a render that chose to show nothing; a trap
             // or an old binary reads the same. All of them degrade instead
             // of erroring — one broken section must not take the page down.
-            let html = match reply {
-                V2Outcome::Ok(html) if html != payload && !html.trim().is_empty() => html,
-                V2Outcome::Failed(_) => {
-                    let stale = self.last_good.get(&cache_key);
-                    if let Some(html) = stale {
-                        return Ok(BlockPayload::Html(format!(
-                            "<div class=\"vy-plugin-section\" data-plugin=\"{}\">{}</div>",
-                            vyasa_themes::renderer::esc(&self.decl.kind),
-                            vyasa_themes::renderer::sanitize_plugin_html(&html)
-                        )));
-                    }
-                    return Ok(BlockPayload::Html(format!(
-                        "<!-- vyasa: unresolved plugin section {} -->",
-                        vyasa_themes::renderer::esc(&self.decl.kind)
-                    )));
-                }
-                V2Outcome::Ok(_) | V2Outcome::Unsupported => {
-                    return Ok(BlockPayload::Html(format!(
-                        "<!-- vyasa: unresolved plugin section {} -->",
-                        vyasa_themes::renderer::esc(&self.decl.kind)
-                    )));
-                }
-            };
-            self.last_good.put(cache_key, &html);
-            // Same widened allowlist plugin blocks pass through, wrapped so
-            // the theme's custom properties cascade into the markup. The
-            // wrapper attribute is `data-plugin`, not `data-section` —
-            // that name belongs to section *ids* and the studio's canvas
-            // resolves clicks by it.
-            Ok(BlockPayload::Html(format!(
-                "<div class=\"vy-plugin-section\" data-plugin=\"{}\">{}</div>",
-                vyasa_themes::renderer::esc(&self.decl.kind),
-                vyasa_themes::renderer::sanitize_plugin_html(&html)
+            Ok(BlockPayload::Html(settle(
+                &self.last_good,
+                cache_key,
+                &self.decl.kind,
+                &payload,
+                reply,
             )))
         })
+    }
+}
+
+/// Turns a render reply into the section's HTML. A good reply is stored as
+/// the last good copy; a failed one (a trap or a timeout) serves the stored
+/// copy when there is one, else the unresolved comment; an echo, a blank
+/// reply and an old binary give the comment and touch no store.
+fn settle(
+    store: &LastGood,
+    key: LastGoodKey,
+    kind: &str,
+    payload: &str,
+    reply: V2Outcome<String>,
+) -> String {
+    let wrap = |html: &str| {
+        format!(
+            "<div class=\"vy-plugin-section\" data-plugin=\"{}\">{}</div>",
+            vyasa_themes::renderer::esc(kind),
+            vyasa_themes::renderer::sanitize_plugin_html(html)
+        )
+    };
+    let unresolved = || {
+        format!(
+            "<!-- vyasa: unresolved plugin section {} -->",
+            vyasa_themes::renderer::esc(kind)
+        )
+    };
+    // An unchanged payload is the contract's way of saying "not mine";
+    // empty is a render that chose to show nothing. All of them degrade
+    // instead of erroring: one broken section must not take the page down.
+    match reply {
+        V2Outcome::Ok(html) if html != payload && !html.trim().is_empty() => {
+            let out = wrap(&html);
+            store.put(key, &html);
+            out
+        }
+        V2Outcome::Failed(_) => store.get(&key).map_or_else(unresolved, |h| wrap(&h)),
+        V2Outcome::Ok(_) | V2Outcome::Unsupported => unresolved(),
     }
 }
 
@@ -426,6 +437,52 @@ mod tests {
             editor,
             "{}".into(),
         )
+    }
+
+    fn run(store: &LastGood, reply: V2Outcome<String>) -> String {
+        settle(store, key(1, false), "hero", "{}", reply)
+    }
+
+    #[test]
+    fn a_good_reply_is_wrapped_and_stored() {
+        let s = LastGood::default();
+        let out = run(&s, V2Outcome::Ok("<p>hi</p>".into()));
+        assert!(out.contains("vy-plugin-section") && out.contains("<p>hi</p>"));
+        assert_eq!(s.get(&key(1, false)).as_deref(), Some("<p>hi</p>"));
+    }
+
+    #[test]
+    fn a_failure_serves_the_stored_copy_wrapped() {
+        let s = LastGood::default();
+        s.put(key(1, false), "<p>old</p><script>x</script>");
+        let out = run(&s, V2Outcome::Failed("trap".into()));
+        assert!(out.contains("vy-plugin-section") && out.contains("<p>old</p>"));
+        assert!(!out.contains("<script"));
+    }
+
+    #[test]
+    fn a_failure_with_nothing_stored_is_the_comment() {
+        let s = LastGood::default();
+        let out = run(&s, V2Outcome::Failed("trap".into()));
+        assert_eq!(out, "<!-- vyasa: unresolved plugin section hero -->");
+    }
+
+    #[test]
+    fn echo_blank_and_unsupported_leave_the_store_alone() {
+        let s = LastGood::default();
+        s.put(key(1, false), "<p>old</p>");
+        for reply in [
+            V2Outcome::Ok("{}".into()),
+            V2Outcome::Ok("  ".into()),
+            V2Outcome::Unsupported,
+        ] {
+            let out = run(&s, reply);
+            assert!(out.starts_with("<!-- vyasa: unresolved"));
+            assert_eq!(s.get(&key(1, false)).as_deref(), Some("<p>old</p>"));
+        }
+        let empty = LastGood::default();
+        run(&empty, V2Outcome::Ok("{}".into()));
+        assert!(empty.get(&key(1, false)).is_none());
     }
 
     #[test]
