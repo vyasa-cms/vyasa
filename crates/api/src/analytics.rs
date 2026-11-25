@@ -49,7 +49,6 @@ const BOT_MARKS: &[&str] = &[
     "facebookexternalhit",
     // Our own checks and the stock HTTP clients a probe or script uses.
     "vyasa",
-    "krishiv",
     "uptime",
     "check_http",
     "go-http-client",
@@ -390,7 +389,6 @@ mod tests {
         assert!(is_bot(Some("curl/8.5")));
         assert!(is_bot(Some("vyasa/0.4.5")));
         assert!(is_bot(Some("Vyasa-Webhook/1")));
-        assert!(is_bot(Some("krishiv-internal-check/1")));
         assert!(is_bot(Some("Go-http-client/2.0")));
         assert!(!is_bot(Some(
             "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/126 Safari/537.36"
