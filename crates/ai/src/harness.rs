@@ -164,8 +164,14 @@ mod tests {
         assert_eq!(Harness::from_option(None), Harness::Vyasa);
         assert_eq!(Harness::from_option(Some(&Value::Null)), Harness::Vyasa);
         assert_eq!(Harness::from_option(Some(&json!("vyasa"))), Harness::Vyasa);
-        assert_eq!(Harness::from_option(Some(&json!("sarathi"))), Harness::Sarathi);
-        assert_eq!(Harness::from_option(Some(&json!("Sarathi"))), Harness::Vyasa);
+        assert_eq!(
+            Harness::from_option(Some(&json!("sarathi"))),
+            Harness::Sarathi
+        );
+        assert_eq!(
+            Harness::from_option(Some(&json!("Sarathi"))),
+            Harness::Vyasa
+        );
         assert_eq!(Harness::from_option(Some(&json!(true))), Harness::Vyasa);
         for h in [Harness::Vyasa, Harness::Sarathi] {
             assert_eq!(Harness::parse(h.as_str()), Some(h));
@@ -218,9 +224,15 @@ mod tests {
         let mut outcomes = Vec::new();
         for harness in [Harness::Vyasa, Harness::Sarathi] {
             let mut toolbox = EchoBox(Vec::new());
-            let out = run(harness, &Scripted::new(&script), &NullSink, &spec(), &mut toolbox)
-                .await
-                .expect("runs");
+            let out = run(
+                harness,
+                &Scripted::new(&script),
+                &NullSink,
+                &spec(),
+                &mut toolbox,
+            )
+            .await
+            .expect("runs");
             assert_eq!(toolbox.0.len(), 1, "the tool really ran");
             outcomes.push((out.reply, out.steps.len(), out.ran_out));
         }
