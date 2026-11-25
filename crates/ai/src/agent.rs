@@ -340,16 +340,16 @@ pub async fn run_agent<P: LlmProvider>(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     #![allow(clippy::expect_used)]
     use super::*;
     use std::sync::Mutex;
 
     /// Replays queued replies; the harness must treat it like any model.
-    struct Scripted(Mutex<Vec<String>>);
+    pub(crate) struct Scripted(Mutex<Vec<String>>);
 
     impl Scripted {
-        fn new(replies: &[&str]) -> Self {
+        pub(crate) fn new(replies: &[&str]) -> Self {
             Self(Mutex::new(
                 replies.iter().rev().map(|s| (*s).to_owned()).collect(),
             ))
@@ -393,14 +393,14 @@ mod tests {
         }
     }
 
-    struct NullSink;
+    pub(crate) struct NullSink;
     impl AiUsageSink for NullSink {
         fn log_success(&self, _: &str, _: &str, _: &str, _: u32, _: u32) {}
         fn log_failure(&self, _: &str, _: &str, _: &str, _: &str) {}
     }
 
     /// Counts calls; `echo` repeats its input back.
-    struct EchoBox(Vec<(String, serde_json::Value)>);
+    pub(crate) struct EchoBox(pub(crate) Vec<(String, serde_json::Value)>);
     impl Toolbox for EchoBox {
         fn tools(&self) -> Vec<ToolDef> {
             vec![ToolDef {
@@ -421,7 +421,7 @@ mod tests {
         }
     }
 
-    fn spec() -> AgentSpec<'static> {
+    pub(crate) fn spec() -> AgentSpec<'static> {
         AgentSpec {
             purpose: "test-agent",
             model: "scripted",

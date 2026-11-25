@@ -182,7 +182,18 @@ async fn run_inner(
         }),
     )
     .allow_script(vyasa_ai::theme_studio::request_allows_script(&message));
-    let outcome = vyasa_ai::agent::run_agent(
+    // The harness is the operator's choice, read per request so Vyasa's
+    // loop and Sarathi can run side by side without a restart.
+    let harness = vyasa_ai::harness::Harness::from_option(
+        state
+            .options
+            .get(vyasa_ai::harness::OPTION_KEY)
+            .await
+            .ok()
+            .as_ref(),
+    );
+    let outcome = vyasa_ai::harness::run(
+        harness,
         &provider,
         &sink,
         &vyasa_ai::agent::AgentSpec {

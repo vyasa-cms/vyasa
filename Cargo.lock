@@ -4103,6 +4103,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "sarathi-protocol"
+version = "0.0.0"
+source = "git+https://github.com/KrishivAI/sarathi?rev=73ff75a43b1adc1aa509b4ab7937c7fef0ce40d9#73ff75a43b1adc1aa509b4ab7937c7fef0ce40d9"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "sarathi-tools"
+version = "0.0.0"
+source = "git+https://github.com/KrishivAI/sarathi?rev=73ff75a43b1adc1aa509b4ab7937c7fef0ce40d9#73ff75a43b1adc1aa509b4ab7937c7fef0ce40d9"
+dependencies = [
+ "sarathi-protocol",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
 name = "schannel"
 version = "0.1.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5678,6 +5698,7 @@ version = "0.4.4"
 dependencies = [
  "base64 0.23.1",
  "reqwest",
+ "sarathi-tools",
  "schemars",
  "serde",
  "serde_json",

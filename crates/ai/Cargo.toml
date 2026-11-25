@@ -17,6 +17,9 @@ vyasa-common = { path = "../common" }
 vyasa-core = { path = "../core" }
 vyasa-themes = { path = "../themes" }
 schemars = "1.2.2"
+# Sarathi, an embeddable agent harness: a git dependency pinned to a commit,
+# allowed by name in deny.toml. Bump `rev` deliberately, never to a branch.
+sarathi-tools = { git = "https://github.com/KrishivAI/sarathi", rev = "73ff75a43b1adc1aa509b4ab7937c7fef0ce40d9" }
 serde = "1.0.229"
 serde_json = "1.0.151"
 tracing = "0.1"
