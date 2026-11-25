@@ -124,9 +124,7 @@ impl SarathiModel {
                 let root = base.strip_suffix("/v1").unwrap_or(base);
                 Target::anthropic(self.api_key.clone()).with_base_url(root)
             }
-            Wire::OpenAi => {
-                Target::openai_compatible(self.base_url.clone(), self.api_key.clone())
-            }
+            Wire::OpenAi => Target::openai_compatible(self.base_url.clone(), self.api_key.clone()),
         }
     }
 
@@ -423,7 +421,13 @@ mod tests {
         }
 
         fn params(&self) -> RawJson {
-            RawJson::from_text(r#"{"model":"scripted","max_tokens":1024}"#).unwrap()
+            let text = match self.wire {
+                Wire::Anthropic => r#"{"model":"scripted","max_tokens":1024}"#,
+                Wire::OpenAi => {
+                    r#"{"model":"scripted","max_tokens":1024,"token_field":"max_tokens"}"#
+                }
+            };
+            RawJson::from_text(text).unwrap()
         }
 
         fn render_tools(
@@ -483,7 +487,11 @@ mod tests {
         for (id, name, input) in calls {
             blocks.push(json!({"type": "tool_use", "id": id, "name": name, "input": input}));
         }
-        let stop = if calls.is_empty() { "end_turn" } else { "tool_use" };
+        let stop = if calls.is_empty() {
+            "end_turn"
+        } else {
+            "tool_use"
+        };
         Some(
             json!({"id": "msg_1", "type": "message", "role": "assistant", "model": "scripted",
                    "content": blocks, "stop_reason": stop,
@@ -504,7 +512,11 @@ mod tests {
         if !tool_calls.is_empty() {
             message["tool_calls"] = Value::Array(tool_calls);
         }
-        let finish = if calls.is_empty() { "stop" } else { "tool_calls" };
+        let finish = if calls.is_empty() {
+            "stop"
+        } else {
+            "tool_calls"
+        };
         Some(
             json!({"id": "c1", "model": "scripted",
                    "choices": [{"index": 0, "message": message, "finish_reason": finish}],
@@ -703,10 +715,18 @@ mod tests {
             ],
         );
         let mut page = Page::default();
-        let out = go(&model, &Recorder::default(), &spec(12, Vec::new()), &mut page)
-            .await
-            .expect("runs");
-        assert_eq!(out.steps[0].observation, crate::agent::truncate(&"x".repeat(7_000)));
+        let out = go(
+            &model,
+            &Recorder::default(),
+            &spec(12, Vec::new()),
+            &mut page,
+        )
+        .await
+        .expect("runs");
+        assert_eq!(
+            out.steps[0].observation,
+            crate::agent::truncate(&"x".repeat(7_000))
+        );
         assert!(out.steps[0].observation.len() < 7_000);
     }
 
@@ -725,9 +745,14 @@ mod tests {
         ] {
             let model = Scripted::new(wire, &[answer(Some("Seen."), &[])]);
             let mut page = Page::default();
-            go(&model, &Recorder::default(), &spec(12, vec![image.clone()]), &mut page)
-                .await
-                .expect("runs");
+            go(
+                &model,
+                &Recorder::default(),
+                &spec(12, vec![image.clone()]),
+                &mut page,
+            )
+            .await
+            .expect("runs");
             let first = model.bodies.lock().unwrap()[0].clone();
             assert!(first.contains("Make the title red."), "{wire:?}: {first}");
             assert_eq!(
@@ -772,7 +797,9 @@ mod tests {
     fn result_and_block_texts_read_both_wire_formats() {
         let raw = |s: &str| RawJson::from_text(s).unwrap();
         assert_eq!(
-            result_text(&raw(r#"{"type":"tool_result","tool_use_id":"a","content":"hi"}"#)),
+            result_text(&raw(
+                r#"{"type":"tool_result","tool_use_id":"a","content":"hi"}"#
+            )),
             "hi"
         );
         assert_eq!(
@@ -787,7 +814,10 @@ mod tests {
         );
         assert_eq!(result_text(&raw(r#"{"x":1}"#)), r#"{"x":1}"#);
         assert_eq!(text_of(r#""plain""#).as_deref(), Some("plain"));
-        assert_eq!(text_of(r#"{"type":"text","text":"t"}"#).as_deref(), Some("t"));
+        assert_eq!(
+            text_of(r#"{"type":"text","text":"t"}"#).as_deref(),
+            Some("t")
+        );
         assert_eq!(text_of("nope"), None);
         assert_eq!(input_of(r#""{\"a\":1}""#), json!({"a": 1}));
         assert_eq!(input_of(r#""not json""#), json!("not json"));
