@@ -8,15 +8,18 @@
 //! the same [`AgentOutcome`] from either, so the proposal, the step list
 //! the studio shows and the `ai_logs` rows do not change with the switch.
 //!
-//! Sarathi's run loop is not in the pinned commit yet. Until it is, a run
-//! asked for on Sarathi runs on Vyasa's loop and says so in a warning;
-//! [`SarathiToolbox`] (a surface's toolbox offered to Sarathi) is here
-//! already, so the switch is one arm of [`run`] when the loop lands.
+//! A Sarathi run calls the registry's primary model ([`SarathiModel`]);
+//! the run itself is in [`sarathi`]. When the caller has no registry model
+//! to give (the environment-key fallback), a run asked for on Sarathi runs
+//! on Vyasa's loop and says so in a warning.
+
+pub mod sarathi;
 
 use serde_json::Value;
 use vyasa_common::AppError;
 
-use crate::agent::{run_agent, AgentOutcome, AgentSpec, Toolbox};
+pub use self::sarathi::{SarathiModel, Wire};
+use crate::agent::{run_agent, truncate, AgentOutcome, AgentSpec, Toolbox};
 use crate::provider::LlmProvider;
 use crate::usage::AiUsageSink;
 
@@ -68,29 +71,34 @@ impl Harness {
     }
 }
 
-/// Whether this build can run agents on Sarathi. False until Sarathi's run
-/// loop is in the pinned commit.
-pub const SARATHI_RUN_LOOP: bool = false;
-
 /// Runs one agent on `harness`: the one entry point a surface calls.
+///
+/// `provider` is Vyasa's failover chain, for Vyasa's loop; `sarathi` is the
+/// chain's primary model, for Sarathi (callers resolve it only when the
+/// harness is Sarathi). Sarathi without a model runs on Vyasa's loop.
 ///
 /// # Errors
 /// What the harness returns: [`AppError`] when the provider chain or the
-/// budget refuses a step.
+/// budget refuses a step, or the Sarathi run fails.
 pub async fn run<P: LlmProvider>(
     harness: Harness,
     provider: &P,
+    sarathi: Option<&SarathiModel>,
     sink: &dyn AiUsageSink,
     spec: &AgentSpec<'_>,
     toolbox: &mut dyn Toolbox,
 ) -> Result<AgentOutcome, AppError> {
-    if harness == Harness::Sarathi && !SARATHI_RUN_LOOP {
-        tracing::warn!(
-            purpose = spec.purpose,
-            "{OPTION_KEY} is \"sarathi\" but this build has no Sarathi run loop; using the vyasa harness"
-        );
+    match (harness, sarathi) {
+        (Harness::Sarathi, Some(model)) => sarathi::run(model, sink, spec, toolbox).await,
+        (Harness::Sarathi, None) => {
+            tracing::warn!(
+                purpose = spec.purpose,
+                "{OPTION_KEY} is \"sarathi\" but no registry model is set up; using the vyasa harness"
+            );
+            run_agent(provider, sink, spec, toolbox).await
+        }
+        (Harness::Vyasa, _) => run_agent(provider, sink, spec, toolbox).await,
     }
-    run_agent(provider, sink, spec, toolbox).await
 }
 
 /// What a tool's output proves to a completion check: `look` renders the
@@ -105,8 +113,9 @@ const EDIT_TOOLS: &[&str] = &["edit", "edit_menu"];
 
 /// A surface's [`Toolbox`] offered to Sarathi.
 ///
-/// The tools and their calls pass through unchanged; an `Err` stays an
-/// observation the model reads (a tool error, not a run failure). Each
+/// The tools and their calls pass through; an `Err` stays an observation
+/// the model reads (a tool error, not a run failure), and either is cut at
+/// the length Vyasa's loop cuts observations at. Each
 /// tool also gets what Sarathi's permission layer and completion gate
 /// need: read-only or edit by name, and `look` tagged as evidence.
 pub struct SarathiToolbox<'a> {
@@ -146,7 +155,13 @@ impl sarathi_tools::Toolbox for SarathiToolbox<'_> {
         name: &str,
         input: &Value,
     ) -> sarathi_tools::BoxFuture<'b, Result<String, String>> {
-        self.inner.call(name, input)
+        let call = self.inner.call(name, input);
+        Box::pin(async move {
+            match call.await {
+                Ok(out) => Ok(truncate(&out)),
+                Err(e) => Err(truncate(&e)),
+            }
+        })
     }
 }
 
@@ -215,7 +230,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn both_harness_values_give_the_same_outcome_until_the_sarathi_loop_lands() {
+    async fn sarathi_without_a_registry_model_runs_on_vyasas_loop() {
         use crate::agent::tests::{spec, EchoBox, NullSink, Scripted};
         let script = [
             r#"{"thought":"try","tool":"echo","input":{"msg":"hi"},"reply":""}"#,
@@ -227,6 +242,7 @@ mod tests {
             let out = run(
                 harness,
                 &Scripted::new(&script),
+                None,
                 &NullSink,
                 &spec(),
                 &mut toolbox,
@@ -236,7 +252,6 @@ mod tests {
             assert_eq!(toolbox.0.len(), 1, "the tool really ran");
             outcomes.push((out.reply, out.steps.len(), out.ran_out));
         }
-        assert!(!SARATHI_RUN_LOOP);
         assert_eq!(outcomes[0], outcomes[1]);
         assert_eq!(outcomes[0], ("All set.".to_owned(), 1, false));
     }

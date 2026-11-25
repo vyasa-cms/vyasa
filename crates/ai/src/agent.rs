@@ -169,7 +169,7 @@ fn protocol(tools: &[ToolDef]) -> String {
     out
 }
 
-fn truncate(observation: &str) -> String {
+pub(crate) fn truncate(observation: &str) -> String {
     if observation.chars().count() <= MAX_OBSERVATION_CHARS {
         return observation.to_owned();
     }

@@ -397,7 +397,7 @@ const SECTIONS: Section[] = [
       {
         key: "ai_harness",
         label: "Agent harness",
-        hint: "Which loop runs the Theme Studio agent. Both use the same models, budget and usage log. Sarathi is under evaluation; a server without its run loop uses Vyasa's and logs a warning.",
+        hint: "Which loop runs the Theme Studio agent. Both use the same models, budget and usage log. Sarathi is under evaluation and calls your first registered model with native tool use; without a registered model it uses Vyasa's loop and logs a warning.",
         kind: "select",
         options: [
           { value: "vyasa", label: "Vyasa (default)" },
