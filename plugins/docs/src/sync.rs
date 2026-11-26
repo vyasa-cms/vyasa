@@ -2126,7 +2126,7 @@ mod tests {
         assert!(done);
     }
 
-    /// A site like the krishiv.ai staging docs: three versions of about 200
+    /// A large docs site: three versions of about 200
     /// pages each, two read from release tags, one from the branch.
     fn three_versions() -> (RefCell<Fake>, Config) {
         const SHA_02: &str = "0202020202020202020202020202020202020202";
