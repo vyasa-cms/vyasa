@@ -222,7 +222,8 @@ pub struct HostCtx {
     pub ai_window: AiWindow,
     /// When the host will stop this call, for `call-budget-ms`.
     pub call_deadline: Option<std::time::Instant>,
-    /// The call's budget: an extended task's reads have their own quota.
+    /// The call's budget: an extended task counts every quota (reads,
+    /// writes, fetches, fetched bytes, model calls) on its own budget.
     pub budget: TaskBudget,
 }
 
@@ -258,13 +259,6 @@ impl HostEnv {
             viewer: None,
             budget: TaskBudget::Ordinary,
         }
-    }
-
-    /// The same environment under the extended budget.
-    #[must_use]
-    pub fn extended(mut self) -> Self {
-        self.budget = TaskBudget::Extended;
-        self
     }
 
     /// The same environment, serving `viewer`.
@@ -461,13 +455,16 @@ impl host::Host for HostCtx {
         if !url.starts_with("https://") {
             return Err(String::from("only https:// URLs may be fetched"));
         }
-        if self
+        match self
             .broker
-            .check_fetch(self.plugin_id, &url, self.extended_budget())
+            .fetch_gate(self.plugin_id, &url, self.extended_budget())
             .await
-            != crate::broker::Decision::Allowed
         {
-            return Err(String::from("capability-denied"));
+            crate::broker::Gate::Allowed => {}
+            crate::broker::Gate::NotGranted => return Err(String::from("capability-denied")),
+            crate::broker::Gate::OverQuota => {
+                return Err(String::from(crate::hostdata::QUOTA_EXCEEDED));
+            }
         }
         let Some(fetch) = self.fetch.clone() else {
             return Err(String::from(
@@ -482,7 +479,7 @@ impl host::Host for HostCtx {
             .record_bytes(self.plugin_id, body.len() as u64, self.extended_budget())
             .await
         {
-            return Err(String::from("byte quota exceeded"));
+            return Err(String::from(crate::hostdata::QUOTA_EXCEEDED));
         }
         Ok(body)
     }
@@ -584,13 +581,16 @@ impl host::Host for HostCtx {
         if !req.url.starts_with("https://") {
             return Err(String::from("only https:// URLs may be fetched"));
         }
-        if self
+        match self
             .broker
-            .check_fetch(self.plugin_id, &req.url, self.extended_budget())
+            .fetch_gate(self.plugin_id, &req.url, self.extended_budget())
             .await
-            != crate::broker::Decision::Allowed
         {
-            return Err(String::from("capability-denied"));
+            crate::broker::Gate::Allowed => {}
+            crate::broker::Gate::NotGranted => return Err(String::from("capability-denied")),
+            crate::broker::Gate::OverQuota => {
+                return Err(String::from(crate::hostdata::QUOTA_EXCEEDED));
+            }
         }
         let Some(fetch) = self.fetch.clone() else {
             return Err(String::from(
@@ -607,7 +607,7 @@ impl host::Host for HostCtx {
             )
             .await
         {
-            return Err(String::from("byte quota exceeded"));
+            return Err(String::from(crate::hostdata::QUOTA_EXCEEDED));
         }
         Ok(host::FetchResponse {
             status: reply.status,
@@ -693,13 +693,16 @@ impl host::Host for HostCtx {
         if system.chars().count() > MAX_AI_SYSTEM_CHARS {
             return Err(String::from("system prompt too long"));
         }
-        if self
+        match self
             .broker
-            .check_ai(self.plugin_id, self.extended_budget())
+            .ai_gate(self.plugin_id, self.extended_budget())
             .await
-            != crate::broker::Decision::Allowed
         {
-            return Err(String::from("capability-denied"));
+            crate::broker::Gate::Allowed => {}
+            crate::broker::Gate::NotGranted => return Err(String::from("capability-denied")),
+            crate::broker::Gate::OverQuota => {
+                return Err(String::from(crate::hostdata::QUOTA_EXCEEDED));
+            }
         }
         let Some(ai) = self.ai.clone() else {
             return Err(String::from("no text model is set up on this site"));

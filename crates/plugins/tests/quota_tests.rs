@@ -264,3 +264,143 @@ async fn writes_count_on_their_own_calls_budget() {
         Gate::OverQuota
     );
 }
+
+/// The call's budget reaches every quota'd host function, not only the
+/// broker: private writes (`kv-set`), audited writes (`update-post`),
+/// fetches (`fetch`, `fetch-with`) and model calls (`ai-complete`) made by
+/// an ordinary call stop at the ordinary limit with `quota-exceeded`,
+/// while the task's own budget is untouched.
+///
+/// With no fetch or model backend configured the gate still runs first, so
+/// an allowed call fails on the missing backend and a refused one on the
+/// quota: the error tells the two apart.
+#[tokio::test]
+async fn every_host_quota_counts_on_its_own_calls_budget() {
+    use vyasa_plugins::host::vyasa::plugin::host::{FetchRequest, PostPatch};
+    let db = TestDb::new().await;
+    let pool = db.pool().clone();
+    let repo = vyasa_db::repo::PluginsRepo::new(pool.clone());
+    let id = plugin(
+        &repo,
+        "sync",
+        serde_json::json!([
+            "kv:read",
+            "kv:write",
+            "db:write:posts",
+            "net:fetch:api.github.com",
+            "ai:text"
+        ]),
+    )
+    .await;
+    let overrides = parse_plugin_quotas(
+        "sync:writes=1,task_writes=2,fetches=1,task_fetches=2,ai_calls=1,task_ai_calls=2",
+    )
+    .unwrap();
+    let broker = std::sync::Arc::new(Broker::new(repo, pool.clone()).with_overrides(overrides));
+    let quota = Err::<(), _>("quota-exceeded".to_owned());
+    let patch = || PostPatch {
+        title: Some("t".into()),
+        body_html: None,
+        excerpt: None,
+        status: None,
+    };
+    let get = || FetchRequest {
+        url: "https://api.github.com/x".into(),
+        headers: Vec::new(),
+    };
+    inside_one_minute().await;
+
+    let mut render = call(&broker, &pool, id, TaskBudget::Ordinary);
+    let mut task = call(&broker, &pool, id, TaskBudget::Extended);
+
+    // Writes: one ordinary, then refused; the task's two remain, kv and
+    // audited post writes on the same budget.
+    assert!(render.kv_set("k".into(), "v".into()).await.is_ok());
+    assert_eq!(render.kv_set("k".into(), "v".into()).await, quota);
+    assert_eq!(render.update_post(1, patch()).await, quota);
+    assert!(task.kv_set("k".into(), "v".into()).await.is_ok());
+    let edited = task.update_post(1, patch()).await;
+    assert!(
+        edited.is_err() && edited != quota,
+        "gate passed: {edited:?}"
+    );
+    assert_eq!(task.kv_set("k".into(), "v".into()).await, quota);
+
+    // Fetches: `fetch` and `fetch-with` share the fetch budget.
+    let unconfigured = render.fetch("https://api.github.com/x".into()).await;
+    assert!(unconfigured.is_err() && unconfigured.map(|_| ()) != quota);
+    assert_eq!(render.fetch_with(get()).await.map(|_| ()), quota);
+    assert_eq!(
+        render
+            .fetch("https://api.github.com/x".into())
+            .await
+            .map(|_| ()),
+        quota
+    );
+    for _ in 0..2 {
+        let r = task.fetch_with(get()).await.map(|_| ());
+        assert!(
+            r.is_err() && r != quota,
+            "task fetch passed the gate: {r:?}"
+        );
+    }
+    assert_eq!(task.fetch_with(get()).await.map(|_| ()), quota);
+
+    // Model calls.
+    let r = render.ai_complete(String::new(), "hi".into()).await;
+    assert!(r.is_err() && r.map(|_| ()) != quota);
+    assert_eq!(
+        render
+            .ai_complete(String::new(), "hi".into())
+            .await
+            .map(|_| ()),
+        quota
+    );
+    for _ in 0..2 {
+        let r = task
+            .ai_complete(String::new(), "hi".into())
+            .await
+            .map(|_| ());
+        assert!(
+            r.is_err() && r != quota,
+            "task model call passed the gate: {r:?}"
+        );
+    }
+    assert_eq!(
+        task.ai_complete(String::new(), "hi".into())
+            .await
+            .map(|_| ()),
+        quota
+    );
+}
+
+/// Fetched bytes count on the call's own budget too: a task's large
+/// download does not use up what a page render may fetch, and the other way
+/// round.
+#[tokio::test]
+async fn fetched_bytes_count_on_their_own_calls_budget() {
+    let db = TestDb::new().await;
+    let pool = db.pool().clone();
+    let repo = vyasa_db::repo::PluginsRepo::new(pool.clone());
+    let id = plugin(
+        &repo,
+        "sync",
+        serde_json::json!(["net:fetch:api.github.com"]),
+    )
+    .await;
+    let overrides = parse_plugin_quotas("sync:bytes=100,task_bytes=300").unwrap();
+    let broker = Broker::new(repo, pool).with_overrides(overrides);
+    inside_one_minute().await;
+    assert!(broker.record_bytes(id, 100, false).await);
+    assert!(
+        !broker.record_bytes(id, 1, false).await,
+        "the ordinary bytes are spent"
+    );
+    assert!(
+        broker.record_bytes(id, 300, true).await,
+        "the task's bytes are all there"
+    );
+    assert!(!broker.record_bytes(id, 1, true).await);
+    // A huge count saturates instead of wrapping past the limit.
+    assert!(!broker.record_bytes(id, u64::MAX, true).await);
+}

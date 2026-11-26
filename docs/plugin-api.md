@@ -119,10 +119,10 @@ reinstalled from a package that declares them.
 | Wall clock | 40 epoch ticks x 50 ms = 2 s per call |
 | Concurrency | one instance and store **per call**: plugin calls run in parallel and share no state between requests |
 | Package size | 10 MiB per `.vyplugin` |
-| `ai-complete` prompt | 20 000 characters user, 8 000 system; 20 calls per minute per plugin |
+| `ai-complete` prompt | 20 000 characters user, 8 000 system; 20 calls per minute per plugin for ordinary calls, and 20 more for an extended task on its own budget (`ai_calls` / `task_ai_calls` lower them) |
 | Reads | 600 per minute per plugin (kv and database reads together); an extended task counts its reads apart, against 3 000 |
-| Writes | 120 per minute per plugin (kv and post writes together) |
-| Over a quota | the call returns the error `quota-exceeded` (a missing grant is `capability-denied`): the budget resets each minute, so pause and carry on, do not treat it as "no value" |
+| Writes | 120 per minute per plugin (kv and post writes together); an extended task counts its writes apart, against 600 |
+| Over a quota | the call returns the error `quota-exceeded` (reads, writes, fetches, fetched bytes and model calls alike; a missing grant is `capability-denied`): the budget resets each minute, so pause and carry on, do not treat it as "no value" |
 | Operator overrides | `VYASA_PLUGIN_QUOTAS` (or `plugin_quotas`) raises or lowers any per-minute limit per plugin, e.g. `vyasa-docs:task_reads=20000,reads=1200;*:writes=200`; limits are `reads`, `fetches`, `bytes`, `writes`, `ai_calls`, `task_` for the extended-task budget |
 | kv | 256 B keys, 64 KiB values, 10 000 keys per plugin |
 | Plugin blocks per page | 32; each is a fresh instantiation |
@@ -132,7 +132,7 @@ reinstalled from a package that declares them.
 | Post meta | 64 B keys, 16 KiB values, 64 keys per plugin per post |
 | Mail | 200-character subject, 32 KiB body, charged to the write quota |
 | Named filter payloads | 64 KiB in and out; a larger reply is ignored |
-| Extended task budget | for a task declared `"budget": "extended"` by a plugin holding `tasks:extended`: 60 s wall clock, 20 billion fuel, 3 000 reads, 300 fetches, 50 MiB fetched and 600 writes per minute, all counted apart from the plugin's other calls (a page render made while the task runs keeps the ordinary limits and spends its own budget); model calls keep their ordinary limit, also counted apart |
+| Extended task budget | for a task declared `"budget": "extended"` by a plugin holding `tasks:extended`: 60 s wall clock, 20 billion fuel, 3 000 reads, 300 fetches, 50 MiB fetched and 600 writes per minute, all counted apart from the plugin's other calls (a page render made while the task runs keeps the ordinary limits and spends its own budget); model calls keep their ordinary limit, also counted apart, so a plugin can spend up to twice that limit in paid calls while its task runs |
 | `fetch-with` headers | request and response allowlists above; header values 4 KiB |
 | `attrs-schema` | 16 KiB per block declaration (a larger schema is dropped, the block stays) |
 | Host API | `HOST_API_VERSION` is 2; a package whose manifest says `min_host_api` above it is refused at install |

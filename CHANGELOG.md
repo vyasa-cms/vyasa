@@ -9,6 +9,7 @@ follows [semantic versioning](https://semver.org) as described in
 
 ### Fixed
 - Plugin quotas: writes, fetches, fetched bytes and model calls are counted per call budget too, like reads. A page render or hook that ran while the plugin's extended task was going got the task's larger limits and spent the same counters; it now keeps the ordinary limits on its own counters, and the task keeps its whole budget.
+- Plugin quotas: an over-quota `fetch`, `fetch-with` or `ai-complete` returns `quota-exceeded`, as reads and writes do, instead of `capability-denied` (or `byte quota exceeded` for the fetched-bytes quota), so a task pauses instead of treating it as a missing grant. The audit row says which budget ran out. While an extended task runs, a plugin can make 20 model calls a minute on the ordinary budget and 20 on the task's (`task_ai_calls` lowers the task's share).
 
 ## [0.4.5] - 2026-11-26
 

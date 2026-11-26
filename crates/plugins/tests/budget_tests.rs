@@ -109,11 +109,13 @@ async fn an_ordinary_call_keeps_the_ordinary_fetch_quota_while_a_task_fetches() 
         .await
         .unwrap();
     let broker = Broker::new(repo, pool);
-    let count = |task: bool| {
+    // Ten tries past a budget's limit show where it stops; each try writes
+    // an audit row, so the test keeps to a few hundred.
+    let count = |task: bool, tries: u32| {
         let broker = broker.clone();
         async move {
             let mut allowed = 0;
-            for _ in 0..400 {
+            for _ in 0..tries {
                 if broker
                     .check_fetch(p.id, "https://api.github.com/x", task)
                     .await
@@ -133,14 +135,13 @@ async fn an_ordinary_call_keeps_the_ordinary_fetch_quota_while_a_task_fetches() 
     if secs % 60 > 50 {
         tokio::time::sleep(std::time::Duration::from_secs(61 - secs % 60)).await;
     }
+    let task_limit = Quotas::extended().fetches_per_min;
+    assert_eq!(count(true, task_limit + 10).await, task_limit as usize);
+    let ordinary_limit = Quotas::default().fetches_per_min;
     assert_eq!(
-        count(true).await,
-        Quotas::extended().fetches_per_min as usize
-    );
-    assert_eq!(
-        count(false).await,
-        Quotas::default().fetches_per_min as usize
+        count(false, ordinary_limit + 10).await,
+        ordinary_limit as usize
     );
     // Each budget stays spent on its own.
-    assert_eq!(count(true).await, 0);
+    assert_eq!(count(true, 10).await, 0);
 }

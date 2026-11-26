@@ -38,7 +38,9 @@ impl Default for Quotas {
             // Every completion is a paid provider call made on the site
             // owner's key. One every few seconds covers any honest use
             // from a hook, route or task; a plugin that wants more is
-            // spending someone else's money in a loop.
+            // spending someone else's money in a loop. An extended task
+            // has its own 20, so a plugin running one can make 40 a minute
+            // in all (`task_ai_calls` lowers the task's share).
             ai_calls_per_min: 20,
         }
     }
@@ -46,8 +48,11 @@ impl Default for Quotas {
 
 impl Quotas {
     /// The larger quotas an extended task runs under: more reads, fetches,
-    /// bytes and writes, because a sync is bulk work; model calls stay as
-    /// they are (money is not part of a longer budget).
+    /// bytes and writes, because a sync is bulk work. Model calls keep the
+    /// ordinary per-minute limit (money is not part of a longer budget),
+    /// but a task counts them on its own budget, so a plugin holding
+    /// `tasks:extended` can make up to twice `ai_calls_per_min` paid calls
+    /// a minute while a task runs; `task_ai_calls` lowers the task's share.
     ///
     /// Reads are cheap key lookups in the plugin's own storage. 600 a
     /// minute shared with every page render the plugin serves left a
@@ -337,27 +342,25 @@ impl Broker {
     }
 
     /// Gate a mutation whose effect is confined to the plugin's own
-    /// private storage: the grant plus one slot from the write quota, and
-    /// no audit row.
+    /// private storage: the grant plus one slot from the write quota of an
+    /// ordinary call (`task` false) or an extended task, each on its own
+    /// budget, and no audit row.
     ///
     /// A plugin writing its own key/value namespace is not doing anything
     /// an operator would reconstruct later, and at the quota ceiling it
     /// would have written 172 800 audit rows a day — burying the entries
     /// that do matter.
-    pub async fn check_private_write(&self, plugin_id: i64, cap: &Capability) -> Decision {
-        self.gate_write(plugin_id, cap, None, false).await.into()
-    }
-
-    /// [`Broker::check_private_write`] for an ordinary call (`task` false)
-    /// or an extended task, each on its own write budget, saying why a
-    /// refusal happened.
     pub async fn private_write_gate(&self, plugin_id: i64, cap: &Capability, task: bool) -> Gate {
         self.gate_write(plugin_id, cap, None, task).await
     }
 
-    /// [`Broker::check_write`] for an ordinary call (`task` false) or an
-    /// extended task, each on its own write budget, saying why a refusal
-    /// happened.
+    /// Gate a mutation with an effect outside the plugin: the grant, one
+    /// slot from the write quota of an ordinary call (`task` false) or an
+    /// extended task, each on its own budget, and an audit row.
+    ///
+    /// A denied read is a packaging mistake; a *successful* write that
+    /// touches content, post meta or someone's inbox is the thing an
+    /// operator needs to be able to reconstruct afterwards.
     pub async fn write_gate(
         &self,
         plugin_id: i64,
@@ -366,18 +369,6 @@ impl Broker {
         task: bool,
     ) -> Gate {
         self.gate_write(plugin_id, cap, Some(detail), task).await
-    }
-
-    /// Gate a mutation with an effect outside the plugin: the grant, one
-    /// slot from the write quota, and an audit row.
-    ///
-    /// A denied read is a packaging mistake; a *successful* write that
-    /// touches content, post meta or someone's inbox is the thing an
-    /// operator needs to be able to reconstruct afterwards.
-    pub async fn check_write(&self, plugin_id: i64, cap: &Capability, detail: &str) -> Decision {
-        self.gate_write(plugin_id, cap, Some(detail), false)
-            .await
-            .into()
     }
 
     async fn gate_write(
@@ -523,35 +514,40 @@ impl Broker {
     /// from the per-minute AI quota of an ordinary call (`task` false) or
     /// an extended task, each counted on its own.
     pub async fn check_ai(&self, plugin_id: i64, task: bool) -> Decision {
+        self.ai_gate(plugin_id, task).await.into()
+    }
+
+    /// [`Broker::check_ai`], saying why a refusal happened.
+    pub async fn ai_gate(&self, plugin_id: i64, task: bool) -> Gate {
         let granted = match self.granted_for(plugin_id).await {
             Ok(g) => g,
             Err(e) => {
                 self.audit(plugin_id, "deny", &Capability::AiText, &e.to_string())
                     .await;
-                return Decision::Denied;
+                return Gate::NotGranted;
             }
         };
         if !granted.iter().any(|g| g.implies(&Capability::AiText)) {
             self.audit(plugin_id, "deny", &Capability::AiText, "not granted")
                 .await;
-            return Decision::Denied;
+            return Gate::NotGranted;
         }
         let limit = self.quotas_as(plugin_id, task).ai_calls_per_min;
         let mut counters = self.counters.lock().await;
         let c = counters.entry(plugin_id).or_default().spent(task);
         if c.ai_calls >= limit {
             drop(counters);
-            self.audit(
-                plugin_id,
-                "quota",
-                &Capability::AiText,
-                "ai calls/min exceeded",
-            )
-            .await;
-            return Decision::Denied;
+            let detail = if task {
+                "ai calls/min exceeded (extended task)"
+            } else {
+                "ai calls/min exceeded"
+            };
+            self.audit(plugin_id, "quota", &Capability::AiText, detail)
+                .await;
+            return Gate::OverQuota;
         }
         c.ai_calls += 1;
-        Decision::Allowed
+        Gate::Allowed
     }
 
     /// Gate an outbound fetch to `url`, consuming one slot from the fetch +
@@ -560,6 +556,11 @@ impl Broker {
     /// call (`task` false) and an extended task each count on their own
     /// budget.
     pub async fn check_fetch(&self, plugin_id: i64, url: &str, task: bool) -> Decision {
+        self.fetch_gate(plugin_id, url, task).await.into()
+    }
+
+    /// [`Broker::check_fetch`], saying why a refusal happened.
+    pub async fn fetch_gate(&self, plugin_id: i64, url: &str, task: bool) -> Gate {
         let host = url_host(url);
         let Some(host) = host else {
             self.audit(
@@ -569,34 +570,38 @@ impl Broker {
                 "unparseable url",
             )
             .await;
-            return Decision::Denied;
+            return Gate::NotGranted;
         };
         let wanted = Capability::NetFetch(host.clone());
         let granted = match self.granted_for(plugin_id).await {
             Ok(g) => g,
             Err(e) => {
                 self.audit(plugin_id, "deny", &wanted, &e.to_string()).await;
-                return Decision::Denied;
+                return Gate::NotGranted;
             }
         };
         if !granted.iter().any(|g| g.implies(&wanted)) {
             self.audit(plugin_id, "deny", &wanted, "pattern not granted")
                 .await;
-            return Decision::Denied;
+            return Gate::NotGranted;
         }
         let limit = self.quotas_as(plugin_id, task).fetches_per_min;
         let mut counters = self.counters.lock().await;
         let c = counters.entry(plugin_id).or_default().spent(task);
         if c.fetches >= limit {
             drop(counters);
-            self.audit(plugin_id, "quota", &wanted, "fetches/min exceeded")
-                .await;
-            return Decision::Denied;
+            let detail = if task {
+                "fetches/min exceeded (extended task)"
+            } else {
+                "fetches/min exceeded"
+            };
+            self.audit(plugin_id, "quota", &wanted, detail).await;
+            return Gate::OverQuota;
         }
         c.fetches += 1;
         drop(counters);
         self.audit(plugin_id, "fetch", &wanted, url).await;
-        Decision::Allowed
+        Gate::Allowed
     }
 
     /// Records fetched bytes against the byte quota; over-budget callers
@@ -606,10 +611,11 @@ impl Broker {
         let limit = self.quotas_as(plugin_id, task).bytes_per_min;
         let mut counters = self.counters.lock().await;
         let c = counters.entry(plugin_id).or_default().spent(task);
-        if c.bytes + n > limit {
+        let total = c.bytes.saturating_add(n);
+        if total > limit {
             return false;
         }
-        c.bytes += n;
+        c.bytes = total;
         true
     }
 }
