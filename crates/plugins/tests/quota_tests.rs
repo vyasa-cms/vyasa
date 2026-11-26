@@ -391,6 +391,14 @@ async fn fetched_bytes_count_on_their_own_calls_budget() {
     let overrides = parse_plugin_quotas("sync:bytes=100,task_bytes=300").unwrap();
     let broker = Broker::new(repo, pool).with_overrides(overrides);
     inside_one_minute().await;
+    // The host always passes the fetch gate before it records bytes; the gate
+    // loads the grants and with them the plugin name the overrides match.
+    assert_eq!(
+        broker
+            .fetch_gate(id, "https://api.github.com/x", false)
+            .await,
+        Gate::Allowed
+    );
     assert!(broker.record_bytes(id, 100, false).await);
     assert!(
         !broker.record_bytes(id, 1, false).await,

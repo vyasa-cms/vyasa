@@ -606,7 +606,9 @@ impl Broker {
 
     /// Records fetched bytes against the byte quota; over-budget callers
     /// should abort the transfer. `task` picks the budget, as for
-    /// [`Broker::check_fetch`].
+    /// [`Broker::check_fetch`]. Call it after [`Broker::fetch_gate`] allowed
+    /// the request: the gate loads the plugin's name, which per-plugin
+    /// overrides (`VYASA_PLUGIN_QUOTAS`) are matched by.
     pub async fn record_bytes(&self, plugin_id: i64, n: u64, task: bool) -> bool {
         let limit = self.quotas_as(plugin_id, task).bytes_per_min;
         let mut counters = self.counters.lock().await;
