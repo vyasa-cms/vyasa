@@ -60,6 +60,7 @@ fn dummy_config(dir: &Path) -> VyasaConfig {
         run_dir: dir.join(".run"),
         debug: true,
         package_trusted_keys: Vec::new(),
+        plugin_quotas: Vec::new(),
         marketplace: vyasa_common::config::SourceConfig::default(),
         updates: vyasa_common::config::SourceConfig::default(),
         db: DbConfig {

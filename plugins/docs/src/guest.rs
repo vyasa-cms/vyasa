@@ -32,6 +32,30 @@ fn kv_text(key: &str) -> Option<String> {
     host::kv_get(key).ok().flatten()
 }
 
+/// What the sync task reads before it decides to run.
+struct TaskState {
+    settings: Settings,
+    prev: Status,
+    pending: Option<String>,
+    incomplete: bool,
+    last_run_ms: u64,
+}
+
+/// [`TaskState`], or the host's error when a read is refused.
+fn task_state() -> Result<TaskState, String> {
+    Ok(TaskState {
+        settings: host::kv_get(SETTINGS_KEY)?
+            .map(|j| Settings::from_json(&j))
+            .unwrap_or_default(),
+        prev: Status::parse(host::kv_get(status::STATUS_KEY)?.as_deref()),
+        pending: host::kv_get(PENDING_KEY)?.filter(|p| !p.is_empty()),
+        incomplete: host::kv_get("sync/complete")?.as_deref() != Some("1"),
+        last_run_ms: host::kv_get("sync/last-run-ms")?
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
+    })
+}
+
 /// The sync algorithm's view of the host.
 struct HostEnv;
 
@@ -60,8 +84,8 @@ impl Env for HostEnv {
         host::now_ms()
     }
 
-    fn kv_get(&mut self, key: &str) -> Option<String> {
-        kv_text(key)
+    fn kv_get(&mut self, key: &str) -> Result<Option<String>, String> {
+        host::kv_get(key)
     }
 
     fn kv_set(&mut self, key: &str, value: &str) -> Result<(), String> {
@@ -72,8 +96,8 @@ impl Env for HostEnv {
         let _ = host::kv_delete(key);
     }
 
-    fn kv_list(&mut self, prefix: &str) -> Vec<String> {
-        host::kv_list(prefix, 1000).unwrap_or_default()
+    fn kv_list(&mut self, prefix: &str) -> Result<Vec<String>, String> {
+        host::kv_list(prefix, 1000)
     }
 
     fn put_entry(&mut self, e: &Entry) -> Result<Put, String> {
@@ -245,12 +269,33 @@ impl Guest for Docs {
         if !sync::sync_fits(total) {
             return Ok(());
         }
-        let s = settings();
+        // The task's own bookkeeping, read strictly: a read the host refuses
+        // for its per-minute quota is not "no settings" or "no status".
+        // Taking it for that made a busy minute skip the sync, or record a
+        // status with no pages. Skip this minute instead; nothing is lost.
+        let state = match task_state() {
+            Ok(state) => state,
+            Err(e) if e.starts_with(sync::QUOTA_EXCEEDED) => {
+                host::log(
+                    host::LogLevel::Info,
+                    "docs sync waits a minute: the host's storage read quota is spent",
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                host::log(
+                    host::LogLevel::Warn,
+                    &format!("docs sync skipped: its state could not be read: {e}"),
+                );
+                return Ok(());
+            }
+        };
+        let s = state.settings;
         if !s.configured() {
             return Ok(());
         }
         let now = host::now_ms();
-        let prev = Status::parse(kv_text(status::STATUS_KEY).as_deref());
+        let prev = state.prev;
         let cfg = match s.sync_config() {
             Ok(c) => c,
             Err(e) => {
@@ -258,17 +303,18 @@ impl Guest for Docs {
                 return Err(e);
             }
         };
-        let pending = kv_text(PENDING_KEY).filter(|p| !p.is_empty());
-        let incomplete = kv_text("sync/complete").as_deref() != Some("1");
-        let last: u64 = kv_text("sync/last-run-ms")
-            .and_then(|v| v.parse().ok())
-            .unwrap_or(0);
+        let pending = state.pending;
+        let incomplete = state.incomplete;
+        let last = state.last_run_ms;
         let due =
             pending.is_some() || incomplete || now.saturating_sub(last) >= s.poll_minutes * 60_000;
         if !due {
             return Ok(());
         }
-        host::kv_set("sync/last-run-ms", &now.to_string())?;
+        match host::kv_set("sync/last-run-ms", &now.to_string()) {
+            Err(e) if e.starts_with(sync::QUOTA_EXCEEDED) => return Ok(()),
+            other => other?,
+        }
         // Stop short of the host's own deadline: a trap would disable the plugin.
         let usable = sync::usable_ms(total);
         let long = total > sync::ORDINARY_BUDGET_MS;
@@ -292,6 +338,8 @@ impl Guest for Docs {
             "docs sync {}: {} created, {} updated, {} unchanged, {} removed, {} requests{}",
             if report.finished {
                 "finished"
+            } else if report.throttled {
+                "paused at the host's per-minute quota (will continue)"
             } else {
                 "paused (will continue)"
             },

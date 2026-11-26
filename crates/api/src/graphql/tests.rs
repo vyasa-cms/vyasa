@@ -44,6 +44,7 @@ fn dummy_config() -> VyasaConfig {
         run_dir: PathBuf::from("/tmp"),
         debug: true,
         package_trusted_keys: Vec::new(),
+        plugin_quotas: Vec::new(),
         marketplace: vyasa_common::config::SourceConfig::default(),
         updates: vyasa_common::config::SourceConfig::default(),
         db: DbConfig {

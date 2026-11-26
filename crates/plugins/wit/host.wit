@@ -176,6 +176,10 @@ interface host {
 
     log: func(level: log-level, message: string);
 
+    /// Reads of posts and public options. `get-post` and `query-posts`
+    /// need `db:read:posts`, `get-option` needs `db:read:options`. A read
+    /// over the call's per-minute quota returns the error
+    /// `quota-exceeded` (a missing grant is `capability-denied`).
     get-post: func(id: u64) -> result<post-summary, string>;
 
     query-posts: func(filter-post-type: option<string>, limit: u32) -> result<list<post-summary>, string>;
@@ -197,7 +201,9 @@ interface host {
 
     /// Private key/value storage. Every key is scoped to the calling
     /// plugin, so two plugins using the same key never see each other's
-    /// value and no key can reach a site option. Needs `kv:read`.
+    /// value and no key can reach a site option. Needs `kv:read`. A read
+    /// over the plugin's per-minute quota returns the error
+    /// `quota-exceeded`: not "no value", retry next minute.
     kv-get: func(key: string) -> result<option<string>, string>;
 
     /// Stores a value. Needs `kv:write`.

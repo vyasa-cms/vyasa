@@ -389,6 +389,10 @@ pub struct VyasaConfig {
     /// (`VYASA_SOCIAL_CARD_CACHE_BYTES`, default 32 MiB, at least 1 MiB).
     #[serde(default = "default_social_card_cache_bytes")]
     pub social_card_cache_bytes: u64,
+    /// Operator overrides of plugin quotas (`VYASA_PLUGIN_QUOTAS`, e.g.
+    /// `vyasa-docs:task_reads=20000`); see [`crate::plugin_quota`].
+    #[serde(default)]
+    pub plugin_quotas: Vec<crate::plugin_quota::PluginQuotaOverride>,
 }
 
 /// Default [`VyasaConfig::social_card_cache_bytes`]: 32 MiB.
@@ -485,6 +489,7 @@ struct RawConfig {
     csp_cloudflare_web_analytics: Option<bool>,
     demo: Option<DemoConfig>,
     social_card_cache_bytes: Option<u64>,
+    plugin_quotas: Option<String>,
 }
 
 impl TryFrom<RawConfig> for VyasaConfig {
@@ -539,6 +544,9 @@ impl TryFrom<RawConfig> for VyasaConfig {
                 "social_card_cache_bytes must be at least 1048576 (1 MiB), got {social_card_cache_bytes}"
             )));
         }
+        let plugin_quotas =
+            crate::plugin_quota::parse_plugin_quotas(raw.plugin_quotas.as_deref().unwrap_or(""))
+                .map_err(crate::AppError::validation)?;
         let trusted_proxies = raw
             .trusted_proxies
             .unwrap_or_default()
@@ -574,6 +582,7 @@ impl TryFrom<RawConfig> for VyasaConfig {
             trust_cf_connecting_ip: raw.trust_cf_connecting_ip.unwrap_or(false),
             csp_cloudflare_web_analytics: raw.csp_cloudflare_web_analytics.unwrap_or(false),
             social_card_cache_bytes,
+            plugin_quotas,
             demo: raw.demo.unwrap_or_default(),
         })
     }
@@ -861,6 +870,23 @@ mod tests {
         let keyed = VyasaConfig::load_from_file(&path).expect("load with keys");
         assert_eq!(keyed.package_trusted_keys, vec!["aa11", "bb22"]);
         std::env::remove_var("VYASA_PLUGIN_TRUSTED_KEYS");
+        assert!(cfg.plugin_quotas.is_empty(), "no overrides by default");
+        // Plugin quota overrides from the environment, validated at load.
+        std::env::set_var(
+            "VYASA_PLUGIN_QUOTAS",
+            "vyasa-docs:task_reads=20000,reads=1200",
+        );
+        let quotas = VyasaConfig::load_from_file(&path).expect("load with quotas");
+        assert_eq!(quotas.plugin_quotas.len(), 2);
+        assert_eq!(quotas.plugin_quotas[0].plugin, "vyasa-docs");
+        assert!(quotas.plugin_quotas[0].task);
+        assert_eq!(quotas.plugin_quotas[0].value, 20000);
+        std::env::set_var("VYASA_PLUGIN_QUOTAS", "vyasa-docs:speed=1");
+        assert!(
+            VyasaConfig::load_from_file(&path).is_err(),
+            "unknown limit refused"
+        );
+        std::env::remove_var("VYASA_PLUGIN_QUOTAS");
         assert_eq!(cfg.bind_addr, "127.0.0.1:9999");
         assert_eq!(cfg.media_dir, std::path::PathBuf::from("media"));
         assert_eq!(cfg.index_dir, std::path::PathBuf::from("index"));
