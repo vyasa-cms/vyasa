@@ -414,11 +414,11 @@ impl Broker {
         Gate::Allowed
     }
 
-    /// Gate a database read (an extended task's own budget while an
-    /// extended scope is alive).
+    /// Gate a database read made by an ordinary call, counted on the
+    /// ordinary read budget. Host functions use [`Self::read_gate`] with
+    /// the call's own budget instead, so a refusal can say why.
     pub async fn check_db_read(&self, plugin_id: i64, cap: Capability) -> Decision {
-        let task = self.in_extended_scope(plugin_id);
-        self.read_gate(plugin_id, cap, task).await.into()
+        self.read_gate(plugin_id, cap, false).await.into()
     }
 
     /// Gate a database or key-value read made by an ordinary call (`task`

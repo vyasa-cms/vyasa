@@ -470,15 +470,22 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
         cx.report.up_to_date = true;
         return Ok(());
     }
-    for (i, sha) in heads.iter().enumerate() {
-        cx.env.kv_set(&format!("sync/head/{i}"), sha)?;
-    }
     let commit = heads[0].clone();
     cx.report.commit.clone_from(&commit);
     let combined = heads.join(",");
-    if cx.env.kv_get("sync/commit")?.as_deref() != Some(combined.as_str()) {
-        cx.env.kv_set("sync/commit", &combined)?;
+    // A new commit is marked unfinished before anything else is written:
+    // a write refused part way (a quiet pause now) must not leave
+    // `complete = "1"` beside a new commit, or the next tick would take
+    // the half-done sync for a finished one and wait `poll_minutes`.
+    let new_commit = cx.env.kv_get("sync/commit")?.as_deref() != Some(combined.as_str());
+    if new_commit {
         cx.env.kv_set("sync/complete", "0")?;
+    }
+    for (i, sha) in heads.iter().enumerate() {
+        cx.env.kv_set(&format!("sync/head/{i}"), sha)?;
+    }
+    if new_commit {
+        cx.env.kv_set("sync/commit", &combined)?;
     }
     let commit_of = |r: &str| -> String {
         refs.iter()
@@ -1503,6 +1510,11 @@ mod tests {
         window_reads: std::cell::Cell<u32>,
         /// Reads the quota refused.
         refused_reads: std::cell::Cell<u32>,
+        /// From the first write to this key on, every write is refused as
+        /// over quota (a write quota spent part way through a run).
+        refuse_writes_from: Option<String>,
+        /// Whether `refuse_writes_from` has been reached.
+        refusing_writes: std::cell::Cell<bool>,
     }
 
     impl Fake {
@@ -1674,6 +1686,15 @@ mod tests {
             Ok(v)
         }
         fn kv_set(&mut self, key: &str, value: &str) -> Result<(), String> {
+            {
+                let f = self.0.borrow();
+                if f.refuse_writes_from.as_deref() == Some(key) {
+                    f.refusing_writes.set(true);
+                }
+                if f.refusing_writes.get() {
+                    return Err(QUOTA_EXCEEDED.to_owned());
+                }
+            }
             self.0
                 .borrow()
                 .kv
@@ -1899,6 +1920,58 @@ mod tests {
             .0
             .blocks_json
             .contains("Changed body"));
+    }
+
+    #[test]
+    fn a_write_refused_while_recording_a_new_commit_leaves_it_unfinished() {
+        for key in ["sync/complete", "sync/head/0", "sync/commit"] {
+            let f = fake_with(repo_one());
+            let b = budget(&f);
+            assert!(run(&mut Wrap(&f), &cfg(), None, b).unwrap().finished);
+            {
+                let mut fk = f.borrow_mut();
+                let mut files = fk.commits[SHA1].clone();
+                files.insert(
+                    "docs/guides/install.md".into(),
+                    "# Install\n\nChanged body.\n".into(),
+                );
+                fk.commits.insert(SHA2.into(), files);
+                fk.head = SHA2.into();
+                fk.refuse_writes_from = Some(key.to_owned());
+                fk.now += 60_000;
+            }
+            let b = budget(&f);
+            let report = run(&mut Wrap(&f), &cfg(), None, b)
+                .unwrap_or_else(|e| panic!("{key}: a refused write must not fail the run: {e}"));
+            assert!(!report.finished, "{key}");
+            {
+                let fk = f.borrow();
+                let kv = fk.kv.borrow();
+                // Never "finished" beside a commit that was not synced.
+                assert!(
+                    kv.get("sync/complete").map(String::as_str) != Some("1")
+                        || kv.get("sync/commit").map(String::as_str) == Some(SHA1),
+                    "{key}: complete = 1 for commit {:?}",
+                    kv.get("sync/commit")
+                );
+            }
+            {
+                let mut fk = f.borrow_mut();
+                fk.refuse_writes_from = None;
+                fk.refusing_writes.set(false);
+                fk.now += 60_000;
+            }
+            let b = budget(&f);
+            let report = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
+            assert!(report.finished, "{key}: {report:?}");
+            assert!(
+                f.borrow().entries["main:guides/install.md"]
+                    .0
+                    .blocks_json
+                    .contains("Changed body"),
+                "{key}"
+            );
+        }
     }
 
     #[test]

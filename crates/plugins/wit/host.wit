@@ -176,6 +176,10 @@ interface host {
 
     log: func(level: log-level, message: string);
 
+    /// Reads of posts and public options. `get-post` and `query-posts`
+    /// need `db:read:posts`, `get-option` needs `db:read:options`. A read
+    /// over the call's per-minute quota returns the error
+    /// `quota-exceeded` (a missing grant is `capability-denied`).
     get-post: func(id: u64) -> result<post-summary, string>;
 
     query-posts: func(filter-post-type: option<string>, limit: u32) -> result<list<post-summary>, string>;

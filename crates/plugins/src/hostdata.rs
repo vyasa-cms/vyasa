@@ -44,7 +44,7 @@ pub struct Ctx<'a> {
 pub const QUOTA_EXCEEDED: &str = "quota-exceeded";
 
 impl Ctx<'_> {
-    async fn allow_read(&self, cap: Capability) -> Result<(), String> {
+    pub(crate) async fn allow_read(&self, cap: Capability) -> Result<(), String> {
         match self.broker.read_gate(self.plugin_id, cap, self.task).await {
             Gate::Allowed => Ok(()),
             Gate::NotGranted => Err(String::from("capability-denied")),

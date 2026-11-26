@@ -276,7 +276,8 @@ impl HostEnv {
 }
 
 impl HostCtx {
-    /// The subject + destination bundle the data host functions take.
+    /// The subject + destination bundle the data host functions take; its
+    /// reads count on this call's own budget (ordinary or extended).
     fn data_ctx(&self) -> crate::hostdata::Ctx<'_> {
         crate::hostdata::Ctx {
             broker: &self.broker,
@@ -322,14 +323,9 @@ impl host::Host for HostCtx {
     }
 
     async fn get_post(&mut self, id: u64) -> Result<host::PostSummary, String> {
-        if self
-            .broker
-            .check_db_read(self.plugin_id, crate::capabilities::Capability::DbReadPosts)
-            .await
-            != crate::broker::Decision::Allowed
-        {
-            return Err(String::from("capability-denied"));
-        }
+        self.data_ctx()
+            .allow_read(crate::capabilities::Capability::DbReadPosts)
+            .await?;
         let Ok(Some(row)) = sqlx::query_as::<
             _,
             (
@@ -367,14 +363,9 @@ impl host::Host for HostCtx {
         filter_post_type: Option<String>,
         limit: u32,
     ) -> Result<Vec<host::PostSummary>, String> {
-        if self
-            .broker
-            .check_db_read(self.plugin_id, crate::capabilities::Capability::DbReadPosts)
-            .await
-            != crate::broker::Decision::Allowed
-        {
-            return Err(String::from("capability-denied"));
-        }
+        self.data_ctx()
+            .allow_read(crate::capabilities::Capability::DbReadPosts)
+            .await?;
         let lim = i64::from(limit.clamp(1, 100));
         let rows = sqlx::query_as::<_, (i64, String, String, String, String)>(
             "SELECT id, type::text, slug, title, COALESCE(excerpt,'') FROM posts \
@@ -401,17 +392,9 @@ impl host::Host for HostCtx {
     }
 
     async fn get_option(&mut self, key: String) -> Result<Option<String>, String> {
-        if self
-            .broker
-            .check_db_read(
-                self.plugin_id,
-                crate::capabilities::Capability::DbReadOptions,
-            )
-            .await
-            != crate::broker::Decision::Allowed
-        {
-            return Err(String::from("capability-denied"));
-        }
+        self.data_ctx()
+            .allow_read(crate::capabilities::Capability::DbReadOptions)
+            .await?;
         if !PUBLIC_OPTIONS.contains(&key.as_str()) {
             return Err(String::from("capability-denied"));
         }

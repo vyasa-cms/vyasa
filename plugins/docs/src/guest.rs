@@ -273,12 +273,22 @@ impl Guest for Docs {
         // for its per-minute quota is not "no settings" or "no status".
         // Taking it for that made a busy minute skip the sync, or record a
         // status with no pages. Skip this minute instead; nothing is lost.
-        let Ok(state) = task_state() else {
-            host::log(
-                host::LogLevel::Info,
-                "docs sync waits a minute: the host's storage read quota is spent",
-            );
-            return Ok(());
+        let state = match task_state() {
+            Ok(state) => state,
+            Err(e) if e.starts_with(sync::QUOTA_EXCEEDED) => {
+                host::log(
+                    host::LogLevel::Info,
+                    "docs sync waits a minute: the host's storage read quota is spent",
+                );
+                return Ok(());
+            }
+            Err(e) => {
+                host::log(
+                    host::LogLevel::Warn,
+                    &format!("docs sync skipped: its state could not be read: {e}"),
+                );
+                return Ok(());
+            }
         };
         let s = state.settings;
         if !s.configured() {

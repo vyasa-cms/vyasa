@@ -6,6 +6,8 @@
 use vyasa_common::plugin_quota::parse_plugin_quotas;
 use vyasa_plugins::broker::{Broker, Gate, Quotas};
 use vyasa_plugins::capabilities::Capability;
+use vyasa_plugins::host::vyasa::plugin::host::Host as _;
+use vyasa_plugins::host::{AiWindow, HostCtx, TaskBudget};
 use vyasa_testkit::TestDb;
 
 /// The broker counts per wall-clock minute; a count that crosses into the
@@ -21,6 +23,30 @@ async fn inside_one_minute() {
             return;
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+    }
+}
+
+/// One call's host context for `plugin_id`, under `budget`.
+fn call(
+    broker: &std::sync::Arc<Broker>,
+    pool: &sqlx::PgPool,
+    plugin_id: i64,
+    budget: TaskBudget,
+) -> HostCtx {
+    HostCtx {
+        plugin_name: String::from("t"),
+        plugin_id,
+        limits: None,
+        wasi: wasmtime_wasi::WasiCtxBuilder::new().build(),
+        table: wasmtime_wasi::ResourceTable::new(),
+        broker: std::sync::Arc::clone(broker),
+        dest: pool.clone(),
+        ai: None,
+        fetch: None,
+        viewer: None,
+        ai_window: AiWindow::Unbounded,
+        call_deadline: None,
+        budget,
     }
 }
 
@@ -72,18 +98,76 @@ async fn a_refusal_names_a_missing_grant_apart_from_a_spent_quota() {
     let db = TestDb::new().await;
     let pool = db.pool().clone();
     let repo = vyasa_db::repo::PluginsRepo::new(pool.clone());
-    let id = plugin(&repo, "reader", serde_json::json!(["kv:read"])).await;
-    let overrides = parse_plugin_quotas("reader:writes=0").unwrap();
+    let writer = plugin(&repo, "writer", serde_json::json!(["kv:read", "kv:write"])).await;
+    let reader = plugin(&repo, "reader", serde_json::json!(["kv:read"])).await;
+    let overrides = parse_plugin_quotas("*:writes=0").unwrap();
     let broker = Broker::new(repo, pool).with_overrides(overrides);
+    // Granted, but no writes left this minute.
     assert_eq!(
-        broker.private_write_gate(id, &Capability::KvWrite).await,
+        broker
+            .private_write_gate(writer, &Capability::KvWrite)
+            .await,
+        Gate::OverQuota
+    );
+    // Not granted: said as such even with no writes left.
+    assert_eq!(
+        broker
+            .private_write_gate(reader, &Capability::KvWrite)
+            .await,
         Gate::NotGranted
     );
     assert_eq!(
         broker
-            .read_gate(id, Capability::DbReadComments, false)
+            .read_gate(reader, Capability::DbReadComments, false)
             .await,
         Gate::NotGranted
+    );
+}
+
+/// Every host read (`get-option`, `get-post`, `query-posts`, `kv-get`,
+/// `kv-list`) counts on its own call's budget: an ordinary call made while
+/// the plugin's extended task is running spends the ordinary budget, not
+/// the task's, and a spent budget reads `quota-exceeded`.
+#[tokio::test]
+async fn host_reads_count_on_their_own_calls_budget() {
+    let db = TestDb::new().await;
+    let pool = db.pool().clone();
+    let repo = vyasa_db::repo::PluginsRepo::new(pool.clone());
+    let id = plugin(
+        &repo,
+        "docs",
+        serde_json::json!(["db:read:options", "db:read:posts", "kv:read"]),
+    )
+    .await;
+    let overrides = parse_plugin_quotas("docs:reads=3,task_reads=4").unwrap();
+    let broker = std::sync::Arc::new(Broker::new(repo, pool.clone()).with_overrides(overrides));
+    inside_one_minute().await;
+    // The task is running: its scope is alive for the whole test.
+    let _scope = broker.extended_scope(id);
+
+    let mut render = call(&broker, &pool, id, TaskBudget::Ordinary);
+    assert!(render.get_option("site_title".into()).await.is_ok());
+    assert!(render.query_posts(None, 1).await.is_ok());
+    assert!(render.kv_get("k".into()).await.is_ok());
+    assert_eq!(
+        render.get_option("site_title".into()).await,
+        Err("quota-exceeded".to_owned()),
+        "a render's spent budget says so, on get-option too"
+    );
+    assert_eq!(
+        render.get_post(1).await.map(|_| ()),
+        Err("quota-exceeded".to_owned())
+    );
+
+    // The task's four reads are all still there.
+    let mut task = call(&broker, &pool, id, TaskBudget::Extended);
+    assert!(task.kv_get("k".into()).await.is_ok());
+    assert!(task.kv_list(String::new(), 10).await.is_ok());
+    assert!(task.get_option("site_title".into()).await.is_ok());
+    assert!(task.query_posts(None, 1).await.is_ok());
+    assert_eq!(
+        task.kv_get("k".into()).await,
+        Err("quota-exceeded".to_owned())
     );
 }
 
