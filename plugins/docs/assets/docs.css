@@ -112,11 +112,12 @@
 /* A page name is often one long token (functions/tuple-sketch-summary-integer): the links shrink and the
    name breaks anywhere, and on a phone the two links stack, so the page never scrolls sideways. */
 .docs-pager { display: flex; justify-content: space-between; gap: 1rem; margin-top: 2.5rem; }
-@media (max-width: 48rem) { .docs-pager { flex-direction: column; } .docs-pager__next { margin-left: 0; } }
 .docs-pager__link { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: .75rem 1rem; border: 1px solid var(--docs-border); border-radius: var(--docs-radius); text-decoration: none; color: var(--docs-text); }
 .docs-pager__next { text-align: right; margin-left: auto; }
 .docs-pager__hint { font-size: .75rem; color: var(--docs-muted); }
 .docs-pager__title { overflow-wrap: anywhere; font-weight: 600; color: var(--docs-accent); }
+/* After the pager rules, so it overrides .docs-pager__next's auto margin at narrow widths. */
+@media (max-width: 48rem) { .docs-pager { flex-direction: column; } .docs-pager__next { margin-left: 0; } }
 
 /* Blocks */
 .docs-tabs { margin: 1rem 0; border: 1px solid var(--docs-border); border-radius: var(--docs-radius); overflow: hidden; }

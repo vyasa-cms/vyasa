@@ -28,7 +28,9 @@ read correctly without it). The script is served on every page but only
 touches the docs page body (the `docs-main` and `docs-content` sections):
 code blocks and tables elsewhere are left as the theme draws them. A theme
 that wants Copy buttons on other code blocks, such as blog posts, puts a
-`data-docs-copy` attribute on their container.
+`data-docs-copy` attribute on their container. The scope follows the section ids of the
+default `doc` layout: a site that renames `docs-main` or `docs-content` in
+the layout editor adds `data-docs-copy` to keep the Copy buttons.
 
 ## Settings
 
