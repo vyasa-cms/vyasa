@@ -11,11 +11,17 @@ follows [semantic versioning](https://semver.org) as described in
 
 - `csp_cloudflare_web_analytics` (`VYASA_CSP_CLOUDFLARE_WEB_ANALYTICS=true`, default off): adds `https://static.cloudflareinsights.com` to the Content-Security-Policy `script-src`, so the beacon of Cloudflare's automatic Web Analytics setup is not blocked. It covers the edge-injected tag only; the manual snippet reports to `cloudflareinsights.com`, which `default-src 'self'` still blocks. `script-src` stays `'self'` unless it is set.
 
+## [0.4.4] - 2026-11-24
+
 ### Fixed
+- Docs plugin 0.1.12: the sidebar, pager and breadcrumbs no longer scan the whole page tree for every node (a quadratic walk). On a site with several docs versions (about 3,000 pages) a section render ran past the plugin's time limit and the repeated traps disabled the plugin. The tree is indexed once per render.
 - A plugin's settings form shows what the plugin declares now, not what it declared when it loaded: the docs plugin's "Last sync" line was frozen at server start. `GET /api/v1/plugins/{id}/form` asks the plugin again; the admin uses it on open, after a save and every minute. Re-reading the form never counts against the plugin: a time or fuel trap there drops the cached instance, keeps the form from load and records no strike.
 
 ### Added
+- Social cards: a theme can declare a `[social_card]` layout (background PNG, font, title and label boxes, post types), and with the new `social_cards` setting on (Settings → Advanced, shown when the active theme has a valid layout) an entry of those types with no image of its own gets a generated 1200×630 PNG as its `og:image`, with `og:image:width`, `og:image:height` and `og:image:alt`. Cards are served from `/_card/{id}-{key}.png`; the key changes with the title, label, theme version and the theme's card files, so a stale URL redirects to the current one. At most two cards render at once; rendered cards are cached in memory (`VYASA_SOCIAL_CARD_CACHE_BYTES`, 32 MiB by default) and purged at the edge when their entry changes. Drafts, password-protected entries and non-public post types get no card. `GET /api/v1/social-cards` reports whether the active theme can draw them, and names any post type in the layout the site does not have (a notice: cards stay on); activating such a theme names them too. The starter docs theme has a layout for docs pages.
 - The plugin detail view shows the plugin's status and its scheduled tasks (interval, last run, last error), and says that a turned-off plugin's settings come back when it is on.
+- Archive templates can draw blog cards: each entry in `posts` carries `image` (the featured media's URL, width, height and alt, or none), `sticky`, `iso_date` and its `terms`; `featured` lists the pinned entries and `categories` lists the categories with an entry count and archive URL.
+- Entry pages of flat post types get `newer`, `older` (the neighbouring published entries of the same type and language) and `related` (up to three entries sharing the most terms, newest first). Publishing or changing an entry drops the cached pages of its neighbours and related entries only, not every page.
 
 ## [0.4.3] - 2026-11-22
 

@@ -7,6 +7,8 @@
 //! queries anything, so every output is a pure function of the payload and
 //! caches with the page.
 
+use std::collections::HashMap;
+
 use serde_json::Value;
 
 use crate::blocks::esc;
@@ -60,6 +62,10 @@ pub struct Page {
     pub tree: Vec<Node>,
     /// The page's headings.
     pub toc: Vec<Toc>,
+    /// Position in `tree` by id: built once by [`parse`], so a lookup is not a walk of the tree.
+    by_id: HashMap<String, usize>,
+    /// Positions in `tree` of each parent's children, in sibling order.
+    kids: HashMap<Option<String>, Vec<usize>>,
 }
 
 fn node_of(v: &Value) -> Option<Node> {
@@ -95,7 +101,7 @@ pub fn parse(payload: &Value) -> Option<Page> {
     if !tree.iter().any(|n| n.id == id) {
         tree.extend(node_of(entry));
     }
-    Some(Page {
+    let mut page = Page {
         id: id.to_owned(),
         ancestors: entry["ancestors"]
             .as_array()?
@@ -117,12 +123,38 @@ pub fn parse(payload: &Value) -> Option<Page> {
                     .collect()
             })
             .unwrap_or_default(),
-    })
+        by_id: HashMap::new(),
+        kids: HashMap::new(),
+    };
+    page.reindex();
+    Some(page)
 }
 
 impl Page {
+    /// Builds the id and children indexes. A tree of a thousand pages is read
+    /// by every section of every page, so each lookup must be a map read:
+    /// scanning the tree per node made the sidebar quadratic, and on a site
+    /// with several versions it ran past the plugin's time limit.
+    fn reindex(&mut self) {
+        self.by_id.clear();
+        self.kids.clear();
+        for (i, n) in self.tree.iter().enumerate() {
+            self.by_id.entry(n.id.clone()).or_insert(i);
+            self.kids.entry(n.parent.clone()).or_default().push(i);
+        }
+        let tree = &self.tree;
+        for v in self.kids.values_mut() {
+            v.sort_by(|&a, &b| {
+                tree[a]
+                    .position
+                    .cmp(&tree[b].position)
+                    .then_with(|| tree[a].id.cmp(&tree[b].id))
+            });
+        }
+    }
+
     fn node(&self, id: &str) -> Option<&Node> {
-        self.tree.iter().find(|n| n.id == id)
+        self.by_id.get(id).map(|&i| &self.tree[i])
     }
 
     fn current(&self) -> Option<&Node> {
@@ -131,13 +163,10 @@ impl Page {
 
     /// Children of `parent` (`None` = top level), in order.
     fn children(&self, parent: Option<&str>) -> Vec<&Node> {
-        let mut v: Vec<&Node> = self
-            .tree
-            .iter()
-            .filter(|n| n.parent.as_deref() == parent)
-            .collect();
-        v.sort_by(|a, b| a.position.cmp(&b.position).then_with(|| a.id.cmp(&b.id)));
-        v
+        self.kids
+            .get(&parent.map(str::to_owned))
+            .map(|v| v.iter().map(|&i| &self.tree[i]).collect())
+            .unwrap_or_default()
     }
 
     /// The version entry this page lives under, if it is not in the latest tree.
@@ -529,6 +558,55 @@ fn search_form(page: &Page, term: &str, placeholder: &str) -> String {
 mod tests {
     use super::*;
     use serde_json::json;
+
+    /// Three versions of about a thousand pages each (staging's shape): every section of a deep page,
+    /// from the payload the host sends, must render in well under the plugin's 2 s limit even unoptimised.
+    #[test]
+    fn a_site_of_three_thousand_pages_renders_every_section_quickly() {
+        let mut tree = Vec::new();
+        for v in 0..3 {
+            let vid = format!("v{v}");
+            tree.push(json!({"id": vid, "parent_id": null, "position": v, "title": format!("0.{v}"), "slug": format!("0-{v}"), "url": format!("/docs/0-{v}"), "fields": {"version_root": true}}));
+            for g in 0..20 {
+                let gid = format!("v{v}g{g}");
+                tree.push(json!({"id": gid, "parent_id": vid, "position": g, "title": format!("Group {g}"), "slug": format!("g{g}"), "url": format!("/docs/0-{v}/g{g}"), "fields": {}}));
+                for p in 0..49 {
+                    tree.push(json!({"id": format!("{gid}p{p}"), "parent_id": gid, "position": p, "title": format!("Page {p}"), "slug": format!("p{p}"), "url": format!("/docs/0-{v}/g{g}/p{p}"), "fields": {}}));
+                }
+            }
+        }
+        assert!(tree.len() > 2900);
+        let start = std::time::Instant::now();
+        for kind in [
+            "docs/sidebar",
+            "docs/toc",
+            "docs/pager",
+            "docs/breadcrumbs",
+            "docs/search",
+            "docs/version-banner",
+        ] {
+            let payload = json!({"kind": kind, "settings": {}, "bound": [], "editor": false, "context": {
+                "entry": {"id": "v2g19p48", "ancestors": ["v2", "v2g19"]},
+                "toc": [], "tree": tree}});
+            let out = crate::sections::render(
+                &payload.to_string(),
+                &crate::settings::Settings::default(),
+            );
+            if kind == "docs/sidebar" {
+                assert!(out.contains("docs-nav") && out.contains("aria-current"));
+            }
+        }
+        assert!(
+            start.elapsed() < std::time::Duration::from_millis(4000),
+            "took {:?}",
+            start.elapsed()
+        );
+        eprintln!(
+            "six sections over {} pages: {:?}",
+            tree.len(),
+            start.elapsed()
+        );
+    }
 
     fn n(id: &str, parent: Option<&str>, pos: i64, title: &str, url: &str, fields: Value) -> Value {
         json!({"id": id, "parent_id": parent, "position": pos, "title": title, "slug": url.rsplit('/').next().unwrap(), "url": url, "fields": fields})

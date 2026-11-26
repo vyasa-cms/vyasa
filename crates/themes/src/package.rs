@@ -141,6 +141,10 @@ pub struct ParsedTheme {
     pub screenshot_png: Option<Vec<u8>>,
     /// Pictures and fonts under `assets/images/` and `assets/fonts/`.
     pub files: Vec<ThemeFile>,
+    /// Why the manifest's `[social_card]` layout cannot be used, when it
+    /// has one that fails a rule. The theme still installs; cards stay off
+    /// for it.
+    pub social_card_error: Option<String>,
 }
 
 /// Package-level failure with an author-facing message.
@@ -243,10 +247,11 @@ pub fn parse_vytheme(bytes: &[u8]) -> Result<ParsedTheme, PackageError> {
 
     // Pass 2: read required files.
     let manifest_toml = read_required(&mut archive, "manifest.toml")?;
-    let manifest: ThemeManifest = toml::from_str(
-        std::str::from_utf8(&manifest_toml).map_err(|_| err("manifest.toml is not valid UTF-8"))?,
-    )
-    .map_err(|e| err(format!("manifest.toml: {e}")))?;
+    let manifest_str =
+        std::str::from_utf8(&manifest_toml).map_err(|_| err("manifest.toml is not valid UTF-8"))?;
+    let manifest: ThemeManifest =
+        toml::from_str(manifest_str).map_err(|e| err(format!("manifest.toml: {e}")))?;
+    let social_card = social_card_section(manifest_str);
     if !valid_name(&manifest.name) {
         return Err(err(format!(
             "manifest.toml: name \"{}\" must match [a-z0-9-]{{1,60}}",
@@ -352,6 +357,9 @@ pub fn parse_vytheme(bytes: &[u8]) -> Result<ParsedTheme, PackageError> {
             assets.insert(key.to_owned(), serde_json::Value::String(src));
         }
     }
+    if let Some(section) = &social_card {
+        assets.insert(SOCIAL_CARD_KEY.to_owned(), section.clone());
+    }
     let assets_json = (!assets.is_empty()).then_some(serde_json::Value::Object(assets));
 
     // Pass 4b: bundled pictures and fonts. Kept out of the JSON row: they
@@ -437,6 +445,10 @@ pub fn parse_vytheme(bytes: &[u8]) -> Result<ParsedTheme, PackageError> {
         Err(e) => return Err(err(format!("cannot open screenshot.png: {e}"))),
     };
 
+    let social_card_error = social_card
+        .as_ref()
+        .and_then(|section| check_social_card(section, &files).err());
+
     Ok(ParsedTheme {
         manifest,
         tokens_json,
@@ -445,7 +457,59 @@ pub fn parse_vytheme(bytes: &[u8]) -> Result<ParsedTheme, PackageError> {
         templates,
         screenshot_png,
         files,
+        social_card_error,
     })
+}
+
+/// The key the `[social_card]` section is stored under in a theme's assets
+/// JSON, beside `css` and `js`: it versions and rolls back with them.
+pub const SOCIAL_CARD_KEY: &str = "social_card";
+
+/// The manifest's `[social_card]` section as JSON, when it has one. Read
+/// apart from [`ThemeManifest`] so a broken section never fails the
+/// package: it only keeps cards off.
+fn social_card_section(manifest: &str) -> Option<serde_json::Value> {
+    let table: toml::Table = toml::from_str(manifest).ok()?;
+    let section = table.get("social_card")?;
+    Some(serde_json::to_value(section).unwrap_or(serde_json::Value::Null))
+}
+
+/// Loads a stored card section against the theme's files: every rule of
+/// the layout, both files present, the background a 1200x630 PNG and the
+/// font parseable.
+///
+/// # Errors
+/// The first rule that fails, as an author-facing message.
+pub fn load_social_card(
+    section: &serde_json::Value,
+    file: impl Fn(&str) -> Option<Vec<u8>>,
+) -> Result<vyasa_core::social_card::CardTheme, String> {
+    let layout: vyasa_core::social_card::CardLayout =
+        serde_json::from_value(section.clone()).map_err(|e| format!("social_card: {e}"))?;
+    layout.validate()?;
+    let background = file(&layout.background).ok_or_else(|| {
+        format!(
+            "social_card.background \"{}\" is not a file in the theme",
+            layout.background
+        )
+    })?;
+    let font = file(&layout.font).ok_or_else(|| {
+        format!(
+            "social_card.font \"{}\" is not a file in the theme",
+            layout.font
+        )
+    })?;
+    vyasa_core::social_card::CardTheme::load(layout, &section.to_string(), &background, &font)
+}
+
+fn check_social_card(section: &serde_json::Value, files: &[ThemeFile]) -> Result<(), String> {
+    load_social_card(section, |path| {
+        files
+            .iter()
+            .find(|f| f.path == path)
+            .map(|f| f.bytes.clone())
+    })
+    .map(|_| ())
 }
 
 /// An SVG served from this origin is a document, and a document can

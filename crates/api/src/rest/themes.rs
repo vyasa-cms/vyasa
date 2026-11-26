@@ -33,6 +33,15 @@ pub struct ThemeResponse {
     pub is_active: bool,
     /// The package manifest's version this row came from, when it did.
     pub package_version: Option<i64>,
+    /// Why the theme's `[social_card]` layout cannot be used: social cards
+    /// stay off while this theme is active. Only on install and activate,
+    /// and only when the theme declares a layout that fails.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub social_card_error: Option<String>,
+    /// The `[social_card]` layout's post types the server does not know
+    /// (a notice: cards stay on). Only on activate.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub social_card_unknown_post_types: Vec<String>,
 }
 
 impl From<ThemeRow> for ThemeResponse {
@@ -43,6 +52,8 @@ impl From<ThemeRow> for ThemeResponse {
             version: i64::from(row.version),
             is_active: row.is_active,
             package_version: row.package_version.map(i64::from),
+            social_card_error: None,
+            social_card_unknown_post_types: Vec::new(),
         }
     }
 }
@@ -156,7 +167,9 @@ pub async fn install(
     crate::theme_assets::store_files(&state, row.id, &parsed.files).await?;
     let mut row = row;
     row.package_version = Some(package_version);
-    Ok((StatusCode::CREATED, Json(ThemeResponse::from(row))))
+    let mut out = ThemeResponse::from(row);
+    out.social_card_error = parsed.social_card_error;
+    Ok((StatusCode::CREATED, Json(out)))
 }
 
 /// One bundled file of a theme version, as listed.
@@ -488,7 +501,20 @@ pub async fn activate(
     );
     let mut out = row.clone();
     out.is_active = true;
-    Ok(Json(ThemeResponse::from(out)))
+    let mut out = ThemeResponse::from(out);
+    // The theme is active by now: a failed card lookup is logged, never
+    // reported as a failed activation.
+    match crate::public::routes::load_card(&state, row).await {
+        Ok(Some(Ok(source))) => {
+            out.social_card_unknown_post_types =
+                crate::social_card::unknown_post_types(&state, &source.theme.layout().post_types)
+                    .await;
+        }
+        Ok(Some(Err(e))) => out.social_card_error = Some(e),
+        Ok(None) => {}
+        Err(e) => tracing::warn!("social card layout of theme {} not checked: {e}", row.name),
+    }
+    Ok(Json(out))
 }
 
 /// Notifies webhook subscribers that the active theme changed.

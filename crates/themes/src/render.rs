@@ -76,6 +76,25 @@ pub struct PageContext {
     pub lang: Option<String>,
     /// Post cards for listing templates.
     pub posts: Vec<PostCard>,
+    /// Pinned entries of the listed type, newest first, for a "Featured"
+    /// block above an archive (`featured` in templates). Filled on the
+    /// first page of a type archive only; empty everywhere else.
+    pub featured: Vec<PostCard>,
+    /// The categories of the listed type that file a published entry, by
+    /// name, for a category bar (`categories`). Filled on type and
+    /// category archives only.
+    pub categories: Vec<TermCount>,
+    /// On an entry of a flat (non-hierarchical) type: the next newer and
+    /// the next older published entry of the same type and language
+    /// (`newer`, `older` in templates). `None` at either end and on every
+    /// other page.
+    pub newer: Option<PostCard>,
+    /// See [`Self::newer`].
+    pub older: Option<PostCard>,
+    /// On an entry of a flat type: up to three published entries of the
+    /// same type sharing a category or tag with it, most shared first
+    /// (`related`). Empty elsewhere.
+    pub related: Vec<PostCard>,
     /// 1-based current page of the listing.
     pub pagination_page: u32,
     /// HREF of the newer page, if any.
@@ -131,8 +150,23 @@ pub struct TermLink {
     pub taxonomy: String,
 }
 
+/// A card's picture: the entry's featured image (`p.image` in templates).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CardImage {
+    /// Image URL, a site path (a mid-sized rendition when one exists).
+    pub url: String,
+    /// Pixel width of the image at `url`, when known.
+    pub width: Option<u32>,
+    /// Pixel height of the image at `url`, when known.
+    pub height: Option<u32>,
+    /// The media item's own alternative text (may be empty).
+    pub alt: String,
+    /// Blurhash placeholder, when the upload computed one.
+    pub blurhash: Option<String>,
+}
+
 /// One list item rendered by index/archive templates.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct PostCard {
     /// Entry title.
     pub title: String,
@@ -153,6 +187,45 @@ pub struct PostCard {
     pub date: String,
     /// The entry's custom field values for display (`p.fields.<key>`).
     pub fields: serde_json::Map<String, serde_json::Value>,
+    /// RFC 3339 publication time, for `<time datetime>` (empty if unknown).
+    pub iso_date: String,
+    /// The featured image, when the entry has one that still exists.
+    pub image: Option<CardImage>,
+    /// Pinned ("sticky") entry.
+    pub sticky: bool,
+    /// The entry's categories and tags, by taxonomy then name.
+    pub terms: Vec<TermLink>,
+}
+
+/// A term a listing can link to, with how many published entries it files
+/// (`categories` in archive templates).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TermCount {
+    /// Display name.
+    pub name: String,
+    /// Archive URL.
+    pub url: String,
+    /// Published entries filed under it.
+    pub count: i64,
+}
+
+/// A card as templates read it.
+fn card_json(p: &PostCard) -> serde_json::Value {
+    serde_json::json!({
+        "title": p.title, "url": p.url, "excerpt": p.excerpt,
+        "snippet": p.snippet,
+        "author": p.author, "date": p.date,
+        "iso_date": p.iso_date,
+        "fields": p.fields,
+        "image": p.image.as_ref().map(|i| serde_json::json!({
+            "url": i.url, "width": i.width, "height": i.height,
+            "alt": i.alt, "blurhash": i.blurhash,
+        })),
+        "sticky": p.sticky,
+        "terms": p.terms.iter().map(|t| serde_json::json!({
+            "name": t.name, "url": t.url, "taxonomy": t.taxonomy,
+        })).collect::<Vec<_>>(),
+    })
 }
 
 fn static_chrome(kind: &str, site: &SiteMeta) -> Option<String> {
@@ -396,12 +469,14 @@ pub async fn render_page(req: RenderRequest<'_>) -> Result<String, EngineError> 
             "base_css": page_base_css(tokens, layout, page, site.base_css_href.is_some()),
             "base_css_href": site.base_css_href,
         },
-        "posts": page.posts.iter().map(|p| serde_json::json!({
-            "title": p.title, "url": p.url, "excerpt": p.excerpt,
-            "snippet": p.snippet,
-            "author": p.author, "date": p.date,
-            "fields": p.fields,
+        "posts": page.posts.iter().map(card_json).collect::<Vec<_>>(),
+        "featured": page.featured.iter().map(card_json).collect::<Vec<_>>(),
+        "categories": page.categories.iter().map(|c| serde_json::json!({
+            "name": c.name, "url": c.url, "count": c.count,
         })).collect::<Vec<_>>(),
+        "newer": page.newer.as_ref().map(card_json),
+        "older": page.older.as_ref().map(card_json),
+        "related": page.related.iter().map(card_json).collect::<Vec<_>>(),
         "entry": page.entry,
         "pagination": {
             "page": page.pagination_page,
