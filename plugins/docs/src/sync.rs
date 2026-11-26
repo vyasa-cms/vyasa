@@ -27,8 +27,14 @@ pub const FORMAT: &str = "f3";
 pub const MAX_PAGE_BYTES: u64 = 512 * 1024;
 /// Page text kept between the scan and the write of one run.
 const MAX_KEPT_BODIES: usize = 8 * 1024 * 1024;
-/// Most pages one site may import.
-pub const MAX_PAGES: usize = 2000;
+/// Most documents one sync may list, over the main tree and every section
+/// together. 2,000 stopped a site with three sections of 650 pages plus its
+/// main tree (2,672) before any write; each run is limited by its request and
+/// write budgets anyway, so the cap only guards against a wrong folder.
+pub const MAX_PAGES: usize = 5000;
+/// Key prefix of the commit an unfinished sync works on, per ref: its hash
+/// and GitHub's etag for it, one value, so a 304 names the right commit.
+const WORKING_PREFIX: &str = "sync/working/";
 /// Key prefix of the packed scan cache. The broker allows 600 key-value
 /// reads a minute even in an extended task, so a site of a thousand pages
 /// cannot keep one key per page: the cache is a few packs of ~40 KB.
@@ -442,22 +448,42 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
                     cx.cfg.repo.name,
                     github::encode_path(r)
                 );
-                let kept = cx.env.kv_get(&head_key)?;
-                let etag = cx.env.kv_get(&etag_key)?;
-                let use_etag = done && kept.is_some();
+                // A finished sync asks with the etag of the commit it
+                // finished. An unfinished one asks with the etag of the
+                // commit it is working on, kept beside that commit in one
+                // value: without a token GitHub allows 60 API calls an hour,
+                // and a 304 does not count, while asking for every head in
+                // full each minute used them all within half an hour, so a
+                // long import failed with 403 before it could finish.
+                let (kept, etag) = if done {
+                    (cx.env.kv_get(&head_key)?, cx.env.kv_get(&etag_key)?)
+                } else {
+                    match cx.env.kv_get(&format!("{WORKING_PREFIX}{i}"))? {
+                        Some(v) => match v.split_once('\n') {
+                            Some((sha, e)) => (Some(sha.to_owned()), Some(e.to_owned())),
+                            None => (None, None),
+                        },
+                        None => (None, None),
+                    }
+                };
+                let use_etag = kept.is_some() && etag.is_some();
                 let reply = cx.get(
                     &url,
                     "application/vnd.github.sha",
                     if use_etag { etag.as_deref() } else { None },
                 )?;
-                if reply.status == 304 {
+                if reply.status == 304 && use_etag {
                     kept.unwrap_or_default()
                 } else {
                     all_unchanged = false;
+                    let sha = reply.body.trim().to_owned();
                     if let Some(e) = &reply.etag {
                         let _ = cx.env.kv_set(&format!("{etag_key}-next"), e);
+                        let _ = cx
+                            .env
+                            .kv_set(&format!("{WORKING_PREFIX}{i}"), &format!("{sha}\n{e}"));
                     }
-                    reply.body.trim().to_owned()
+                    sha
                 }
             }
         };
@@ -466,7 +492,9 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
         }
         heads.push(sha);
     }
-    if all_unchanged {
+    // Unchanged heads mean nothing to do only once the sync of them finished;
+    // an unfinished one carries on with them.
+    if all_unchanged && done {
         cx.report.up_to_date = true;
         return Ok(());
     }
@@ -2202,11 +2230,17 @@ mod tests {
     /// A large docs site: three versions of about 200
     /// pages each, two read from release tags, one from the branch.
     fn three_versions() -> (RefCell<Fake>, Config) {
+        three_versions_of(200)
+    }
+
+    /// Three sections (two tags and the main branch) of `pages` pages each,
+    /// beside the main tree of the same `pages`.
+    fn three_versions_of(pages: usize) -> (RefCell<Fake>, Config) {
         const SHA_02: &str = "0202020202020202020202020202020202020202";
         const SHA_03: &str = "0303030303030303030303030303030303030303";
         let version = |v: &str| -> Files {
             let mut files = Files::new();
-            for i in 0..200 {
+            for i in 0..pages {
                 files.insert(
                     format!("docs/area{}/page{i}.md", i % 12),
                     format!("---\ntitle: Page {i}\n---\n# Page {i} ({v})\n\nBody {i} of {v}.\n"),
@@ -2283,6 +2317,67 @@ mod tests {
             .filter(|k| k.starts_with("s:") && k.ends_with(".md"))
             .count();
         assert_eq!(pages, 600, "every page of every version is imported");
+    }
+
+    /// Krishiv's site: a main tree and three sections of about 700 pages
+    /// each (2,800 documents) was refused before any write at 2,000.
+    #[test]
+    fn four_trees_of_seven_hundred_pages_are_listed_and_imported() {
+        let (f, c) = three_versions_of(700);
+        let b = task_budget(&f);
+        let r = run(&mut Wrap(&f), &c, None, b);
+        let r = r.expect("2,800 documents are under the cap");
+        assert!(r.created > 0, "the first run writes pages: {r:?}");
+    }
+
+    #[test]
+    fn more_documents_than_the_cap_are_refused_with_the_count() {
+        let (f, c) = three_versions_of(MAX_PAGES / 4 + 1);
+        let b = task_budget(&f);
+        let e = run(&mut Wrap(&f), &c, None, b).unwrap_err();
+        assert!(e.contains("documents found") && e.contains(&MAX_PAGES.to_string()), "{e}");
+    }
+
+    /// Without a token GitHub allows 60 API calls an hour and a 304 is free.
+    /// An unfinished sync asked for every head in full each minute, used the
+    /// hour's calls within half an hour and then failed every run with 403.
+    /// Now each head is fetched in full once; later runs ask with its etag.
+    #[test]
+    fn an_unfinished_sync_asks_for_its_heads_with_their_etags() {
+        let (f, c) = three_versions();
+        let mut runs = 0;
+        loop {
+            runs += 1;
+            assert!(runs <= 12, "the sync did not finish in 12 scheduled runs");
+            let b = task_budget(&f);
+            let r = run(&mut Wrap(&f), &c, None, b).unwrap();
+            f.borrow_mut().now += 60_000;
+            if r.finished {
+                assert!(!r.up_to_date, "an unchanged head does not end an unfinished sync");
+                break;
+            }
+        }
+        assert!(runs > 1, "the import takes several runs");
+        let fk = f.borrow();
+        let commit_asks: Vec<&Option<String>> = fk
+            .requests
+            .iter()
+            .zip(&fk.etag_seen)
+            .filter(|(u, _)| u.contains("/commits/"))
+            .map(|(_, e)| e)
+            .collect();
+        assert_eq!(commit_asks.len(), 3 * runs, "three refs a run");
+        assert_eq!(
+            commit_asks.iter().filter(|e| e.is_none()).count(),
+            3,
+            "each head is fetched in full once"
+        );
+        let pages = fk
+            .entries
+            .keys()
+            .filter(|k| k.starts_with("s:") && k.ends_with(".md"))
+            .count();
+        assert_eq!(pages, 600);
     }
 
     /// Page renders spend most of the plugin's read budget. A run that the

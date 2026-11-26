@@ -165,7 +165,7 @@ line trashes the section's pages on the next sync.
 
 ## Limits
 
-512 KiB per page, 2000 pages, nesting up to 8 levels, 12 versions. Images are
+512 KiB per page, 5000 documents over the main tree and every section together, nesting up to 8 levels, 12 versions. Images are
 shown from public repositories only (their address is the raw file at the
 commit). Footnotes and math are left as literal text.
 
