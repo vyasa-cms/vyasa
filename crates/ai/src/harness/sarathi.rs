@@ -394,10 +394,19 @@ mod tests {
     }
 
     impl Scripted {
-        fn new(wire: Wire, replies: &[Option<String>]) -> Self {
+        fn new(wire: Wire, replies: &[String]) -> Self {
             Self {
                 wire,
-                replies: Mutex::new(replies.iter().cloned().collect()),
+                replies: Mutex::new(replies.iter().cloned().map(Some).collect()),
+                bodies: Mutex::new(Vec::new()),
+            }
+        }
+
+        /// A model whose one call fails as an outage.
+        fn unreachable(wire: Wire) -> Self {
+            Self {
+                wire,
+                replies: Mutex::new(VecDeque::from([None])),
                 bodies: Mutex::new(Vec::new()),
             }
         }
@@ -479,7 +488,7 @@ mod tests {
     }
 
     /// An answer that calls `calls` (`(id, tool, input)`) after `text`.
-    fn anthropic(text: Option<&str>, calls: &[(&str, &str, Value)]) -> Option<String> {
+    fn anthropic(text: Option<&str>, calls: &[(&str, &str, Value)]) -> String {
         let mut blocks = Vec::new();
         if let Some(t) = text {
             blocks.push(json!({"type": "text", "text": t}));
@@ -492,15 +501,13 @@ mod tests {
         } else {
             "tool_use"
         };
-        Some(
-            json!({"id": "msg_1", "type": "message", "role": "assistant", "model": "scripted",
-                   "content": blocks, "stop_reason": stop,
-                   "usage": {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 2}})
-            .to_string(),
-        )
+        json!({"id": "msg_1", "type": "message", "role": "assistant", "model": "scripted",
+               "content": blocks, "stop_reason": stop,
+               "usage": {"input_tokens": 10, "output_tokens": 5, "cache_read_input_tokens": 2}})
+        .to_string()
     }
 
-    fn openai(text: Option<&str>, calls: &[(&str, &str, Value)]) -> Option<String> {
+    fn openai(text: Option<&str>, calls: &[(&str, &str, Value)]) -> String {
         let tool_calls: Vec<Value> = calls
             .iter()
             .map(|(id, name, input)| {
@@ -517,17 +524,18 @@ mod tests {
         } else {
             "tool_calls"
         };
-        Some(
-            json!({"id": "c1", "model": "scripted",
-                   "choices": [{"index": 0, "message": message, "finish_reason": finish}],
-                   "usage": {"prompt_tokens": 10, "completion_tokens": 5}})
-            .to_string(),
-        )
+        json!({"id": "c1", "model": "scripted",
+               "choices": [{"index": 0, "message": message, "finish_reason": finish}],
+               "usage": {"prompt_tokens": 10, "completion_tokens": 5}})
+        .to_string()
     }
+
+    /// `(provider, model, purpose, prompt tokens, completion tokens)`.
+    type UsageRow = (String, String, String, u32, u32);
 
     #[derive(Default)]
     struct Recorder {
-        rows: Mutex<Vec<(String, String, String, u32, u32)>>,
+        rows: Mutex<Vec<UsageRow>>,
         failures: Mutex<Vec<String>>,
     }
 
@@ -610,7 +618,7 @@ mod tests {
         for (wire, answer) in [
             (
                 Wire::Anthropic,
-                anthropic as fn(Option<&str>, &[(&str, &str, Value)]) -> Option<String>,
+                anthropic as fn(Option<&str>, &[(&str, &str, Value)]) -> String,
             ),
             (Wire::OpenAi, openai),
         ] {
@@ -693,7 +701,7 @@ mod tests {
 
     #[tokio::test]
     async fn a_model_that_cannot_be_reached_is_an_error_and_a_failure_row() {
-        let model = Scripted::new(Wire::Anthropic, &[None]);
+        let model = Scripted::unreachable(Wire::Anthropic);
         let sink = Recorder::default();
         let mut page = Page::default();
         let err = go(&model, &sink, &spec(12, Vec::new()), &mut page)
@@ -739,7 +747,7 @@ mod tests {
         for (wire, answer) in [
             (
                 Wire::Anthropic,
-                anthropic as fn(Option<&str>, &[(&str, &str, Value)]) -> Option<String>,
+                anthropic as fn(Option<&str>, &[(&str, &str, Value)]) -> String,
             ),
             (Wire::OpenAi, openai),
         ] {

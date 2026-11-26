@@ -280,7 +280,6 @@ mod tests {
         let failed: sarathi_tools::ToolResult = tb.call("frobnicate", &json!({})).await.into();
         assert!(failed.is_error);
         assert_eq!(failed.content, "no tool frobnicate");
-        drop(tb);
         assert_eq!(studio.edits, 1);
     }
 }
