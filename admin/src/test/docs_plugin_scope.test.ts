@@ -52,11 +52,11 @@ describe("docs plugin script scope", () => {
 
   it("treats a container a theme marks with data-docs-copy like the docs body", () => {
     run(
-      '<div class="kc-read" data-docs-copy><pre><code>pip install krishiv</code></pre></div>' +
+      '<div class="post-body" data-docs-copy><pre><code>pip install example</code></pre></div>' +
         '<div class="kp"><pre class="code"><code>home</code></pre></div>',
     );
     expect(document.querySelectorAll(".docs-copy")).toHaveLength(1);
-    expect(document.querySelector(".kc-read pre .docs-copy")).not.toBeNull();
+    expect(document.querySelector(".post-body pre .docs-copy")).not.toBeNull();
     expect(document.querySelector(".kp pre .docs-copy")).toBeNull();
   });
 });
