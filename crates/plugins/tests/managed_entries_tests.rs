@@ -59,6 +59,7 @@ fn ctx<'a>(e: &'a Env, id: i64) -> Ctx<'a> {
         broker: &e.broker,
         pool: &e.pool,
         plugin_id: id,
+        task: false,
     }
 }
 

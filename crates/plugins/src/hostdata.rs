@@ -8,7 +8,7 @@
 
 use sqlx::PgPool;
 
-use crate::broker::{Broker, Decision};
+use crate::broker::{Broker, Decision, Gate};
 use crate::capabilities::Capability;
 
 /// Longest key a plugin may use.
@@ -35,14 +35,20 @@ pub struct Ctx<'a> {
     pub pool: &'a PgPool,
     /// Calling plugin.
     pub plugin_id: i64,
+    /// Whether the call is an extended task (its reads have their own budget).
+    pub task: bool,
 }
 
+/// The error a read or write over its per-minute budget returns: a pause,
+/// not a missing grant. The budget resets each minute.
+pub const QUOTA_EXCEEDED: &str = "quota-exceeded";
+
 impl Ctx<'_> {
-    async fn allow_read(&self, cap: Capability) -> Result<(), String> {
-        if self.broker.check_db_read(self.plugin_id, cap).await == Decision::Allowed {
-            Ok(())
-        } else {
-            Err(String::from("capability-denied"))
+    pub(crate) async fn allow_read(&self, cap: Capability) -> Result<(), String> {
+        match self.broker.read_gate(self.plugin_id, cap, self.task).await {
+            Gate::Allowed => Ok(()),
+            Gate::NotGranted => Err(String::from("capability-denied")),
+            Gate::OverQuota => Err(String::from(QUOTA_EXCEEDED)),
         }
     }
 
@@ -58,18 +64,18 @@ impl Ctx<'_> {
 
     /// A write confined to the plugin's own storage: quota'd, not audited.
     async fn allow_private_write(&self, cap: &Capability) -> Result<(), String> {
-        if self.broker.check_private_write(self.plugin_id, cap).await == Decision::Allowed {
-            Ok(())
-        } else {
-            Err(String::from("capability-denied"))
+        match self.broker.private_write_gate(self.plugin_id, cap).await {
+            Gate::Allowed => Ok(()),
+            Gate::NotGranted => Err(String::from("capability-denied")),
+            Gate::OverQuota => Err(String::from(QUOTA_EXCEEDED)),
         }
     }
 
     async fn allow_write(&self, cap: &Capability, detail: &str) -> Result<(), String> {
-        if self.broker.check_write(self.plugin_id, cap, detail).await == Decision::Allowed {
-            Ok(())
-        } else {
-            Err(String::from("capability-denied"))
+        match self.broker.write_gate(self.plugin_id, cap, detail).await {
+            Gate::Allowed => Ok(()),
+            Gate::NotGranted => Err(String::from("capability-denied")),
+            Gate::OverQuota => Err(String::from(QUOTA_EXCEEDED)),
         }
     }
 }
