@@ -250,6 +250,7 @@ impl AppState {
             300,
         )));
         let secret = token_secret(&config);
+        let plugin_quotas = config.plugin_quotas.clone();
         let ai_models = ai_registry(&config, &pool);
         let social_cards = std::sync::Arc::new(crate::social_card::SocialCards::new(
             config.social_card_cache_bytes,
@@ -292,10 +293,10 @@ impl AppState {
             surface_epoch: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             theme_bundle: crate::public::routes::BundleCache::default(),
             breakers: std::sync::Arc::default(),
-            broker: std::sync::Arc::new(vyasa_plugins::broker::Broker::new(
-                plugins_repo2,
-                broker_pool,
-            )),
+            broker: std::sync::Arc::new(
+                vyasa_plugins::broker::Broker::new(plugins_repo2, broker_pool)
+                    .with_overrides(plugin_quotas),
+            ),
             preview_assets: moka::sync::Cache::builder()
                 .max_capacity(128)
                 .time_to_idle(std::time::Duration::from_secs(600))

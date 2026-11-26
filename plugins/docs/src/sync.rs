@@ -51,23 +51,26 @@ struct ScanCache {
 }
 
 impl ScanCache {
-    fn load<E: Env>(env: &mut E) -> Self {
-        let mut packs = env.kv_list(PACK_PREFIX);
+    /// Reads every pack. A refused read stops the load: a cache that looked
+    /// empty because the host said "not now" made a throttled sync fetch
+    /// every page again, and never finish.
+    fn load<E: Env>(env: &mut E) -> Result<Self, String> {
+        let mut packs = env.kv_list(PACK_PREFIX)?;
         packs.sort();
         let mut map = BTreeMap::new();
         for k in &packs {
             let parsed = env
-                .kv_get(k)
+                .kv_get(k)?
                 .and_then(|v| serde_json::from_str::<BTreeMap<String, String>>(&v).ok());
             if let Some(m) = parsed {
                 map.extend(m);
             }
         }
-        Self {
+        Ok(Self {
             map,
             packs,
             dirty: false,
-        }
+        })
     }
 
     fn insert(&mut self, sha: &str, text: &str) {
@@ -227,7 +230,11 @@ pub trait Env {
     /// Milliseconds since the epoch.
     fn now_ms(&self) -> u64;
     /// Reads a stored value.
-    fn kv_get(&mut self, key: &str) -> Option<String>;
+    ///
+    /// # Errors
+    /// The host's message; [`QUOTA_EXCEEDED`] when this minute's read
+    /// budget is spent (the run pauses and the next one carries on).
+    fn kv_get(&mut self, key: &str) -> Result<Option<String>, String>;
     /// Stores a value.
     ///
     /// # Errors
@@ -236,7 +243,10 @@ pub trait Env {
     /// Removes a value.
     fn kv_delete(&mut self, key: &str);
     /// Keys under a prefix.
-    fn kv_list(&mut self, prefix: &str) -> Vec<String>;
+    ///
+    /// # Errors
+    /// As [`Env::kv_get`].
+    fn kv_list(&mut self, prefix: &str) -> Result<Vec<String>, String>;
     /// Writes an entry.
     ///
     /// # Errors
@@ -280,6 +290,9 @@ pub struct Report {
     pub requests: u32,
     /// Everything was applied (false: run again).
     pub finished: bool,
+    /// The host refused a read or write for its per-minute quota; the run
+    /// stopped where it was and the next one carries on.
+    pub throttled: bool,
     /// Nothing changed upstream since the last finished run.
     pub up_to_date: bool,
     /// The commit synced.
@@ -297,12 +310,21 @@ struct Ctx<'a, E: Env> {
 
 enum Stop {
     Budget,
+    /// The host's per-minute quota: a pause, like [`Stop::Budget`].
+    Throttled,
     Fail(String),
 }
 
+/// The host's error for a read or write over its per-minute quota.
+pub const QUOTA_EXCEEDED: &str = "quota-exceeded";
+
 impl From<String> for Stop {
     fn from(s: String) -> Self {
-        Stop::Fail(s)
+        if s.starts_with(QUOTA_EXCEEDED) {
+            Stop::Throttled
+        } else {
+            Stop::Fail(s)
+        }
     }
 }
 
@@ -374,6 +396,10 @@ pub fn run<E: Env>(
             Ok(cx.report)
         }
         Err(Stop::Budget) => Ok(cx.report),
+        Err(Stop::Throttled) => {
+            cx.report.throttled = true;
+            Ok(cx.report)
+        }
         Err(Stop::Fail(m)) => Err(m),
     }
 }
@@ -394,8 +420,8 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
     }
     // Done means done by this importer: after an upgrade that
     // changes what pages are made of, the same commit syncs again.
-    let done = cx.env.kv_get("sync/complete").as_deref() == Some("1")
-        && cx.env.kv_get("sync/format").as_deref() == Some(FORMAT);
+    let done = cx.env.kv_get("sync/complete")?.as_deref() == Some("1")
+        && cx.env.kv_get("sync/format")?.as_deref() == Some(FORMAT);
     let mut heads: Vec<String> = Vec::new();
     let mut all_unchanged = true;
     for (i, r) in refs.iter().enumerate() {
@@ -416,8 +442,8 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
                     cx.cfg.repo.name,
                     github::encode_path(r)
                 );
-                let kept = cx.env.kv_get(&head_key);
-                let etag = cx.env.kv_get(&etag_key);
+                let kept = cx.env.kv_get(&head_key)?;
+                let etag = cx.env.kv_get(&etag_key)?;
                 let use_etag = done && kept.is_some();
                 let reply = cx.get(
                     &url,
@@ -450,7 +476,7 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
     let commit = heads[0].clone();
     cx.report.commit.clone_from(&commit);
     let combined = heads.join(",");
-    if cx.env.kv_get("sync/commit").as_deref() != Some(combined.as_str()) {
+    if cx.env.kv_get("sync/commit")?.as_deref() != Some(combined.as_str()) {
         cx.env.kv_set("sync/commit", &combined)?;
         cx.env.kv_set("sync/complete", "0")?;
     }
@@ -521,7 +547,7 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
     // The cache is read once (a few packs), kept in memory, and written back
     // when this phase ends, however it ends, so a run cut short by the
     // request budget resumes where it stopped.
-    let mut cache = ScanCache::load(cx.env);
+    let mut cache = ScanCache::load(cx.env)?;
     let scanned: Result<(), Stop> = (|| {
         for f in &files {
             let is_meta = f.path == "_meta.json" || f.path.ends_with("/_meta.json");
@@ -585,8 +611,8 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
     // Managed rows stay listed after they are trashed, so a cursor (the last
     // key handled) lets a budget-limited run carry on where the last stopped,
     // and the plan signature says the whole set was already done.
-    if cx.env.kv_get("sync/pruned").as_deref() != Some(sig.as_str()) {
-        let cursor = cx.env.kv_get("sync/prune-cursor").unwrap_or_default();
+    if cx.env.kv_get("sync/pruned")?.as_deref() != Some(sig.as_str()) {
+        let cursor = cx.env.kv_get("sync/prune-cursor")?.unwrap_or_default();
         let mut last: Option<String> = None;
         for key in managed.keys().filter(|k| k.as_str() > cursor.as_str()) {
             if wanted.contains(key.as_str()) {
@@ -693,7 +719,7 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
     // Importers before 0.1.5 kept one key per page; drop those a few at a time.
     for k in cx
         .env
-        .kv_list("scan/")
+        .kv_list("scan/")?
         .into_iter()
         .take(LEGACY_SCAN_DELETES)
     {
@@ -705,12 +731,12 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
         } else {
             format!("sync/commit-etag/{i}")
         };
-        if let Some(next) = cx.env.kv_get(&format!("{key}-next")) {
+        if let Some(next) = cx.env.kv_get(&format!("{key}-next"))? {
             cx.env.kv_set(&key, &next)?;
         }
     }
     // Listings of commits no longer in use.
-    for k in cx.env.kv_list(TREE_PREFIX) {
+    for k in cx.env.kv_list(TREE_PREFIX)? {
         if !heads
             .iter()
             .any(|h| k.starts_with(&format!("{TREE_PREFIX}{h}/")))
@@ -1094,7 +1120,7 @@ fn list_folder<E: Env>(
     // reuses it: an anonymous run has 60 GitHub API calls an hour, and
     // listing again on every round used them all before any page was made.
     let key = format!("{TREE_PREFIX}{commit}/{}", folder.join("/"));
-    if let Some(t) = cx.env.kv_get(&key).and_then(|v| parse_cached_tree(&v)) {
+    if let Some(t) = cx.env.kv_get(&key)?.and_then(|v| parse_cached_tree(&v)) {
         return Ok(t);
     }
     let mut tree_ref = commit.to_owned();
@@ -1468,6 +1494,46 @@ mod tests {
         step_ms: u64,
         /// Key-value reads (`kv_get` and `kv_list`): the broker allows 600 a minute.
         kv_reads: std::cell::Cell<u32>,
+        /// Reads allowed per wall-clock minute, as the host's broker does;
+        /// `None` for no limit.
+        read_quota: Option<u32>,
+        /// The minute `window_reads` counts.
+        read_window: std::cell::Cell<u64>,
+        /// Reads in the current minute, by the sync or anything else.
+        window_reads: std::cell::Cell<u32>,
+        /// Reads the quota refused.
+        refused_reads: std::cell::Cell<u32>,
+    }
+
+    impl Fake {
+        /// One read against the per-minute quota.
+        fn read(&self) -> Result<(), String> {
+            let minute = self.now / 60_000;
+            if self.read_window.get() != minute {
+                self.read_window.set(minute);
+                self.window_reads.set(0);
+            }
+            if self
+                .read_quota
+                .is_some_and(|q| self.window_reads.get() >= q)
+            {
+                self.refused_reads.set(self.refused_reads.get() + 1);
+                return Err(QUOTA_EXCEEDED.to_owned());
+            }
+            self.window_reads.set(self.window_reads.get() + 1);
+            self.kv_reads.set(self.kv_reads.get() + 1);
+            Ok(())
+        }
+
+        /// Reads spent this minute by other calls of the plugin (page renders).
+        fn spend_reads(&self, n: u32) {
+            let minute = self.now / 60_000;
+            if self.read_window.get() != minute {
+                self.read_window.set(minute);
+                self.window_reads.set(0);
+            }
+            self.window_reads.set(self.window_reads.get() + n);
+        }
     }
 
     fn blob_sha(content: &str) -> String {
@@ -1601,11 +1667,11 @@ mod tests {
         fn now_ms(&self) -> u64 {
             self.0.borrow().now
         }
-        fn kv_get(&mut self, key: &str) -> Option<String> {
+        fn kv_get(&mut self, key: &str) -> Result<Option<String>, String> {
             let f = self.0.borrow();
-            f.kv_reads.set(f.kv_reads.get() + 1);
+            f.read()?;
             let v = f.kv.borrow().get(key).cloned();
-            v
+            Ok(v)
         }
         fn kv_set(&mut self, key: &str, value: &str) -> Result<(), String> {
             self.0
@@ -1618,16 +1684,16 @@ mod tests {
         fn kv_delete(&mut self, key: &str) {
             self.0.borrow().kv.borrow_mut().remove(key);
         }
-        fn kv_list(&mut self, prefix: &str) -> Vec<String> {
+        fn kv_list(&mut self, prefix: &str) -> Result<Vec<String>, String> {
             let f = self.0.borrow();
-            f.kv_reads.set(f.kv_reads.get() + 1);
+            f.read()?;
             let keys: Vec<String> =
                 f.kv.borrow()
                     .keys()
                     .filter(|k| k.starts_with(prefix))
                     .cloned()
                     .collect();
-            keys
+            Ok(keys)
         }
         fn put_entry(&mut self, e: &Entry) -> Result<Put, String> {
             let mut f = self.0.borrow_mut();
@@ -2058,6 +2124,160 @@ mod tests {
             }
         }
         assert!(done);
+    }
+
+    /// A site like the krishiv.ai staging docs: three versions of about 200
+    /// pages each, two read from release tags, one from the branch.
+    fn three_versions() -> (RefCell<Fake>, Config) {
+        const SHA_02: &str = "0202020202020202020202020202020202020202";
+        const SHA_03: &str = "0303030303030303030303030303030303030303";
+        let version = |v: &str| -> Files {
+            let mut files = Files::new();
+            for i in 0..200 {
+                files.insert(
+                    format!("docs/area{}/page{i}.md", i % 12),
+                    format!("---\ntitle: Page {i}\n---\n# Page {i} ({v})\n\nBody {i} of {v}.\n"),
+                );
+            }
+            files
+        };
+        let f = fake_with(version("next"));
+        {
+            let mut fk = f.borrow_mut();
+            fk.commits.insert(SHA_02.into(), version("0.2"));
+            fk.commits.insert(SHA_03.into(), version("0.3"));
+            fk.refs.insert("v0.2.0".into(), SHA_02.into());
+            fk.refs.insert("v0.3.0".into(), SHA_03.into());
+            // The host's default: 600 reads a minute (an ordinary call's
+            // budget; an extended task has more).
+            fk.read_quota = Some(600);
+        }
+        let mut c = cfg();
+        c.sections = [
+            ("engine/0.2", Some("v0.2.0")),
+            ("engine/0.3", Some("v0.3.0")),
+            ("engine/next", None),
+        ]
+        .into_iter()
+        .map(|(slug, git_ref)| crate::settings::SectionDef {
+            slug: slug.into(),
+            title: slug.into(),
+            folder: vec!["docs".into()],
+            git_ref: git_ref.map(Into::into),
+        })
+        .collect();
+        (f, c)
+    }
+
+    /// The budget the plugin gives one scheduled extended task.
+    fn task_budget(f: &RefCell<Fake>) -> Budget {
+        Budget {
+            deadline_ms: f.borrow().now + 55_000,
+            max_requests: 250,
+            max_writes: 500,
+        }
+    }
+
+    fn raw_fetches(f: &RefCell<Fake>) -> usize {
+        f.borrow()
+            .requests
+            .iter()
+            .filter(|u| u.contains("raw.githubusercontent.com"))
+            .count()
+    }
+
+    #[test]
+    fn three_versions_of_two_hundred_pages_sync_under_the_default_read_quota() {
+        let (f, c) = three_versions();
+        let mut runs = 0;
+        loop {
+            runs += 1;
+            assert!(runs <= 12, "the sync did not finish in 12 scheduled runs");
+            let b = task_budget(&f);
+            let r = run(&mut Wrap(&f), &c, None, b).unwrap();
+            assert!(!r.throttled, "run {runs} was throttled: {r:?}");
+            // The scheduler runs the task once a minute.
+            f.borrow_mut().now += 60_000;
+            if r.finished {
+                break;
+            }
+        }
+        let fk = f.borrow();
+        assert_eq!(fk.refused_reads.get(), 0, "no read was refused");
+        let pages = fk
+            .entries
+            .keys()
+            .filter(|k| k.starts_with("s:") && k.ends_with(".md"))
+            .count();
+        assert_eq!(pages, 600, "every page of every version is imported");
+    }
+
+    /// Page renders spend most of the plugin's read budget. A run that the
+    /// host refuses a read pauses (no error, nothing forgotten) and a later
+    /// run carries on: the scan cache never shrinks and no run starts the
+    /// import over.
+    #[test]
+    fn a_throttled_sync_pauses_and_resumes_where_it_stopped() {
+        let (f, c) = three_versions();
+        // The unthrottled cost, for comparison.
+        let (g, _) = three_versions();
+        loop {
+            let b = task_budget(&g);
+            let r = run(&mut Wrap(&g), &c, None, b).unwrap();
+            g.borrow_mut().now += 60_000;
+            if r.finished {
+                break;
+            }
+        }
+        let baseline = raw_fetches(&g);
+
+        let mut throttled = 0;
+        let mut finished = false;
+        let mut cached = 0;
+        // Each minute other calls leave the sync only `left` reads: from none
+        // (refused at once) to enough for a whole run.
+        for (minute, left) in [
+            0u32, 1, 2, 3, 5, 8, 600, 4, 600, 6, 600, 7, 600, 600, 600, 600,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            f.borrow().spend_reads(600 - left);
+            let b = task_budget(&f);
+            let r = run(&mut Wrap(&f), &c, None, b)
+                .unwrap_or_else(|e| panic!("minute {minute}: a throttled run must not fail: {e}"));
+            f.borrow_mut().now += 60_000;
+            if r.throttled {
+                throttled += 1;
+                assert!(!r.finished);
+            }
+            let now_cached = cached_scans(&f);
+            assert!(
+                now_cached >= cached,
+                "minute {minute}: the scan cache shrank ({cached} -> {now_cached})"
+            );
+            cached = now_cached;
+            if r.finished {
+                finished = true;
+                break;
+            }
+        }
+        assert!(throttled >= 5, "the quota refused {throttled} runs");
+        assert!(finished, "the sync never finished");
+        let pages = f
+            .borrow()
+            .entries
+            .keys()
+            .filter(|k| k.starts_with("s:") && k.ends_with(".md"))
+            .count();
+        assert_eq!(pages, 600, "every page of every version is imported");
+        // Refused runs read no page: the pages fetched are the unthrottled
+        // import's, give or take the bodies a run boundary drops.
+        let fetched = raw_fetches(&f);
+        assert!(
+            fetched <= baseline + 250,
+            "{fetched} page fetches against {baseline} unthrottled"
+        );
     }
 
     #[test]
@@ -2531,15 +2751,15 @@ mod tests {
             fn now_ms(&self) -> u64 {
                 0
             }
-            fn kv_get(&mut self, _: &str) -> Option<String> {
-                None
+            fn kv_get(&mut self, _: &str) -> Result<Option<String>, String> {
+                Ok(None)
             }
             fn kv_set(&mut self, _: &str, _: &str) -> Result<(), String> {
                 Ok(())
             }
             fn kv_delete(&mut self, _: &str) {}
-            fn kv_list(&mut self, _: &str) -> Vec<String> {
-                vec![]
+            fn kv_list(&mut self, _: &str) -> Result<Vec<String>, String> {
+                Ok(vec![])
             }
             fn put_entry(&mut self, _: &Entry) -> Result<Put, String> {
                 Err("no".into())

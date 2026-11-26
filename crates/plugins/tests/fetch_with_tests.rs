@@ -74,6 +74,7 @@ async fn ctx_with(
         viewer: None,
         ai_window: AiWindow::Unbounded,
         call_deadline: None,
+        budget: vyasa_plugins::host::TaskBudget::Ordinary,
     };
     (ctx, fake, db)
 }

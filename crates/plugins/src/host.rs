@@ -222,6 +222,8 @@ pub struct HostCtx {
     pub ai_window: AiWindow,
     /// When the host will stop this call, for `call-budget-ms`.
     pub call_deadline: Option<std::time::Instant>,
+    /// The call's budget: an extended task's reads have their own quota.
+    pub budget: TaskBudget,
 }
 
 /// How long one epoch tick lasts.
@@ -280,6 +282,7 @@ impl HostCtx {
             broker: &self.broker,
             pool: &self.dest,
             plugin_id: self.plugin_id,
+            task: self.budget == TaskBudget::Extended,
         }
     }
 }
@@ -1003,6 +1006,7 @@ impl WasmtimeHost {
                     std::time::Instant::now()
                         + std::time::Duration::from_millis(EPOCH_TICK_MILLIS.saturating_mul(ticks)),
                 ),
+                budget: env.budget,
             },
         );
         // Both budgets are best-effort: a store that refuses them still

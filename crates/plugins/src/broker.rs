@@ -4,6 +4,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
+use vyasa_common::plugin_quota::{PluginQuotaOverride, QuotaLimit};
 use vyasa_common::AppError;
 use vyasa_db::repo::PluginsRepo;
 
@@ -44,17 +45,46 @@ impl Default for Quotas {
 }
 
 impl Quotas {
-    /// The larger quotas an extended task runs under: more fetches, bytes
-    /// and writes, because a sync is bulk work; reads and model calls stay
-    /// as they are (money is not part of a longer budget).
+    /// The larger quotas an extended task runs under: more reads, fetches,
+    /// bytes and writes, because a sync is bulk work; model calls stay as
+    /// they are (money is not part of a longer budget).
+    ///
+    /// Reads are cheap key lookups in the plugin's own storage. 600 a
+    /// minute shared with every page render the plugin serves left a
+    /// documentation sync of three versions refused before it had read
+    /// its own state; a task now counts its reads apart from ordinary
+    /// calls, against this larger budget.
     #[must_use]
     pub fn extended() -> Self {
         Self {
+            db_reads_per_min: 3000,
             fetches_per_min: 300,
             bytes_per_min: 50 * 1024 * 1024,
             writes_per_min: 600,
             ..Self::default()
         }
+    }
+}
+
+impl Quotas {
+    /// These quotas with the operator's overrides for `plugin` applied:
+    /// entries for every plugin (`*`) first, then those naming it. `task`
+    /// picks the overrides of the extended-task budget.
+    #[must_use]
+    pub fn with_overrides(mut self, overrides: &[PluginQuotaOverride], plugin: &str, task: bool) -> Self {
+        let wildcard = overrides.iter().filter(|o| o.plugin == "*");
+        let named = overrides.iter().filter(|o| o.plugin == plugin);
+        for o in wildcard.chain(named).filter(|o| o.task == task) {
+            let per_min = u32::try_from(o.value).unwrap_or(u32::MAX);
+            match o.limit {
+                QuotaLimit::Reads => self.db_reads_per_min = per_min,
+                QuotaLimit::Fetches => self.fetches_per_min = per_min,
+                QuotaLimit::Bytes => self.bytes_per_min = o.value,
+                QuotaLimit::Writes => self.writes_per_min = per_min,
+                QuotaLimit::AiCalls => self.ai_calls_per_min = per_min,
+            }
+        }
+        self
     }
 }
 
@@ -72,6 +102,9 @@ impl Drop for ExtendedScope {
 struct Counters {
     window: u64,
     db_reads: u32,
+    /// Reads made by extended tasks, counted apart so page renders cannot
+    /// spend a sync's budget (or a sync theirs).
+    task_db_reads: u32,
     fetches: u32,
     bytes: u64,
     writes: u32,
@@ -86,12 +119,34 @@ impl Counters {
         if self.window != now {
             self.window = now;
             self.db_reads = 0;
+            self.task_db_reads = 0;
             self.fetches = 0;
             self.bytes = 0;
             self.writes = 0;
             self.ai_calls = 0;
         }
         self
+    }
+}
+
+/// The outcome of a read or write gate, with the reason for a refusal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Gate {
+    /// Granted and within quota.
+    Allowed,
+    /// The capability is not granted.
+    NotGranted,
+    /// Granted, but this minute's budget is spent; retry later.
+    OverQuota,
+}
+
+impl From<Gate> for Decision {
+    fn from(g: Gate) -> Self {
+        if g == Gate::Allowed {
+            Decision::Allowed
+        } else {
+            Decision::Denied
+        }
     }
 }
 
@@ -116,6 +171,10 @@ pub struct Broker {
     extended: Arc<std::sync::Mutex<HashMap<i64, Arc<std::sync::atomic::AtomicU32>>>>,
     /// When each plugin was last refused for a quota (not a missing grant).
     quota_refused: Arc<std::sync::Mutex<HashMap<i64, std::time::Instant>>>,
+    /// The operator's quota overrides, by plugin name.
+    overrides: Arc<[PluginQuotaOverride]>,
+    /// Plugin names by id, learned with the grants (overrides name plugins).
+    names: Arc<std::sync::Mutex<HashMap<i64, String>>>,
 }
 
 impl std::fmt::Debug for Broker {
@@ -136,7 +195,17 @@ impl Broker {
             quotas: Quotas::default(),
             extended: Arc::new(std::sync::Mutex::new(HashMap::new())),
             quota_refused: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            overrides: Arc::from(Vec::new()),
+            names: Arc::new(std::sync::Mutex::new(HashMap::new())),
         }
+    }
+
+    /// The same broker with the operator's quota overrides
+    /// (`plugin_quotas`, env `VYASA_PLUGIN_QUOTAS`).
+    #[must_use]
+    pub fn with_overrides(mut self, overrides: Vec<PluginQuotaOverride>) -> Self {
+        self.overrides = Arc::from(overrides);
+        self
     }
 
     /// Starts an extended scope for `plugin_id`: until the guard drops, its
@@ -151,17 +220,33 @@ impl Broker {
         ExtendedScope(flag)
     }
 
-    /// The quotas in force for `plugin_id` right now.
-    fn quotas_for(&self, plugin_id: i64) -> Quotas {
-        let extended = self.extended.lock().is_ok_and(|map| {
+    /// Whether an extended scope is alive for `plugin_id`.
+    fn in_extended_scope(&self, plugin_id: i64) -> bool {
+        self.extended.lock().is_ok_and(|map| {
             map.get(&plugin_id)
                 .is_some_and(|f| f.load(std::sync::atomic::Ordering::SeqCst) > 0)
-        });
-        if extended {
-            Quotas::extended()
-        } else {
-            self.quotas
+        })
+    }
+
+    /// The quotas in force for `plugin_id` right now.
+    fn quotas_for(&self, plugin_id: i64) -> Quotas {
+        self.quotas_as(plugin_id, self.in_extended_scope(plugin_id))
+    }
+
+    /// The ordinary (`task` false) or extended-task quotas of `plugin_id`,
+    /// with the operator's overrides for it.
+    fn quotas_as(&self, plugin_id: i64, task: bool) -> Quotas {
+        let base = if task { Quotas::extended() } else { self.quotas };
+        if self.overrides.is_empty() {
+            return base;
         }
+        let name = self
+            .names
+            .lock()
+            .ok()
+            .and_then(|m| m.get(&plugin_id).cloned())
+            .unwrap_or_default();
+        base.with_overrides(&self.overrides, &name, task)
     }
 
     /// [`Broker::new`] with explicit per-window quotas.
@@ -185,6 +270,9 @@ impl Broker {
             .find(|p| p.id == plugin_id)
             .ok_or_else(|| AppError::not_found("plugin", plugin_id))?;
         let caps = Capability::parse_list(&row.capabilities).unwrap_or_default();
+        if let Ok(mut names) = self.names.lock() {
+            names.insert(plugin_id, row.name.clone());
+        }
         self.grants.write().await.insert(plugin_id, caps.clone());
         Ok(caps)
     }
@@ -274,7 +362,17 @@ impl Broker {
     /// would have written 172 800 audit rows a day — burying the entries
     /// that do matter.
     pub async fn check_private_write(&self, plugin_id: i64, cap: &Capability) -> Decision {
+        self.gate_write(plugin_id, cap, None).await.into()
+    }
+
+    /// [`Broker::check_private_write`], saying why a refusal happened.
+    pub async fn private_write_gate(&self, plugin_id: i64, cap: &Capability) -> Gate {
         self.gate_write(plugin_id, cap, None).await
+    }
+
+    /// [`Broker::check_write`], saying why a refusal happened.
+    pub async fn write_gate(&self, plugin_id: i64, cap: &Capability, detail: &str) -> Gate {
+        self.gate_write(plugin_id, cap, Some(detail)).await
     }
 
     /// Gate a mutation with an effect outside the plugin: the grant, one
@@ -284,12 +382,12 @@ impl Broker {
     /// touches content, post meta or someone's inbox is the thing an
     /// operator needs to be able to reconstruct afterwards.
     pub async fn check_write(&self, plugin_id: i64, cap: &Capability, detail: &str) -> Decision {
-        self.gate_write(plugin_id, cap, Some(detail)).await
+        self.gate_write(plugin_id, cap, Some(detail)).await.into()
     }
 
-    async fn gate_write(&self, plugin_id: i64, cap: &Capability, detail: Option<&str>) -> Decision {
+    async fn gate_write(&self, plugin_id: i64, cap: &Capability, detail: Option<&str>) -> Gate {
         if self.check_capability(plugin_id, cap).await != Decision::Allowed {
-            return Decision::Denied;
+            return Gate::NotGranted;
         }
         let mut counters = self.counters.lock().await;
         let c = counters.entry(plugin_id).or_default().roll();
@@ -297,39 +395,65 @@ impl Broker {
             drop(counters);
             self.audit(plugin_id, "quota", cap, "writes/min exceeded")
                 .await;
-            return Decision::Denied;
+            return Gate::OverQuota;
         }
         c.writes += 1;
         drop(counters);
         if let Some(detail) = detail {
             self.audit(plugin_id, "write", cap, detail).await;
         }
-        Decision::Allowed
+        Gate::Allowed
     }
 
-    /// Gate a database read.
+    /// Gate a database read (an extended task's own budget while an
+    /// extended scope is alive).
     pub async fn check_db_read(&self, plugin_id: i64, cap: Capability) -> Decision {
+        let task = self.in_extended_scope(plugin_id);
+        self.read_gate(plugin_id, cap, task).await.into()
+    }
+
+    /// Gate a database or key-value read made by an ordinary call (`task`
+    /// false) or an extended task, each counted against its own per-minute
+    /// budget, and say why a refusal happened.
+    pub async fn read_gate(&self, plugin_id: i64, cap: Capability, task: bool) -> Gate {
         let granted = match self.granted_for(plugin_id).await {
             Ok(g) => g,
             Err(e) => {
                 self.audit(plugin_id, "deny", &cap, &e.to_string()).await;
-                return Decision::Denied;
+                return Gate::NotGranted;
             }
         };
         if !granted.iter().any(|g| g.implies(&cap)) {
             self.audit(plugin_id, "deny", &cap, "not granted").await;
-            return Decision::Denied;
+            return Gate::NotGranted;
         }
+        let limit = self.quotas_as(plugin_id, task).db_reads_per_min;
         let mut counters = self.counters.lock().await;
         let c = counters.entry(plugin_id).or_default().roll();
-        if c.db_reads >= self.quotas_for(plugin_id).db_reads_per_min {
+        let used = if task {
+            &mut c.task_db_reads
+        } else {
+            &mut c.db_reads
+        };
+        if *used >= limit {
             drop(counters);
-            self.audit(plugin_id, "quota", &cap, "db reads/min exceeded")
-                .await;
-            return Decision::Denied;
+            let detail = if task {
+                "db reads/min exceeded (extended task)"
+            } else {
+                "db reads/min exceeded"
+            };
+            // One audit row (and warning) per plugin per minute: the
+            // refusal is the same until the window rolls, and a guest that
+            // keeps asking wrote thousands of identical rows.
+            // (`quota_refused` keeps the last audited refusal, so it stays
+            // within a minute while refusals go on.)
+            if !self.quota_refused_within(plugin_id, std::time::Duration::from_secs(60)) {
+                self.audit(plugin_id, "quota", &cap, detail).await;
+            }
+            return Gate::OverQuota;
         }
-        c.db_reads += 1;
-        Decision::Allowed
+        *used += 1;
+        Gate::Allowed
     }
 
     /// Gate an event emission.
@@ -357,6 +481,9 @@ impl Broker {
     /// plugin with a different capability list kept enforcing the old one
     /// until the next restart.
     pub async fn evict(&self, plugin_id: i64) {
+        if let Ok(mut names) = self.names.lock() {
+            names.remove(&plugin_id);
+        }
         self.grants.write().await.remove(&plugin_id);
     }
 

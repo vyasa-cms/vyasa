@@ -126,6 +126,18 @@ does not check this — the log line says `log-only mode`.
 skipped for subsequent hooks; the count is on `/metrics` and the state on the
 admin Plugins page. Disable it, or fix and re-enable.
 
+**A plugin hits its quota.** `plugin_audit` rows of kind `quota` (at most
+one a minute per plugin for reads) and `broker quota` warnings in the log
+mean a plugin used its per-minute budget; the call gets `quota-exceeded`
+and a well-behaved plugin carries on the next minute. A plugin you trust
+with more (a documentation importer syncing several versions) gets higher
+limits from `VYASA_PLUGIN_QUOTAS`, by plugin name, then a restart:
+`VYASA_PLUGIN_QUOTAS='vyasa-docs:task_reads=20000,reads=1200'`. Limits are
+`reads`, `fetches`, `bytes`, `writes` and `ai_calls`, per minute; prefix one
+with `task_` for the budget of extended tasks (scheduled syncs); `*` names
+every plugin, and a plugin's own entry applies after it. A malformed value
+stops the server at start with a message naming it.
+
 **Pages are stale.** The render cache is purged by domain events (publish,
 edit, trash, restore, delete, new comment) and directly on theme activation
 and option writes. If the invalidator lags it purges everything rather than

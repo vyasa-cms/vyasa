@@ -197,7 +197,9 @@ interface host {
 
     /// Private key/value storage. Every key is scoped to the calling
     /// plugin, so two plugins using the same key never see each other's
-    /// value and no key can reach a site option. Needs `kv:read`.
+    /// value and no key can reach a site option. Needs `kv:read`. A read
+    /// over the plugin's per-minute quota returns the error
+    /// `quota-exceeded`: not "no value", retry next minute.
     kv-get: func(key: string) -> result<option<string>, string>;
 
     /// Stores a value. Needs `kv:write`.

@@ -122,7 +122,11 @@ by the broker on every call.
 | `tasks:extended` | a one-minute budget for tasks declared `"budget": "extended"` |
 
 Reads are quota'd per minute, as are fetches, fetched bytes, writes and
-`ai-complete` calls. `html:page` and `assets:script` are new: a plugin
+`ai-complete` calls. A call over its quota returns the error
+`quota-exceeded` (a missing grant is `capability-denied`): the budget
+resets each minute, so pause the work and carry on next time rather than
+read the refusal as a missing value. The operator can raise a plugin's
+limits with `VYASA_PLUGIN_QUOTAS`. `html:page` and `assets:script` are new: a plugin
 that filters `page-html` or ships JS must declare them, and one installed
 before they existed loses those powers until it is reinstalled from a
 package that does.
