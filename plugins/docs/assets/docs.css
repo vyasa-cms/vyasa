@@ -60,7 +60,7 @@
 /* No banner on the latest version: no empty band either. */
 .vy-section--docs\/version-banner:not(:has(.docs-banner)) { display: none; }
 
-.docs-title { margin: .5rem 0 1rem; font-size: clamp(1.75rem, 1.2rem + 2.4vw, 2.5rem); line-height: 1.15; letter-spacing: -.02em; }
+.docs-title { overflow-wrap: anywhere; margin: .5rem 0 1rem; font-size: clamp(1.75rem, 1.2rem + 2.4vw, 2.5rem); line-height: 1.15; letter-spacing: -.02em; }
 
 /* Drawers: always open on a wide screen; the script closes them on a phone. */
 .docs-drawer > summary, .docs-toc__drawer > summary {
@@ -83,7 +83,7 @@
 .docs-nav__list .docs-nav__list { padding-left: .9rem; border-left: 1px solid var(--docs-border); margin-left: .35rem; }
 .docs-nav__item { margin: .1rem 0; }
 .docs-nav__label { margin: 1rem 0 .25rem; font-size: .75rem; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; color: var(--docs-muted); }
-.docs-nav__link { display: block; padding: .25rem .5rem; border-radius: var(--docs-radius); color: var(--docs-text); text-decoration: none; }
+.docs-nav__link { display: block; overflow-wrap: anywhere; padding: .25rem .5rem; border-radius: var(--docs-radius); color: var(--docs-text); text-decoration: none; }
 .docs-nav__link:hover { background: var(--docs-surface); }
 .docs-nav__link.is-current { background: var(--docs-surface); color: var(--docs-accent); font-weight: 600; }
 .docs-nav__group > details > summary { list-style: none; cursor: pointer; }
@@ -100,6 +100,7 @@
 .docs-search__button { padding: .4rem .8rem; border: 0; border-radius: var(--docs-radius); background: var(--docs-accent); color: var(--docs-on-accent); cursor: pointer; }
 .docs-crumbs ol { display: flex; flex-wrap: wrap; gap: .4rem; list-style: none; padding: 0; margin: 0 0 1rem; color: var(--docs-muted); }
 .docs-crumbs li + li::before { content: "/"; margin-right: .4rem; }
+.docs-crumbs li { min-width: 0; overflow-wrap: anywhere; }
 .docs-crumbs a { color: inherit; }
 .docs-banner { padding: .75rem 1rem; margin-bottom: 1rem; border: 1px solid var(--docs-border); border-left: 4px solid #d29922; border-radius: var(--docs-radius); background: var(--docs-surface); }
 
@@ -108,11 +109,14 @@
 .docs-toc a { display: block; padding: .15rem .75rem; color: var(--docs-muted); text-decoration: none; }
 .docs-toc a:hover, .docs-toc a.is-active { color: var(--docs-accent); }
 .docs-toc__l3 a { padding-left: 1.5rem; }
+/* A page name is often one long token (functions/tuple-sketch-summary-integer): the links shrink and the
+   name breaks anywhere, and on a phone the two links stack, so the page never scrolls sideways. */
 .docs-pager { display: flex; justify-content: space-between; gap: 1rem; margin-top: 2.5rem; }
-.docs-pager__link { flex: 1; display: flex; flex-direction: column; padding: .75rem 1rem; border: 1px solid var(--docs-border); border-radius: var(--docs-radius); text-decoration: none; color: var(--docs-text); }
+@media (max-width: 48rem) { .docs-pager { flex-direction: column; } .docs-pager__next { margin-left: 0; } }
+.docs-pager__link { flex: 1; min-width: 0; display: flex; flex-direction: column; padding: .75rem 1rem; border: 1px solid var(--docs-border); border-radius: var(--docs-radius); text-decoration: none; color: var(--docs-text); }
 .docs-pager__next { text-align: right; margin-left: auto; }
 .docs-pager__hint { font-size: .75rem; color: var(--docs-muted); }
-.docs-pager__title { font-weight: 600; color: var(--docs-accent); }
+.docs-pager__title { overflow-wrap: anywhere; font-weight: 600; color: var(--docs-accent); }
 
 /* Blocks */
 .docs-tabs { margin: 1rem 0; border: 1px solid var(--docs-border); border-radius: var(--docs-radius); overflow: hidden; }
@@ -136,7 +140,7 @@
 .docs-tree ul { list-style: none; margin: 0; padding-left: 1.1rem; }
 .docs-tree > ul { padding-left: 0; }
 .docs-tree__note { color: var(--docs-muted); }
-.docs-copy { position: absolute; top: .4rem; right: .4rem; padding: .15rem .5rem; font-size: .75rem; border: 1px solid var(--docs-border); border-radius: var(--docs-radius); background: var(--vy-color-bg, #fff); cursor: pointer; }
+:where([data-section="docs-main"], [data-section="docs-content"], [data-docs-copy]) .docs-copy { position: absolute; top: .4rem; right: .4rem; padding: .15rem .5rem; font-size: .75rem; border: 1px solid var(--docs-border); border-radius: var(--docs-radius); background: var(--vy-color-bg, #fff); cursor: pointer; }
 .docs-placeholder { padding: .75rem 1rem; border: 1px dashed var(--docs-border); border-radius: var(--docs-radius); color: var(--docs-muted); font-size: .85rem; }
 
 /* Tables: full width, scrolling sideways; status words as pills. */
