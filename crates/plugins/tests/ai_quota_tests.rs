@@ -148,6 +148,7 @@ mod ai_complete {
             viewer: None,
             ai_window: window,
             call_deadline: None,
+            budget: vyasa_plugins::host::TaskBudget::Ordinary,
         }
     }
 

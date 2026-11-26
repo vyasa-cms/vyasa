@@ -10,6 +10,13 @@ follows [semantic versioning](https://semver.org) as described in
 ### Changed
 - The declared minimum supported Rust version is 1.97 (was 1.85, which no longer built: the plugin host's wasmtime needs 1.97); the pinned toolchain stays 1.99. CI checks that the workspace builds on 1.97.
 
+### Fixed
+- Docs plugin 0.1.13: a sync the host throttles pauses and carries on, instead of starting over. A key-value read refused for the per-minute quota used to look like a missing key, so a busy minute made the importer forget its scan cache and its progress, fetch every page again and never finish (on a site of three docs versions it stayed at `pages: 0`). Refused reads and writes now stop the run where it is (`paused at the host's per-minute quota`), the task skips a minute whose own bookkeeping it cannot read, and the status keeps its page count.
+- Plugin quotas: a call over its per-minute quota returns `quota-exceeded`, apart from `capability-denied` for a missing grant. An extended task (a scheduled sync) counts its reads apart from the plugin's page renders, against 3,000 a minute, so renders can no longer spend a sync's budget. A read refused for the quota writes one audit row a minute per plugin, not one per call. Every host read (`get-option`, `get-post`, `query-posts`, `kv-get`, `kv-list`) counts on its own call's budget. Plugins that matched `capability-denied` to detect throttling should match `quota-exceeded` instead.
+
+### Added
+- `VYASA_PLUGIN_QUOTAS` (`plugin_quotas`): the operator raises or lowers a plugin's per-minute limits by name, e.g. `vyasa-docs:task_reads=20000,reads=1200;*:writes=200` (`reads`, `fetches`, `bytes`, `writes`, `ai_calls`; `task_` for the extended-task budget; `*` for every plugin). A malformed value stops the server at start.
+
 ## [0.4.4] - 2026-11-24
 
 ### Fixed
