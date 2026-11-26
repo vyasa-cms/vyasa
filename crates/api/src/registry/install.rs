@@ -27,6 +27,10 @@ pub struct Installed {
     pub capabilities: Vec<String>,
     /// True when a plugin needs enabling before it does anything.
     pub needs_enabling: bool,
+    /// Why a theme's `[social_card]` layout cannot be used (cards stay off
+    /// while it is active).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub social_card_error: Option<String>,
 }
 
 /// Downloads and verifies one package.
@@ -164,6 +168,7 @@ async fn install_plugin(
         // Installed plugins stay inert until an operator enables them:
         // seeing the capability list and then choosing is the point.
         needs_enabling: !row.enabled,
+        social_card_error: None,
     })
 }
 
@@ -244,6 +249,7 @@ async fn install_theme(
         // A theme is inert until someone activates it, which is a
         // separate, reversible act with its own rollback.
         needs_enabling: !row.is_active,
+        social_card_error: parsed.social_card_error,
     })
 }
 

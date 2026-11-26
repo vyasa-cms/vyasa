@@ -212,6 +212,7 @@ export const CAPABILITIES: Record<string, CapabilityInfo> = {
       "deleting a submission or subscriber outright",
       "the privacy policy page's content",
       "content types and their fields — creating, relabelling and deleting them",
+      "whether the active theme can draw social cards",
     ],
     fullAdministratorOnly: [
       "changing the mail relay or sending a test message through it",
@@ -221,7 +222,7 @@ export const CAPABILITIES: Record<string, CapabilityInfo> = {
       "applying updates",
       "importing a site archive",
     ],
-    areas: ["ai", "audience", "audit-log", "content-types", "export", "import", "mail", "media", "options", "privacy", "redirects", "registry", "search", "site-health", "updates"],
+    areas: ["ai", "audience", "audit-log", "content-types", "export", "import", "mail", "media", "options", "privacy", "redirects", "registry", "search", "site-health", "social-cards", "updates"],
   },
   view_admin: {
     label: "Use the admin screens",

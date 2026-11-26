@@ -26,6 +26,7 @@ fn ctx(deadline: Option<Instant>) -> HostCtx {
         viewer: None,
         ai_window: AiWindow::Unbounded,
         call_deadline: deadline,
+        budget: vyasa_plugins::host::TaskBudget::Ordinary,
     }
 }
 

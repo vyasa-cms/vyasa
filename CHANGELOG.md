@@ -7,7 +7,33 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.4.5] - 2026-11-26
+
 ### Fixed
+- Docs plugin 0.1.14: its script no longer reaches outside the docs page body. It added a Copy button (and `position: relative`) to every `<pre>` on the site and wrapped every table under `<main>` in a scrolling box with status pills, so a theme's own code panels on non-docs pages (a home page's `pre.code`) showed a second Copy control and the theme's room for it. The copy buttons and table wrapping now apply only inside the `docs-main` and `docs-content` sections, or inside an element a theme marks with `data-docs-copy` (to keep them on, say, blog posts), and the `.docs-copy` rule is scoped there too (with no added specificity, so theme overrides still apply).
+- Docs plugin 0.1.14: a page whose name is one long token (`functions/tuple-sketch-summary-integer`) no longer makes a phone scroll sideways: the previous/next links shrink and break the name anywhere, and stack on narrow screens; the page title, breadcrumbs and sidebar links break long names the same way.
+- Docs plugin 0.1.13: a sync the host throttles pauses and carries on, instead of starting over. A key-value read refused for the per-minute quota used to look like a missing key, so a busy minute made the importer forget its scan cache and its progress, fetch every page again and never finish (on a site of three docs versions it stayed at `pages: 0`). Refused reads and writes now stop the run where it is (`paused at the host's per-minute quota`), the task skips a minute whose own bookkeeping it cannot read, and the status keeps its page count.
+- Plugin quotas: a call over its per-minute quota returns `quota-exceeded`, apart from `capability-denied` for a missing grant. An extended task (a scheduled sync) counts its reads apart from the plugin's page renders, against 3,000 a minute, so renders can no longer spend a sync's budget. A read refused for the quota writes one audit row a minute per plugin, not one per call. Every host read (`get-option`, `get-post`, `query-posts`, `kv-get`, `kv-list`) counts on its own call's budget. Plugins that matched `capability-denied` to detect throttling should match `quota-exceeded` instead.
+
+### Added
+- `VYASA_PLUGIN_QUOTAS` (`plugin_quotas`): the operator raises or lowers a plugin's per-minute limits by name, e.g. `vyasa-docs:task_reads=20000,reads=1200;*:writes=200` (`reads`, `fetches`, `bytes`, `writes`, `ai_calls`; `task_` for the extended-task budget; `*` for every plugin). A malformed value stops the server at start.
+
+## [0.4.4] - 2026-11-24
+
+### Fixed
+- Docs plugin 0.1.12: the sidebar, pager and breadcrumbs no longer scan the whole page tree for every node (a quadratic walk). On a site with several docs versions (about 3,000 pages) a section render ran past the plugin's time limit and the repeated traps disabled the plugin. The tree is indexed once per render.
+- A plugin's settings form shows what the plugin declares now, not what it declared when it loaded: the docs plugin's "Last sync" line was frozen at server start. `GET /api/v1/plugins/{id}/form` asks the plugin again; the admin uses it on open, after a save and every minute. Re-reading the form never counts against the plugin: a time or fuel trap there drops the cached instance, keeps the form from load and records no strike.
+
+### Added
+- Social cards: a theme can declare a `[social_card]` layout (background PNG, font, title and label boxes, post types), and with the new `social_cards` setting on (Settings → Advanced, shown when the active theme has a valid layout) an entry of those types with no image of its own gets a generated 1200×630 PNG as its `og:image`, with `og:image:width`, `og:image:height` and `og:image:alt`. Cards are served from `/_card/{id}-{key}.png`; the key changes with the title, label, theme version and the theme's card files, so a stale URL redirects to the current one. At most two cards render at once; rendered cards are cached in memory (`VYASA_SOCIAL_CARD_CACHE_BYTES`, 32 MiB by default) and purged at the edge when their entry changes. Drafts, password-protected entries and non-public post types get no card. `GET /api/v1/social-cards` reports whether the active theme can draw them, and names any post type in the layout the site does not have (a notice: cards stay on); activating such a theme names them too. The starter docs theme has a layout for docs pages.
+- The plugin detail view shows the plugin's status and its scheduled tasks (interval, last run, last error), and says that a turned-off plugin's settings come back when it is on.
+- Archive templates can draw blog cards: each entry in `posts` carries `image` (the featured media's URL, width, height and alt, or none), `sticky`, `iso_date` and its `terms`; `featured` lists the pinned entries and `categories` lists the categories with an entry count and archive URL.
+- Entry pages of flat post types get `newer`, `older` (the neighbouring published entries of the same type and language) and `related` (up to three entries sharing the most terms, newest first). Publishing or changing an entry drops the cached pages of its neighbours and related entries only, not every page.
+
+## [0.4.3] - 2026-11-22
+
+### Fixed
+- Search finds text in tables, code blocks and quotes, not only paragraphs and headings: a config key in a reference table or an error class in a code block now matches (docs QA-W-4). The AI assist text is unchanged. An existing index keeps its old bodies until it is rebuilt: run `vyasa search reindex` (or `POST /api/v1/search/reindex`, or Site health → Rebuild index) after upgrading.
 - A plugin refresh keeps the plugin's scheduled tasks declared until the new declarations replace them, and a task that was claimed but has no declaration is skipped instead of run on the ordinary budget.
 - A plugin call that runs past its time or fuel limit (an epoch-deadline or fuel trap) no longer disables the plugin for good on the first occurrence: it is marked degraded and stays enabled, and the third such trap within ten minutes disables it as before. A busy server (a deploy publishing pages while a sync runs) could trap a healthy plugin once and take its pages down until an administrator re-enabled it. Any trap now records its reason on the Plugins page; before, a disabled plugin showed no cause. A settings save (or a restart) that a plugin refuses now leaves it degraded and serving on its previous settings, not errored: an errored plugin refuses every later call, so the next settings save could not heal it, and the docs import of a staging deploy left vyasa-docs off until an administrator re-enabled it.
 
@@ -16,6 +42,7 @@ follows [semantic versioning](https://semver.org) as described in
 - Each menu `<nav>` has an accessible name: the block's `label` setting, else the menu's slug.
 
 ### Added
+- `GET /llms-full.txt`: every readable entry's Markdown in one file (the same set as `llms.txt`, each body inline), so a model reads the whole site in one fetch. `llms-full` is now a reserved type slug.
 - A theme's `font_faces` entries take optional `weight`, `style` and `display`, printed as `font-weight`, `font-style` and `font-display` in the `@font-face` rule. Two files of one family (400 and 700, roman and italic) are no longer reported as a duplicate.
 
 ### Added

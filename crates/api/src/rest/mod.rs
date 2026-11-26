@@ -228,6 +228,7 @@ fn plugin_routes() -> Guarded {
         )
         .at("/plugins/surface", |r| r.get(access, plugins::surface))
         .at("/plugins/{id}/audit", |r| r.get(access, plugins::audit))
+        .at("/plugins/{id}/form", |r| r.get(access, plugins::form))
         .at("/plugins/settings/{id}", |r| {
             r.get(access, plugins::settings_all)
         })
@@ -890,6 +891,9 @@ fn ai_routes() -> Guarded {
             r.get(Cap(EditPosts), embed_preview::preview)
         })
         .merge(setup_routes())
+        .at("/social-cards", |r| {
+            r.get(Cap(ManageOptions), seo::social_card_status)
+        })
         .at("/redirects", |r| {
             r.get(Cap(ManageOptions), seo::list_redirects)
                 .post(Cap(ManageOptions), seo::add_redirect)

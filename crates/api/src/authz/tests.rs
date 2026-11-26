@@ -60,6 +60,7 @@ fn dummy_config(dir: &Path) -> VyasaConfig {
         run_dir: dir.join(".run"),
         debug: true,
         package_trusted_keys: Vec::new(),
+        plugin_quotas: Vec::new(),
         marketplace: vyasa_common::config::SourceConfig::default(),
         updates: vyasa_common::config::SourceConfig::default(),
         db: DbConfig {
@@ -74,6 +75,7 @@ fn dummy_config(dir: &Path) -> VyasaConfig {
         storage: None,
         trusted_proxies: Vec::new(),
         trust_cf_connecting_ip: false,
+        social_card_cache_bytes: vyasa_common::config::DEFAULT_SOCIAL_CARD_CACHE_BYTES,
         demo: vyasa_common::config::DemoConfig::default(),
     }
 }

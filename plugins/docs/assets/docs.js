@@ -44,8 +44,22 @@
     Array.prototype.forEach.call(doc.querySelectorAll(".docs-drawer, .docs-toc__drawer"), function (d) { d.removeAttribute("open"); });
   }
 
+  // Everything below touches only the docs page body (the plugin's docs-main
+  // group and its post-content section, or a container a theme marks with
+  // data-docs-copy), never code blocks or tables a theme draws elsewhere on
+  // the site: this script is loaded on every page.
+  var scope = '[data-section="docs-main"], [data-section="docs-content"], [data-docs-copy]';
+  function inDocs(selector) {
+    var parts = selector.split(",");
+    var out = [];
+    scope.split(",").forEach(function (root) {
+      parts.forEach(function (part) { out.push(root.trim() + " " + part.trim()); });
+    });
+    return doc.querySelectorAll(out.join(", "));
+  }
+
   // Copy buttons on code blocks.
-  Array.prototype.forEach.call(doc.querySelectorAll("pre"), function (pre) {
+  Array.prototype.forEach.call(inDocs("pre"), function (pre) {
     if (!navigator.clipboard || pre.querySelector(".docs-copy")) { return; }
     pre.style.position = "relative";
     var button = doc.createElement("button");
@@ -70,7 +84,7 @@
     "not yet": "soon", "planned": "soon", "in progress": "soon",
     "unsupported": "no", "not supported": "no", "no": "no", "n/a": "na"
   };
-  Array.prototype.forEach.call(doc.querySelectorAll("article table, .docs-body table, main table"), function (table) {
+  Array.prototype.forEach.call(inDocs("table"), function (table) {
     if (table.closest(".docs-table") || table.classList.contains("docs-params")) { return; }
     var wrap = doc.createElement("div");
     wrap.className = "docs-table";

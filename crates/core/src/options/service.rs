@@ -64,6 +64,9 @@ pub const SITE_OPTION_KEYS: &[&str] = &[
     "discourage_indexing",
     // Default colour scheme: "system" (OS), "light" or "dark"; a visitor's toggle wins.
     "color_scheme",
+    // A generated Open Graph card per entry, when the active theme declares
+    // a card layout; off by default.
+    "social_cards",
 ];
 
 /// Option rows the media-storage settings own (`/api/v1/media/storage`).
@@ -592,6 +595,9 @@ impl OptionsService {
                     "color_scheme must be \"system\", \"light\" or \"dark\"",
                 ));
             }
+            "social_cards" if !value.is_boolean() => {
+                return Err(AppError::validation("social_cards must be true or false"));
+            }
             "newsletter_enabled" if !value.is_boolean() => {
                 return Err(AppError::validation(
                     "newsletter_enabled must be true or false",
@@ -778,6 +784,19 @@ impl OptionsService {
             Some(n) => Ok(i64::try_from(n).unwrap_or(10).clamp(1, 100)),
             None => Ok(10),
         }
+    }
+
+    /// Whether entries get a generated social card (default off). Only
+    /// takes effect while the active theme declares a valid card layout.
+    ///
+    /// # Errors
+    /// Propagates repository errors.
+    pub async fn social_cards(&self) -> Result<bool, AppError> {
+        Ok(self
+            .raw("social_cards")
+            .await?
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false))
     }
 
     /// How long a CDN may hold a public page, in seconds.

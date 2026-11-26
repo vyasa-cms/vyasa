@@ -2,6 +2,7 @@ import * as React from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import {
+  getPluginForm,
   getPluginSettings,
   getPluginSurface,
   putPluginSetting,
@@ -157,9 +158,26 @@ export function formatInterval(seconds: number): string {
   return `${seconds} seconds`;
 }
 
-/** One plugin's declared settings form. */
-export function SettingsForm({ form }: { form: PluginForm }) {
+/** How often an open settings form asks its plugin for the form again. */
+const FORM_REFRESH_MS = 60_000;
+
+/**
+ * One plugin's declared settings form.
+ *
+ * `form` is what the plugin declared when it loaded. A plugin may put live
+ * state in its form (the docs plugin's "Last sync" line), so the form is
+ * asked for again on open, after a save and every minute; until that
+ * answers, or when it fails, the form from load is shown.
+ */
+export function SettingsForm({ form: loaded }: { form: PluginForm }) {
   const queryClient = useQueryClient();
+  const live = useQuery({
+    queryKey: ["plugin-form", loaded.pluginId],
+    queryFn: () => getPluginForm(loaded.pluginId),
+    refetchInterval: FORM_REFRESH_MS,
+    retry: false,
+  });
+  const form = live.data ?? loaded;
   const stored = useQuery({
     queryKey: ["plugin-settings", form.pluginId],
     queryFn: () => getPluginSettings(form.pluginId),
@@ -173,14 +191,12 @@ export function SettingsForm({ form }: { form: PluginForm }) {
   const secretFlags = (stored.data?.["__secrets"] ?? {}) as Record<string, boolean>;
   const [secretActions, setSecretActions] = React.useState<Record<string, "set" | "clear">>({});
 
-  const values =
-    draft ??
-    Object.fromEntries(
-      form.fields.map((f) => [
-        f.key,
-        f.kind === "secret" ? "" : (stored.data?.[f.key] ?? f.default ?? defaultFor(f)),
-      ]),
-    );
+  const initial = (f: PluginField) =>
+    f.kind === "secret" ? "" : (stored.data?.[f.key] ?? f.default ?? defaultFor(f));
+  // Under the draft, so a field the plugin added after the draft was opened
+  // (the form is fetched again every minute) shows and saves its stored or
+  // default value.
+  const values = { ...Object.fromEntries(form.fields.map((f) => [f.key, initial(f)])), ...draft };
 
   const save = useMutation({
     mutationFn: async () => {
@@ -208,6 +224,9 @@ export function SettingsForm({ form }: { form: PluginForm }) {
       // can change its status (or turn it off over a slug clash).
       void queryClient.invalidateQueries({ queryKey: ["plugins"] });
       void queryClient.invalidateQueries({ queryKey: ["plugin-surface"] });
+      void queryClient.invalidateQueries({
+        queryKey: ["plugin-form", form.pluginId],
+      });
       notify.success(`${form.pluginName} settings saved`);
     },
     onError: (e) => notify.error("Couldn't save the settings", e),

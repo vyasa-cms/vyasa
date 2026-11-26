@@ -9,6 +9,22 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fe438c63458706e03479442743baae6c88256498e6431708f6dfc520a26515d3"
 
 [[package]]
+name = "ab_glyph"
+version = "0.2.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01c0457472c38ea5bd1c3b5ada5e368271cb550be7a4ca4a0b4634e9913f6cc2"
+dependencies = [
+ "ab_glyph_rasterizer",
+ "owned_ttf_parser",
+]
+
+[[package]]
+name = "ab_glyph_rasterizer"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
+
+[[package]]
 name = "addr2line"
 version = "0.26.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1622,7 +1638,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3034,7 +3050,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3116,6 +3132,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8c7c9e0d9b23589f26070720bac724174bfec1083e82f7854cdd0267518343c0"
 dependencies = [
  "num-traits",
+]
+
+[[package]]
+name = "owned_ttf_parser"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36820e9051aca1014ddc75770aab4d68bc1e9e632f0f5627c4086bc216fb583b"
+dependencies = [
+ "ttf-parser",
 ]
 
 [[package]]
@@ -3628,7 +3653,7 @@ dependencies = [
  "once_cell",
  "socket2",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -3966,7 +3991,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4035,7 +4060,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -4921,7 +4946,7 @@ dependencies = [
  "getrandom 0.4.3",
  "once_cell",
  "rustix",
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5372,6 +5397,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e421abadd41a4225275504ea4d6566923418b7f05506fbc9c0fe86ba7396114b"
 
 [[package]]
+name = "ttf-parser"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
+
+[[package]]
 name = "tungstenite"
 version = "0.29.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5448,6 +5479,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5c1cb5db39152898a79168971543b1cb5020dff7fe43c8dc468b0885f5e29df5"
 
 [[package]]
+name = "unicode-general-category"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b993bddc193ae5bd0d623b49ec06ac3e9312875fdae725a975c51db1cc1677f"
+
+[[package]]
 name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5467,6 +5504,12 @@ name = "unicode-properties"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7df058c713841ad818f1dc5d3fd88063241cc61f49f5fbea4b951e8cf5a8d71d"
+
+[[package]]
+name = "unicode-script"
+version = "0.5.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "aa04c955db05429d464c74d495c1ee677e1866e783a4c3747f9c0cef7756cabf"
 
 [[package]]
 name = "unicode-segmentation"
@@ -5631,7 +5674,7 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vyasa-ai"
-version = "0.4.2"
+version = "0.4.5"
 dependencies = [
  "base64 0.23.1",
  "reqwest",
@@ -5647,7 +5690,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-api"
-version = "0.4.2"
+version = "0.4.5"
 dependencies = [
  "ammonia",
  "async-graphql",
@@ -5705,7 +5748,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-common"
-version = "0.4.2"
+version = "0.4.5"
 dependencies = [
  "config",
  "criterion",
@@ -5718,8 +5761,9 @@ dependencies = [
 
 [[package]]
 name = "vyasa-core"
-version = "0.4.2"
+version = "0.4.5"
 dependencies = [
+ "ab_glyph",
  "argon2",
  "async-trait",
  "base64 0.23.1",
@@ -5743,6 +5787,10 @@ dependencies = [
  "tera 2.3.0",
  "tokio",
  "tracing",
+ "unicode-bidi",
+ "unicode-general-category",
+ "unicode-normalization",
+ "unicode-script",
  "vyasa-common",
  "vyasa-db",
  "vyasa-testkit",
@@ -5752,7 +5800,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-db"
-version = "0.4.2"
+version = "0.4.5"
 dependencies = [
  "chrono",
  "serde",
@@ -5767,7 +5815,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-jobs"
-version = "0.4.2"
+version = "0.4.5"
 dependencies = [
  "chrono",
  "lettre",
@@ -5787,7 +5835,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-plugins"
-version = "0.4.2"
+version = "0.4.5"
 dependencies = [
  "ammonia",
  "chrono",
@@ -5812,7 +5860,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-search"
-version = "0.4.2"
+version = "0.4.5"
 dependencies = [
  "tantivy",
  "tempfile",
@@ -5823,7 +5871,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-testkit"
-version = "0.4.2"
+version = "0.4.5"
 dependencies = [
  "ed25519-dalek",
  "hex",
@@ -5840,12 +5888,13 @@ dependencies = [
 
 [[package]]
 name = "vyasa-themes"
-version = "0.4.2"
+version = "0.4.5"
 dependencies = [
  "ammonia",
  "chrono",
  "criterion",
  "futures",
+ "image",
  "insta",
  "moka",
  "schemars",
@@ -6473,7 +6522,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.59.0",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -222,6 +222,8 @@ pub struct HostCtx {
     pub ai_window: AiWindow,
     /// When the host will stop this call, for `call-budget-ms`.
     pub call_deadline: Option<std::time::Instant>,
+    /// The call's budget: an extended task's reads have their own quota.
+    pub budget: TaskBudget,
 }
 
 /// How long one epoch tick lasts.
@@ -274,12 +276,14 @@ impl HostEnv {
 }
 
 impl HostCtx {
-    /// The subject + destination bundle the data host functions take.
+    /// The subject + destination bundle the data host functions take; its
+    /// reads count on this call's own budget (ordinary or extended).
     fn data_ctx(&self) -> crate::hostdata::Ctx<'_> {
         crate::hostdata::Ctx {
             broker: &self.broker,
             pool: &self.dest,
             plugin_id: self.plugin_id,
+            task: self.budget == TaskBudget::Extended,
         }
     }
 }
@@ -319,14 +323,9 @@ impl host::Host for HostCtx {
     }
 
     async fn get_post(&mut self, id: u64) -> Result<host::PostSummary, String> {
-        if self
-            .broker
-            .check_db_read(self.plugin_id, crate::capabilities::Capability::DbReadPosts)
-            .await
-            != crate::broker::Decision::Allowed
-        {
-            return Err(String::from("capability-denied"));
-        }
+        self.data_ctx()
+            .allow_read(crate::capabilities::Capability::DbReadPosts)
+            .await?;
         let Ok(Some(row)) = sqlx::query_as::<
             _,
             (
@@ -364,14 +363,9 @@ impl host::Host for HostCtx {
         filter_post_type: Option<String>,
         limit: u32,
     ) -> Result<Vec<host::PostSummary>, String> {
-        if self
-            .broker
-            .check_db_read(self.plugin_id, crate::capabilities::Capability::DbReadPosts)
-            .await
-            != crate::broker::Decision::Allowed
-        {
-            return Err(String::from("capability-denied"));
-        }
+        self.data_ctx()
+            .allow_read(crate::capabilities::Capability::DbReadPosts)
+            .await?;
         let lim = i64::from(limit.clamp(1, 100));
         let rows = sqlx::query_as::<_, (i64, String, String, String, String)>(
             "SELECT id, type::text, slug, title, COALESCE(excerpt,'') FROM posts \
@@ -398,17 +392,9 @@ impl host::Host for HostCtx {
     }
 
     async fn get_option(&mut self, key: String) -> Result<Option<String>, String> {
-        if self
-            .broker
-            .check_db_read(
-                self.plugin_id,
-                crate::capabilities::Capability::DbReadOptions,
-            )
-            .await
-            != crate::broker::Decision::Allowed
-        {
-            return Err(String::from("capability-denied"));
-        }
+        self.data_ctx()
+            .allow_read(crate::capabilities::Capability::DbReadOptions)
+            .await?;
         if !PUBLIC_OPTIONS.contains(&key.as_str()) {
             return Err(String::from("capability-denied"));
         }
@@ -766,6 +752,16 @@ impl TrapStrikes {
     }
 }
 
+/// Which kind of call trapped, for [`WasmtimeHost::on_trap`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum TrapPath {
+    /// A call the site depends on (a hook, a task, a declaration at load): resource traps count as strikes.
+    Call,
+    /// A re-read the admin makes of a declaration it already holds: a resource trap only evicts; the caller keeps
+    /// the answer from load.
+    Refresh,
+}
+
 /// True for a trap that says the call was too slow or too hungry, not that the plugin's code is broken: the epoch
 /// deadline (`Interrupt`) and fuel exhaustion.
 fn is_resource_trap(err: &wasmtime::Error) -> bool {
@@ -993,6 +989,7 @@ impl WasmtimeHost {
                     std::time::Instant::now()
                         + std::time::Duration::from_millis(EPOCH_TICK_MILLIS.saturating_mul(ticks)),
                 ),
+                budget: env.budget,
             },
         );
         // Both budgets are best-effort: a store that refuses them still
@@ -1140,7 +1137,7 @@ impl WasmtimeHost {
             Ok(out) => InvokeOutcome::Ok(out),
             Err(trap) => {
                 let msg = Self::trap_reason(&trap);
-                self.on_trap(plugin_id, &trap, &msg).await;
+                self.on_trap(plugin_id, &trap, &msg, TrapPath::Call).await;
                 InvokeOutcome::Failed(msg)
             }
         }
@@ -1154,9 +1151,15 @@ impl WasmtimeHost {
         self.repo.set_enabled(plugin_id, false).await.ok();
     }
 
-    async fn on_trap(&self, plugin_id: i64, trap: &wasmtime::Error, message: &str) {
+    async fn on_trap(&self, plugin_id: i64, trap: &wasmtime::Error, message: &str, path: TrapPath) {
         tracing::warn!(plugin_id, "plugin trap: {message}");
         let reason = format!("trapped: {message}");
+        if is_resource_trap(trap) && path == TrapPath::Refresh {
+            // A re-read of a declaration (the admin polls a settings form once a minute) must not be what disables a
+            // plugin on a busy server: evict so the next call starts clean, and leave the strikes and status alone.
+            self.evict(plugin_id).await;
+            return;
+        }
         if is_resource_trap(trap) {
             let strikes = {
                 let mut all = self
@@ -1202,6 +1205,116 @@ impl WasmtimeHost {
             reason = format!("{reason} (trap: {trap})");
         }
         reason
+    }
+}
+
+#[cfg(test)]
+mod refresh_trap_tests {
+    use vyasa_db::repo::PluginsRepo;
+    use vyasa_testkit::TestDb;
+
+    use super::{TrapPath, WasmtimeHost};
+
+    fn trap(t: wasmtime::Trap) -> wasmtime::Error {
+        wasmtime::Error::new(t)
+    }
+
+    #[tokio::test]
+    async fn resource_traps_on_the_refresh_path_leave_the_plugin_enabled_and_unstruck() {
+        let db = TestDb::new().await;
+        let repo = PluginsRepo::new(db.pool().clone());
+        let row = crate::lifecycle::install(
+            &repo,
+            "poller",
+            "1.0.0",
+            b"\0asm",
+            "aaa",
+            &serde_json::json!([]),
+        )
+        .await
+        .expect("install");
+        // A new plugin starts disabled; enable it so the assertions below
+        // test the trap handling and not the install default.
+        repo.set_enabled(row.id, true).await.expect("enable");
+        repo.set_status(row.id, "loaded").await.expect("status");
+        let host = WasmtimeHost::new(repo.clone()).expect("engine");
+        for t in [
+            wasmtime::Trap::Interrupt,
+            wasmtime::Trap::OutOfFuel,
+            wasmtime::Trap::Interrupt,
+        ] {
+            host.on_trap(row.id, &trap(t), "register-admin: slow", TrapPath::Refresh)
+                .await;
+        }
+        let now = repo
+            .list()
+            .await
+            .expect("list")
+            .into_iter()
+            .find(|p| p.id == row.id)
+            .expect("row");
+        assert!(
+            now.enabled,
+            "three refresh traps must not disable the plugin"
+        );
+        assert_eq!(now.status, "loaded", "nor change its status");
+        assert!(
+            host.strikes.lock().expect("strikes").get(&row.id).is_none(),
+            "nor record a strike"
+        );
+        // The same three on an ordinary call still disable it.
+        for t in [
+            wasmtime::Trap::Interrupt,
+            wasmtime::Trap::OutOfFuel,
+            wasmtime::Trap::Interrupt,
+        ] {
+            host.on_trap(row.id, &trap(t), "hook: slow", TrapPath::Call)
+                .await;
+        }
+        let now = repo
+            .list()
+            .await
+            .expect("list")
+            .into_iter()
+            .find(|p| p.id == row.id)
+            .expect("row");
+        assert!(!now.enabled);
+        assert_eq!(now.status, "errored");
+    }
+
+    #[tokio::test]
+    async fn a_code_trap_on_the_refresh_path_still_disables_the_plugin() {
+        let db = TestDb::new().await;
+        let repo = PluginsRepo::new(db.pool().clone());
+        let row = crate::lifecycle::install(
+            &repo,
+            "broken",
+            "1.0.0",
+            b"\0asm",
+            "aaa",
+            &serde_json::json!([]),
+        )
+        .await
+        .expect("install");
+        repo.set_enabled(row.id, true).await.expect("enable");
+        repo.set_status(row.id, "loaded").await.expect("status");
+        let host = WasmtimeHost::new(repo.clone()).expect("engine");
+        host.on_trap(
+            row.id,
+            &trap(wasmtime::Trap::UnreachableCodeReached),
+            "register-admin",
+            TrapPath::Refresh,
+        )
+        .await;
+        let now = repo
+            .list()
+            .await
+            .expect("list")
+            .into_iter()
+            .find(|p| p.id == row.id)
+            .expect("row");
+        assert!(!now.enabled);
+        assert_eq!(now.status, "errored");
     }
 }
 
@@ -1262,7 +1375,7 @@ impl WasmtimeHost {
             Ok(Err(e)) => InvokeOutcome::Failed(e),
             Err(trap) => {
                 let msg = Self::trap_reason(&trap);
-                self.on_trap(plugin_id, &trap, &msg).await;
+                self.on_trap(plugin_id, &trap, &msg, TrapPath::Call).await;
                 InvokeOutcome::Failed(msg)
             }
         }
@@ -1379,7 +1492,7 @@ impl WasmtimeHost {
             Ok(Err(message)) => V2Outcome::Failed(message),
             Err(trap) => {
                 let msg = Self::trap_reason(&trap);
-                self.on_trap(plugin_id, &trap, &msg).await;
+                self.on_trap(plugin_id, &trap, &msg, TrapPath::Call).await;
                 V2Outcome::Failed(msg)
             }
         }
@@ -1407,7 +1520,7 @@ impl WasmtimeHost {
             Ok(Err(message)) => V2Outcome::Failed(message),
             Err(trap) => {
                 let msg = Self::trap_reason(&trap);
-                self.on_trap(plugin_id, &trap, &msg).await;
+                self.on_trap(plugin_id, &trap, &msg, TrapPath::Call).await;
                 V2Outcome::Failed(msg)
             }
         }
@@ -1456,7 +1569,7 @@ impl WasmtimeHost {
             Ok(Err(message)) => V2Outcome::Failed(message),
             Err(trap) => {
                 let msg = Self::trap_reason(&trap);
-                self.on_trap(plugin_id, &trap, &msg).await;
+                self.on_trap(plugin_id, &trap, &msg, TrapPath::Call).await;
                 V2Outcome::Failed(msg)
             }
         }
@@ -1471,6 +1584,32 @@ impl WasmtimeHost {
         plugin_id: i64,
         which: Declaration,
         env: &HostEnv,
+    ) -> V2Outcome<String> {
+        self.declaration_call(plugin_id, which, env, TrapPath::Call)
+            .await
+    }
+
+    /// [`Self::call_declaration`] for a declaration the caller already holds from load and only re-reads (the
+    /// settings form the admin refreshes while it is on screen).
+    ///
+    /// A time or fuel trap here evicts the instance but records no strike and leaves the plugin's status alone:
+    /// polling a status line must not be able to disable a plugin. Any other trap is handled as on every call.
+    pub async fn call_declaration_refresh(
+        &self,
+        plugin_id: i64,
+        which: Declaration,
+        env: &HostEnv,
+    ) -> V2Outcome<String> {
+        self.declaration_call(plugin_id, which, env, TrapPath::Refresh)
+            .await
+    }
+
+    async fn declaration_call(
+        &self,
+        plugin_id: i64,
+        which: Declaration,
+        env: &HostEnv,
+        path: TrapPath,
     ) -> V2Outcome<String> {
         let (bindings, mut store) = match self.begin_call_v2(plugin_id, env).await {
             Ok(Some(pair)) => pair,
@@ -1488,7 +1627,7 @@ impl WasmtimeHost {
             Ok(json) => V2Outcome::Ok(json),
             Err(trap) => {
                 let msg = format!("{}: {}", which.as_str(), Self::trap_reason(&trap));
-                self.on_trap(plugin_id, &trap, &msg).await;
+                self.on_trap(plugin_id, &trap, &msg, path).await;
                 V2Outcome::Failed(msg)
             }
         }
@@ -1520,7 +1659,7 @@ impl WasmtimeHost {
             Ok(out) => V2Outcome::Ok(out),
             Err(trap) => {
                 let msg = format!("filter-at {point}: {}", Self::trap_reason(&trap));
-                self.on_trap(plugin_id, &trap, &msg).await;
+                self.on_trap(plugin_id, &trap, &msg, TrapPath::Call).await;
                 V2Outcome::Failed(msg)
             }
         }
@@ -1544,7 +1683,7 @@ impl WasmtimeHost {
             Ok(Err(message)) => V2Outcome::Failed(message),
             Err(trap) => {
                 let msg = format!("on-event {name}: {}", Self::trap_reason(&trap));
-                self.on_trap(plugin_id, &trap, &msg).await;
+                self.on_trap(plugin_id, &trap, &msg, TrapPath::Call).await;
                 V2Outcome::Failed(msg)
             }
         }

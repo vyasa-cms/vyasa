@@ -1548,6 +1548,10 @@ export const api = {
     return request("/api/v1/media/storage/migrate", { method: "POST" });
   },
 
+  /** Whether the active theme can draw social cards, and for which post types. */
+  socialCards(): Promise<{ available: boolean; error?: string | null; post_types: string[]; unknown_post_types?: string[] }> {
+    return request("/api/v1/social-cards");
+  },
   registrySources(): Promise<{ marketplace: SourceInfo; updates: SourceInfo }> {
     return request("/api/v1/registry/sources");
   },
@@ -1734,6 +1738,11 @@ export const api = {
 
   getPluginSurface(): Promise<PluginSurface> {
     return request("/api/v1/plugins/surface");
+  },
+
+  /** The plugin's settings form as it declares it now (404 when it has none loaded). */
+  getPluginForm(id: string): Promise<PluginForm> {
+    return request(`/api/v1/plugins/${id}/form`);
   },
 
   // --- Content types and fields (phase 99) ----------------------------------

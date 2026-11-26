@@ -32,6 +32,9 @@ pub struct PostFilter {
     pub offset: u32,
     /// Pinned posts first (the home listing); other sorts unchanged.
     pub sticky_first: bool,
+    /// Only pinned (`Some(true)`) or only unpinned (`Some(false)`) posts;
+    /// `None` keeps both.
+    pub sticky: Option<bool>,
     /// Restrict to `post`, `page` and these custom types: what a reader who
     /// does not edit content may see (custom types served publicly).
     /// `None` leaves every type in.
@@ -303,6 +306,7 @@ impl PostsRepo {
                AND ($10 OR (p.status = 'published' AND p.password_hash IS NULL)
                     OR p.author_id = $11)
                AND ($12::text[] IS NULL OR p.type IN ('post', 'page') OR p.type = ANY($12))
+               AND ($13::boolean IS NULL OR p.sticky = $13)
              ORDER BY {sticky}{order}
              LIMIT $6 OFFSET $7"
         )))
@@ -322,6 +326,7 @@ impl PostsRepo {
         .bind(all)
         .bind(author)
         .bind(filter.readable_types.as_deref())
+        .bind(filter.sticky)
         .fetch_all(&self.pool)
         .await
         .map_err(|err| AppError::db(format!("post list failed: {err}")))
@@ -455,7 +460,8 @@ impl PostsRepo {
                AND ($8::int IS NULL OR (
                     EXTRACT(YEAR FROM COALESCE(p.published_at, p.created_at)) = $8
                     AND EXTRACT(MONTH FROM COALESCE(p.published_at, p.created_at)) = $9))
-               AND ($10::text[] IS NULL OR p.type IN ('post', 'page') OR p.type = ANY($10))",
+               AND ($10::text[] IS NULL OR p.type IN ('post', 'page') OR p.type = ANY($10))
+               AND ($11::boolean IS NULL OR p.sticky = $11)",
         )
         .bind(filter.status.map(PostStatus::as_str))
         .bind(filter.post_type.map(PostType::as_str))
@@ -471,6 +477,7 @@ impl PostsRepo {
                 .map(|(_, m)| i32::try_from(m).unwrap_or(1)),
         )
         .bind(filter.readable_types.as_deref())
+        .bind(filter.sticky)
         .fetch_one(&self.pool)
         .await
         .map_err(|err| AppError::db(format!("post count failed: {err}")))
@@ -1000,6 +1007,74 @@ impl PostsRepo {
         .fetch_all(&self.pool)
         .await
         .map_err(|err| AppError::db(format!("translations failed: {err}")))
+    }
+
+    /// The published, unprotected entries of `post`'s type and language
+    /// next to it in publication order: `(newer, older)`. Ties on the
+    /// date are broken by id, so every entry has one place in the order.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Db`] on database failure.
+    pub async fn neighbours(
+        &self,
+        post: &PostRow,
+    ) -> Result<(Option<PostRow>, Option<PostRow>), AppError> {
+        let when = post.published_at.unwrap_or(post.created_at);
+        let side = |newer: bool| {
+            let (cmp, dir) = if newer { (">", "ASC") } else { ("<", "DESC") };
+            format!(
+                "SELECT {POST_COLUMNS} FROM posts
+                 WHERE type = $1 AND lang = $2 AND status = 'published'
+                   AND password_hash IS NULL
+                   AND (COALESCE(published_at, created_at), id) {cmp} ($3, $4)
+                 ORDER BY COALESCE(published_at, created_at) {dir}, id {dir}
+                 LIMIT 1"
+            )
+        };
+        let mut out = [None, None];
+        for (slot, newer) in out.iter_mut().zip([true, false]) {
+            *slot = sqlx::query_as(sqlx::AssertSqlSafe(side(newer)))
+                .bind(post.post_type.as_str())
+                .bind(&post.lang)
+                .bind(when)
+                .bind(post.id)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|err| AppError::db(format!("neighbour lookup failed: {err}")))?;
+        }
+        let [newer, older] = out;
+        Ok((newer, older))
+    }
+
+    /// Up to `limit` published, unprotected entries of `post`'s type and
+    /// language that share a category or tag with it: most shared terms
+    /// first, then newest. Empty when the entry has no terms.
+    ///
+    /// # Errors
+    /// Returns [`AppError::Db`] on database failure.
+    pub async fn related_by_terms(
+        &self,
+        post: &PostRow,
+        limit: u32,
+    ) -> Result<Vec<PostRow>, AppError> {
+        sqlx::query_as(sqlx::AssertSqlSafe(format!(
+            "SELECT {POST_COLUMNS} FROM posts
+             JOIN (SELECT tr.post_id, COUNT(*) AS shared
+                   FROM term_relationships tr
+                   WHERE tr.term_id IN (SELECT term_id FROM term_relationships WHERE post_id = $1)
+                     AND tr.post_id <> $1
+                   GROUP BY tr.post_id) s ON s.post_id = posts.id
+             WHERE type = $2 AND lang = $3 AND status = 'published' AND password_hash IS NULL
+             ORDER BY s.shared DESC, COALESCE(published_at, created_at) DESC, id DESC
+             LIMIT $4"
+        )))
+        .bind(post.id)
+        .bind(post.post_type.as_str())
+        .bind(&post.lang)
+        .bind(i64::from(limit))
+        .fetch_all(&self.pool)
+        .await
+        .map_err(|err| AppError::db(format!("related posts failed: {err}")))
     }
 
     /// Pins or unpins a post on the home listing.

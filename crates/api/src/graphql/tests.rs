@@ -44,6 +44,7 @@ fn dummy_config() -> VyasaConfig {
         run_dir: PathBuf::from("/tmp"),
         debug: true,
         package_trusted_keys: Vec::new(),
+        plugin_quotas: Vec::new(),
         marketplace: vyasa_common::config::SourceConfig::default(),
         updates: vyasa_common::config::SourceConfig::default(),
         db: DbConfig {
@@ -58,6 +59,7 @@ fn dummy_config() -> VyasaConfig {
         storage: None,
         trusted_proxies: Vec::new(),
         trust_cf_connecting_ip: false,
+        social_card_cache_bytes: vyasa_common::config::DEFAULT_SOCIAL_CARD_CACHE_BYTES,
         demo: vyasa_common::config::DemoConfig::default(),
     }
 }
@@ -857,6 +859,7 @@ async fn subscription_post_published_and_updated() {
                 limit: 1,
                 offset: 0,
                 sticky_first: false,
+                sticky: None,
                 readable_types: None,
             })
             .await

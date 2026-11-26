@@ -108,6 +108,8 @@ pub struct AppState {
     pub content_queries: std::sync::Arc<dyn vyasa_themes::ContentQueries>,
     /// Public-site render cache (phase 23); `None` until routes land.
     pub render_cache: Option<std::sync::Arc<crate::render_cache::RenderCache>>,
+    /// Generated social cards: the PNG cache, renders in flight, permits.
+    pub social_cards: std::sync::Arc<crate::social_card::SocialCards>,
     /// The `discourage_indexing` option, cached for the response middleware.
     pub indexing_flag: std::sync::Arc<crate::middleware::demo::IndexingFlag>,
     /// Per-IP rate limiter shared across requests.
@@ -248,7 +250,11 @@ impl AppState {
             300,
         )));
         let secret = token_secret(&config);
+        let plugin_quotas = config.plugin_quotas.clone();
         let ai_models = ai_registry(&config, &pool);
+        let social_cards = std::sync::Arc::new(crate::social_card::SocialCards::new(
+            config.social_card_cache_bytes,
+        ));
         Self {
             cdn: crate::cdn::from_config(&config),
             config,
@@ -287,10 +293,10 @@ impl AppState {
             surface_epoch: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
             theme_bundle: crate::public::routes::BundleCache::default(),
             breakers: std::sync::Arc::default(),
-            broker: std::sync::Arc::new(vyasa_plugins::broker::Broker::new(
-                plugins_repo2,
-                broker_pool,
-            )),
+            broker: std::sync::Arc::new(
+                vyasa_plugins::broker::Broker::new(plugins_repo2, broker_pool)
+                    .with_overrides(plugin_quotas),
+            ),
             preview_assets: moka::sync::Cache::builder()
                 .max_capacity(128)
                 .time_to_idle(std::time::Duration::from_secs(600))
@@ -300,6 +306,7 @@ impl AppState {
                 .map(std::sync::Arc::new),
             content_queries,
             render_cache,
+            social_cards,
             indexing_flag: std::sync::Arc::new(crate::middleware::demo::IndexingFlag::new()),
             rate_limiter: std::sync::Arc::new(crate::middleware::rate_limit::RateLimiter::new(
                 crate::middleware::rate_limit::DEFAULT_LIMITS.to_vec(),
