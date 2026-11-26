@@ -113,6 +113,33 @@ pub async fn run(
     }
 }
 
+/// The harness is the operator's choice, read per request so Vyasa's loop
+/// and Sarathi can run side by side without a restart. Sarathi calls the
+/// chain's primary model itself; that model is resolved only when Sarathi
+/// is asked for, so Vyasa's loop never reads the registry twice.
+async fn pick_harness(
+    state: &AppState,
+    kind: ModelKind,
+) -> (
+    vyasa_ai::harness::Harness,
+    Option<vyasa_ai::harness::SarathiModel>,
+) {
+    let harness = vyasa_ai::harness::Harness::from_option(
+        state
+            .options
+            .get(vyasa_ai::harness::OPTION_KEY)
+            .await
+            .ok()
+            .as_ref(),
+    );
+    let sarathi = if harness == vyasa_ai::harness::Harness::Sarathi {
+        ai_registry::sarathi_model(state, kind).await
+    } else {
+        None
+    };
+    (harness, sarathi)
+}
+
 async fn run_inner(
     state: &AppState,
     draft_id: i64,
@@ -182,23 +209,7 @@ async fn run_inner(
         }),
     )
     .allow_script(vyasa_ai::theme_studio::request_allows_script(&message));
-    // The harness is the operator's choice, read per request so Vyasa's
-    // loop and Sarathi can run side by side without a restart.
-    let harness = vyasa_ai::harness::Harness::from_option(
-        state
-            .options
-            .get(vyasa_ai::harness::OPTION_KEY)
-            .await
-            .ok()
-            .as_ref(),
-    );
-    // Sarathi calls the chain's primary model itself; resolved only when
-    // it is asked for, so Vyasa's loop never reads the registry twice.
-    let sarathi = if harness == vyasa_ai::harness::Harness::Sarathi {
-        ai_registry::sarathi_model(state, kind).await
-    } else {
-        None
-    };
+    let (harness, sarathi) = pick_harness(state, kind).await;
     let outcome = vyasa_ai::harness::run(
         harness,
         &provider,
