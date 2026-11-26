@@ -132,7 +132,7 @@ reinstalled from a package that declares them.
 | Post meta | 64 B keys, 16 KiB values, 64 keys per plugin per post |
 | Mail | 200-character subject, 32 KiB body, charged to the write quota |
 | Named filter payloads | 64 KiB in and out; a larger reply is ignored |
-| Extended task budget | for a task declared `"budget": "extended"` by a plugin holding `tasks:extended`: 60 s wall clock, 20 billion fuel, 3 000 reads, 300 fetches, 50 MiB fetched and 600 writes per minute, counted apart from the plugin's other calls for reads; model calls keep their ordinary limit |
+| Extended task budget | for a task declared `"budget": "extended"` by a plugin holding `tasks:extended`: 60 s wall clock, 20 billion fuel, 3 000 reads, 300 fetches, 50 MiB fetched and 600 writes per minute, all counted apart from the plugin's other calls (a page render made while the task runs keeps the ordinary limits and spends its own budget); model calls keep their ordinary limit, also counted apart |
 | `fetch-with` headers | request and response allowlists above; header values 4 KiB |
 | `attrs-schema` | 16 KiB per block declaration (a larger schema is dropped, the block stays) |
 | Host API | `HOST_API_VERSION` is 2; a package whose manifest says `min_host_api` above it is refused at install |

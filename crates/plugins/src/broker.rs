@@ -93,44 +93,46 @@ impl Quotas {
     }
 }
 
-/// While alive, one plugin's counters use [`Quotas::extended`].
-pub struct ExtendedScope(Arc<std::sync::atomic::AtomicU32>);
-
-impl Drop for ExtendedScope {
-    fn drop(&mut self) {
-        self.0.fetch_sub(1, std::sync::atomic::Ordering::SeqCst);
-    }
-}
-
-/// Sliding counters (fixed 60 s window keyed by wall-clock minute).
+/// What one budget has spent in the current window.
 #[derive(Default)]
-struct Counters {
-    window: u64,
+struct Spent {
     db_reads: u32,
-    /// Reads made by extended tasks, counted apart so page renders cannot
-    /// spend a sync's budget (or a sync theirs).
-    task_db_reads: u32,
     fetches: u32,
     bytes: u64,
     writes: u32,
     ai_calls: u32,
 }
 
+/// Sliding counters (fixed 60 s window keyed by wall-clock minute).
+///
+/// Ordinary calls (page renders, hooks, routes) and extended tasks (a
+/// scheduled sync) each spend their own budget, so a render made while a
+/// sync runs is held to the ordinary limits and cannot spend the sync's
+/// budget (or the sync theirs).
+#[derive(Default)]
+struct Counters {
+    window: u64,
+    ordinary: Spent,
+    task: Spent,
+}
+
 impl Counters {
-    fn roll(&mut self) -> &mut Self {
+    /// The spent counters of the ordinary (`task` false) or extended-task
+    /// budget, after starting a new window if the minute changed.
+    fn spent(&mut self, task: bool) -> &mut Spent {
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |d| d.as_secs() / 60);
         if self.window != now {
             self.window = now;
-            self.db_reads = 0;
-            self.task_db_reads = 0;
-            self.fetches = 0;
-            self.bytes = 0;
-            self.writes = 0;
-            self.ai_calls = 0;
+            self.ordinary = Spent::default();
+            self.task = Spent::default();
         }
-        self
+        if task {
+            &mut self.task
+        } else {
+            &mut self.ordinary
+        }
     }
 }
 
@@ -172,8 +174,6 @@ pub struct Broker {
     grants: Arc<tokio::sync::RwLock<HashMap<i64, Vec<Capability>>>>,
     counters: Arc<tokio::sync::Mutex<HashMap<i64, Counters>>>,
     quotas: Quotas,
-    /// Per plugin, how many extended scopes are alive (lock-free to drop).
-    extended: Arc<std::sync::Mutex<HashMap<i64, Arc<std::sync::atomic::AtomicU32>>>>,
     /// When each plugin was last refused for a quota (not a missing grant).
     quota_refused: Arc<std::sync::Mutex<HashMap<i64, std::time::Instant>>>,
     /// The operator's quota overrides, by plugin name.
@@ -198,7 +198,6 @@ impl Broker {
             grants: Arc::new(tokio::sync::RwLock::new(HashMap::new())),
             counters: Arc::new(tokio::sync::Mutex::new(HashMap::new())),
             quotas: Quotas::default(),
-            extended: Arc::new(std::sync::Mutex::new(HashMap::new())),
             quota_refused: Arc::new(std::sync::Mutex::new(HashMap::new())),
             overrides: Arc::from(Vec::new()),
             names: Arc::new(std::sync::Mutex::new(HashMap::new())),
@@ -211,31 +210,6 @@ impl Broker {
     pub fn with_overrides(mut self, overrides: Vec<PluginQuotaOverride>) -> Self {
         self.overrides = Arc::from(overrides);
         self
-    }
-
-    /// Starts an extended scope for `plugin_id`: until the guard drops, its
-    /// quotas are [`Quotas::extended`]. Scopes nest.
-    #[must_use]
-    pub fn extended_scope(&self, plugin_id: i64) -> ExtendedScope {
-        let flag = self.extended.lock().map_or_else(
-            |_| Arc::new(std::sync::atomic::AtomicU32::new(0)),
-            |mut map| Arc::clone(map.entry(plugin_id).or_default()),
-        );
-        flag.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-        ExtendedScope(flag)
-    }
-
-    /// Whether an extended scope is alive for `plugin_id`.
-    fn in_extended_scope(&self, plugin_id: i64) -> bool {
-        self.extended.lock().is_ok_and(|map| {
-            map.get(&plugin_id)
-                .is_some_and(|f| f.load(std::sync::atomic::Ordering::SeqCst) > 0)
-        })
-    }
-
-    /// The quotas in force for `plugin_id` right now.
-    fn quotas_for(&self, plugin_id: i64) -> Quotas {
-        self.quotas_as(plugin_id, self.in_extended_scope(plugin_id))
     }
 
     /// The ordinary (`task` false) or extended-task quotas of `plugin_id`,
@@ -371,17 +345,27 @@ impl Broker {
     /// would have written 172 800 audit rows a day — burying the entries
     /// that do matter.
     pub async fn check_private_write(&self, plugin_id: i64, cap: &Capability) -> Decision {
-        self.gate_write(plugin_id, cap, None).await.into()
+        self.gate_write(plugin_id, cap, None, false).await.into()
     }
 
-    /// [`Broker::check_private_write`], saying why a refusal happened.
-    pub async fn private_write_gate(&self, plugin_id: i64, cap: &Capability) -> Gate {
-        self.gate_write(plugin_id, cap, None).await
+    /// [`Broker::check_private_write`] for an ordinary call (`task` false)
+    /// or an extended task, each on its own write budget, saying why a
+    /// refusal happened.
+    pub async fn private_write_gate(&self, plugin_id: i64, cap: &Capability, task: bool) -> Gate {
+        self.gate_write(plugin_id, cap, None, task).await
     }
 
-    /// [`Broker::check_write`], saying why a refusal happened.
-    pub async fn write_gate(&self, plugin_id: i64, cap: &Capability, detail: &str) -> Gate {
-        self.gate_write(plugin_id, cap, Some(detail)).await
+    /// [`Broker::check_write`] for an ordinary call (`task` false) or an
+    /// extended task, each on its own write budget, saying why a refusal
+    /// happened.
+    pub async fn write_gate(
+        &self,
+        plugin_id: i64,
+        cap: &Capability,
+        detail: &str,
+        task: bool,
+    ) -> Gate {
+        self.gate_write(plugin_id, cap, Some(detail), task).await
     }
 
     /// Gate a mutation with an effect outside the plugin: the grant, one
@@ -391,19 +375,32 @@ impl Broker {
     /// touches content, post meta or someone's inbox is the thing an
     /// operator needs to be able to reconstruct afterwards.
     pub async fn check_write(&self, plugin_id: i64, cap: &Capability, detail: &str) -> Decision {
-        self.gate_write(plugin_id, cap, Some(detail)).await.into()
+        self.gate_write(plugin_id, cap, Some(detail), false)
+            .await
+            .into()
     }
 
-    async fn gate_write(&self, plugin_id: i64, cap: &Capability, detail: Option<&str>) -> Gate {
+    async fn gate_write(
+        &self,
+        plugin_id: i64,
+        cap: &Capability,
+        detail: Option<&str>,
+        task: bool,
+    ) -> Gate {
         if self.check_capability(plugin_id, cap).await != Decision::Allowed {
             return Gate::NotGranted;
         }
+        let limit = self.quotas_as(plugin_id, task).writes_per_min;
         let mut counters = self.counters.lock().await;
-        let c = counters.entry(plugin_id).or_default().roll();
-        if c.writes >= self.quotas_for(plugin_id).writes_per_min {
+        let c = counters.entry(plugin_id).or_default().spent(task);
+        if c.writes >= limit {
             drop(counters);
-            self.audit(plugin_id, "quota", cap, "writes/min exceeded")
-                .await;
+            let detail = if task {
+                "writes/min exceeded (extended task)"
+            } else {
+                "writes/min exceeded"
+            };
+            self.audit(plugin_id, "quota", cap, detail).await;
             return Gate::OverQuota;
         }
         c.writes += 1;
@@ -438,13 +435,8 @@ impl Broker {
         }
         let limit = self.quotas_as(plugin_id, task).db_reads_per_min;
         let mut counters = self.counters.lock().await;
-        let c = counters.entry(plugin_id).or_default().roll();
-        let used = if task {
-            &mut c.task_db_reads
-        } else {
-            &mut c.db_reads
-        };
-        if *used >= limit {
+        let c = counters.entry(plugin_id).or_default().spent(task);
+        if c.db_reads >= limit {
             drop(counters);
             let detail = if task {
                 "db reads/min exceeded (extended task)"
@@ -461,7 +453,7 @@ impl Broker {
             }
             return Gate::OverQuota;
         }
-        *used += 1;
+        c.db_reads += 1;
         Gate::Allowed
     }
 
@@ -528,8 +520,9 @@ impl Broker {
     }
 
     /// Gate a text-model completion: the `ai:text` grant plus one slot
-    /// from the per-minute AI quota.
-    pub async fn check_ai(&self, plugin_id: i64) -> Decision {
+    /// from the per-minute AI quota of an ordinary call (`task` false) or
+    /// an extended task, each counted on its own.
+    pub async fn check_ai(&self, plugin_id: i64, task: bool) -> Decision {
         let granted = match self.granted_for(plugin_id).await {
             Ok(g) => g,
             Err(e) => {
@@ -543,9 +536,10 @@ impl Broker {
                 .await;
             return Decision::Denied;
         }
+        let limit = self.quotas_as(plugin_id, task).ai_calls_per_min;
         let mut counters = self.counters.lock().await;
-        let c = counters.entry(plugin_id).or_default().roll();
-        if c.ai_calls >= self.quotas_for(plugin_id).ai_calls_per_min {
+        let c = counters.entry(plugin_id).or_default().spent(task);
+        if c.ai_calls >= limit {
             drop(counters);
             self.audit(
                 plugin_id,
@@ -562,8 +556,10 @@ impl Broker {
 
     /// Gate an outbound fetch to `url`, consuming one slot from the fetch +
     /// byte quotas when the response size is known upfront (unknown sizes
-    /// consume after download via [`Broker::record_bytes`]).
-    pub async fn check_fetch(&self, plugin_id: i64, url: &str) -> Decision {
+    /// consume after download via [`Broker::record_bytes`]). An ordinary
+    /// call (`task` false) and an extended task each count on their own
+    /// budget.
+    pub async fn check_fetch(&self, plugin_id: i64, url: &str, task: bool) -> Decision {
         let host = url_host(url);
         let Some(host) = host else {
             self.audit(
@@ -588,9 +584,10 @@ impl Broker {
                 .await;
             return Decision::Denied;
         }
+        let limit = self.quotas_as(plugin_id, task).fetches_per_min;
         let mut counters = self.counters.lock().await;
-        let c = counters.entry(plugin_id).or_default().roll();
-        if c.fetches >= self.quotas_for(plugin_id).fetches_per_min {
+        let c = counters.entry(plugin_id).or_default().spent(task);
+        if c.fetches >= limit {
             drop(counters);
             self.audit(plugin_id, "quota", &wanted, "fetches/min exceeded")
                 .await;
@@ -603,11 +600,13 @@ impl Broker {
     }
 
     /// Records fetched bytes against the byte quota; over-budget callers
-    /// should abort the transfer.
-    pub async fn record_bytes(&self, plugin_id: i64, n: u64) -> bool {
+    /// should abort the transfer. `task` picks the budget, as for
+    /// [`Broker::check_fetch`].
+    pub async fn record_bytes(&self, plugin_id: i64, n: u64, task: bool) -> bool {
+        let limit = self.quotas_as(plugin_id, task).bytes_per_min;
         let mut counters = self.counters.lock().await;
-        let c = counters.entry(plugin_id).or_default().roll();
-        if c.bytes + n > self.quotas_for(plugin_id).bytes_per_min {
+        let c = counters.entry(plugin_id).or_default().spent(task);
+        if c.bytes + n > limit {
             return false;
         }
         c.bytes += n;

@@ -105,14 +105,14 @@ async fn a_refusal_names_a_missing_grant_apart_from_a_spent_quota() {
     // Granted, but no writes left this minute.
     assert_eq!(
         broker
-            .private_write_gate(writer, &Capability::KvWrite)
+            .private_write_gate(writer, &Capability::KvWrite, false)
             .await,
         Gate::OverQuota
     );
     // Not granted: said as such even with no writes left.
     assert_eq!(
         broker
-            .private_write_gate(reader, &Capability::KvWrite)
+            .private_write_gate(reader, &Capability::KvWrite, false)
             .await,
         Gate::NotGranted
     );
@@ -142,9 +142,6 @@ async fn host_reads_count_on_their_own_calls_budget() {
     let overrides = parse_plugin_quotas("docs:reads=3,task_reads=4").unwrap();
     let broker = std::sync::Arc::new(Broker::new(repo, pool.clone()).with_overrides(overrides));
     inside_one_minute().await;
-    // The task is running: its scope is alive for the whole test.
-    let _scope = broker.extended_scope(id);
-
     let mut render = call(&broker, &pool, id, TaskBudget::Ordinary);
     assert!(render.get_option("site_title".into()).await.is_ok());
     assert!(render.query_posts(None, 1).await.is_ok());
@@ -210,12 +207,60 @@ async fn the_operator_raises_or_lowers_one_plugins_limits_by_name() {
     // `*:writes=2` reaches the vyasa-docs plugin too.
     for _ in 0..2 {
         assert_eq!(
-            broker.private_write_gate(docs, &Capability::KvWrite).await,
+            broker
+                .private_write_gate(docs, &Capability::KvWrite, false)
+                .await,
             Gate::Allowed
         );
     }
     assert_eq!(
-        broker.private_write_gate(docs, &Capability::KvWrite).await,
+        broker
+            .private_write_gate(docs, &Capability::KvWrite, false)
+            .await,
+        Gate::OverQuota
+    );
+}
+
+/// Writes, like reads, count on the call's own budget: an ordinary call
+/// made while the plugin's sync runs is held to the ordinary write limit
+/// and leaves the task's writes untouched.
+#[tokio::test]
+async fn writes_count_on_their_own_calls_budget() {
+    let db = TestDb::new().await;
+    let pool = db.pool().clone();
+    let repo = vyasa_db::repo::PluginsRepo::new(pool.clone());
+    let docs = plugin(&repo, "docs", serde_json::json!(["kv:read", "kv:write"])).await;
+    let overrides = parse_plugin_quotas("docs:writes=2,task_writes=3").unwrap();
+    let broker = Broker::new(repo, pool).with_overrides(overrides);
+    inside_one_minute().await;
+    for _ in 0..2 {
+        assert_eq!(
+            broker
+                .private_write_gate(docs, &Capability::KvWrite, false)
+                .await,
+            Gate::Allowed
+        );
+    }
+    assert_eq!(
+        broker
+            .private_write_gate(docs, &Capability::KvWrite, false)
+            .await,
+        Gate::OverQuota,
+        "the ordinary budget stops at its own limit"
+    );
+    for _ in 0..3 {
+        assert_eq!(
+            broker
+                .private_write_gate(docs, &Capability::KvWrite, true)
+                .await,
+            Gate::Allowed,
+            "the task's writes are all still there"
+        );
+    }
+    assert_eq!(
+        broker
+            .private_write_gate(docs, &Capability::KvWrite, true)
+            .await,
         Gate::OverQuota
     );
 }

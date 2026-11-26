@@ -68,23 +68,20 @@ async fn an_extended_task_gets_a_longer_budget_only_with_the_capability() {
             .await,
         Decision::Denied
     );
-    // Within the scope the larger fetch quota applies; outside it, the ordinary one.
-    {
-        let _scope = broker.extended_scope(with.id);
-        for i in 0..100 {
-            assert_eq!(
-                broker
-                    .check_fetch(with.id, "https://api.github.com/x")
-                    .await,
-                Decision::Allowed,
-                "fetch {i}"
-            );
-        }
+    // An extended task's call gets the larger fetch quota; an ordinary one the ordinary quota.
+    for i in 0..100 {
+        assert_eq!(
+            broker
+                .check_fetch(with.id, "https://api.github.com/x", true)
+                .await,
+            Decision::Allowed,
+            "fetch {i}"
+        );
     }
     let mut allowed = 0;
     for _ in 0..200 {
         if broker
-            .check_fetch(without.id, "https://api.github.com/x")
+            .check_fetch(without.id, "https://api.github.com/x", false)
             .await
             == Decision::Allowed
         {
@@ -94,8 +91,10 @@ async fn an_extended_task_gets_a_longer_budget_only_with_the_capability() {
     assert_eq!(allowed, Quotas::default().fetches_per_min as usize);
 }
 
+/// A render made while the plugin's sync is running counts on the ordinary
+/// budget: it neither gets the task's larger limits nor spends them.
 #[tokio::test]
-async fn a_scope_ends_when_it_is_dropped() {
+async fn an_ordinary_call_keeps_the_ordinary_fetch_quota_while_a_task_fetches() {
     let db = TestDb::new().await;
     let pool = db.pool().clone();
     let repo = vyasa_db::repo::PluginsRepo::new(pool.clone());
@@ -110,14 +109,38 @@ async fn a_scope_ends_when_it_is_dropped() {
         .await
         .unwrap();
     let broker = Broker::new(repo, pool);
-    let scope = broker.extended_scope(p.id);
-    drop(scope);
-    // The window may already hold requests; assert the *limit*, not the count: the 61st in one window is denied.
-    let mut allowed = 0;
-    for _ in 0..200 {
-        if broker.check_fetch(p.id, "https://api.github.com/x").await == Decision::Allowed {
-            allowed += 1;
+    let count = |task: bool| {
+        let broker = broker.clone();
+        async move {
+            let mut allowed = 0;
+            for _ in 0..400 {
+                if broker
+                    .check_fetch(p.id, "https://api.github.com/x", task)
+                    .await
+                    == Decision::Allowed
+                {
+                    allowed += 1;
+                }
+            }
+            allowed
         }
+    };
+    // Wait for the start of a minute so both budgets are counted in one window.
+    let secs = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+    if secs % 60 > 50 {
+        tokio::time::sleep(std::time::Duration::from_secs(61 - secs % 60)).await;
     }
-    assert_eq!(allowed, Quotas::default().fetches_per_min as usize);
+    assert_eq!(
+        count(true).await,
+        Quotas::extended().fetches_per_min as usize
+    );
+    assert_eq!(
+        count(false).await,
+        Quotas::default().fetches_per_min as usize
+    );
+    // Each budget stays spent on its own.
+    assert_eq!(count(true).await, 0);
 }

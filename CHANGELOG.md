@@ -7,6 +7,9 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Fixed
+- Plugin quotas: writes, fetches, fetched bytes and model calls are counted per call budget too, like reads. A page render or hook that ran while the plugin's extended task was going got the task's larger limits and spent the same counters; it now keeps the ordinary limits on its own counters, and the task keeps its whole budget.
+
 ## [0.4.5] - 2026-11-26
 
 ### Fixed
