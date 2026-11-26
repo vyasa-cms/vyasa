@@ -76,13 +76,13 @@ async fn a_refusal_names_a_missing_grant_apart_from_a_spent_quota() {
     let overrides = parse_plugin_quotas("reader:writes=0").unwrap();
     let broker = Broker::new(repo, pool).with_overrides(overrides);
     assert_eq!(
-        broker
-            .private_write_gate(id, &Capability::KvWrite)
-            .await,
+        broker.private_write_gate(id, &Capability::KvWrite).await,
         Gate::NotGranted
     );
     assert_eq!(
-        broker.read_gate(id, Capability::DbReadComments, false).await,
+        broker
+            .read_gate(id, Capability::DbReadComments, false)
+            .await,
         Gate::NotGranted
     );
 }
@@ -112,7 +112,11 @@ async fn the_operator_raises_or_lowers_one_plugins_limits_by_name() {
     };
     inside_one_minute().await;
     assert_eq!(allowed(docs, false).await, 5, "the named entry wins over *");
-    assert_eq!(allowed(docs, true).await, 7, "task_ sets the extended budget");
+    assert_eq!(
+        allowed(docs, true).await,
+        7,
+        "task_ sets the extended budget"
+    );
     assert_eq!(allowed(other, false).await, 3, "* applies to every plugin");
     assert_eq!(
         allowed(other, true).await,

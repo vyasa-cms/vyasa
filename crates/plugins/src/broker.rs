@@ -71,7 +71,12 @@ impl Quotas {
     /// entries for every plugin (`*`) first, then those naming it. `task`
     /// picks the overrides of the extended-task budget.
     #[must_use]
-    pub fn with_overrides(mut self, overrides: &[PluginQuotaOverride], plugin: &str, task: bool) -> Self {
+    pub fn with_overrides(
+        mut self,
+        overrides: &[PluginQuotaOverride],
+        plugin: &str,
+        task: bool,
+    ) -> Self {
         let wildcard = overrides.iter().filter(|o| o.plugin == "*");
         let named = overrides.iter().filter(|o| o.plugin == plugin);
         for o in wildcard.chain(named).filter(|o| o.task == task) {
@@ -236,7 +241,11 @@ impl Broker {
     /// The ordinary (`task` false) or extended-task quotas of `plugin_id`,
     /// with the operator's overrides for it.
     fn quotas_as(&self, plugin_id: i64, task: bool) -> Quotas {
-        let base = if task { Quotas::extended() } else { self.quotas };
+        let base = if task {
+            Quotas::extended()
+        } else {
+            self.quotas
+        };
         if self.overrides.is_empty() {
             return base;
         }

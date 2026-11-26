@@ -862,14 +862,20 @@ mod tests {
         std::env::remove_var("VYASA_PLUGIN_TRUSTED_KEYS");
         assert!(cfg.plugin_quotas.is_empty(), "no overrides by default");
         // Plugin quota overrides from the environment, validated at load.
-        std::env::set_var("VYASA_PLUGIN_QUOTAS", "vyasa-docs:task_reads=20000,reads=1200");
+        std::env::set_var(
+            "VYASA_PLUGIN_QUOTAS",
+            "vyasa-docs:task_reads=20000,reads=1200",
+        );
         let quotas = VyasaConfig::load_from_file(&path).expect("load with quotas");
         assert_eq!(quotas.plugin_quotas.len(), 2);
         assert_eq!(quotas.plugin_quotas[0].plugin, "vyasa-docs");
         assert!(quotas.plugin_quotas[0].task);
         assert_eq!(quotas.plugin_quotas[0].value, 20000);
         std::env::set_var("VYASA_PLUGIN_QUOTAS", "vyasa-docs:speed=1");
-        assert!(VyasaConfig::load_from_file(&path).is_err(), "unknown limit refused");
+        assert!(
+            VyasaConfig::load_from_file(&path).is_err(),
+            "unknown limit refused"
+        );
         std::env::remove_var("VYASA_PLUGIN_QUOTAS");
         assert_eq!(cfg.bind_addr, "127.0.0.1:9999");
         assert_eq!(cfg.media_dir, std::path::PathBuf::from("media"));
