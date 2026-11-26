@@ -15,15 +15,15 @@ fn the_extended_limits_are_a_minute_and_twenty_billion_fuel() {
 }
 
 #[test]
-fn the_extended_quotas_are_larger_in_the_three_places_a_sync_needs() {
+fn the_extended_quotas_are_larger_in_the_four_places_a_sync_needs() {
     let q = Quotas::extended();
     let d = Quotas::default();
     assert!(
         q.fetches_per_min > d.fetches_per_min
             && q.bytes_per_min > d.bytes_per_min
             && q.writes_per_min > d.writes_per_min
+            && q.db_reads_per_min > d.db_reads_per_min
     );
-    assert_eq!(q.db_reads_per_min, d.db_reads_per_min);
     assert_eq!(
         q.ai_calls_per_min, d.ai_calls_per_min,
         "money is not part of a longer budget"
