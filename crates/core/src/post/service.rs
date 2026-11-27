@@ -857,7 +857,9 @@ impl PostService {
         new_position: Option<i32>,
     ) -> Result<Vec<vyasa_db::repo::TreeChange>, AppError> {
         let mut nodes = self.hierarchy_nodes(current.post_type).await?;
-        if !nodes.iter().any(|n| n.id == current.id) {
+        // Not in the tree: coming back from the trash.
+        let joining = !nodes.iter().any(|n| n.id == current.id);
+        if joining {
             nodes.push(hierarchy::Node {
                 id: current.id,
                 parent_id: current.parent_id,
@@ -878,7 +880,32 @@ impl PostService {
                 }
             }
         }
+        // An entry placed by this write (a new parent, or back from the trash)
+        // must have a live parent; an orphan it leaves where it is (only its
+        // content or slug changes) is not refused, so one old orphan does not
+        // stop every write to the type.
+        let reparented = new_parent.is_some_and(|p| p != current.parent_id);
+        if joining || reparented {
+            hierarchy::check_parent(&nodes, current.id).map_err(AppError::validation)?;
+        }
         hierarchy::validate_tree(&nodes).map_err(AppError::validation)?;
+        // Only the position changes (a sync re-puts every entry with its
+        // parent and position): no path moves, so the stored one is kept.
+        // Recomputing it would put an orphan's subtree at the root.
+        let slug_changed = new_slug.is_some_and(|s| s != current.slug);
+        if !joining && !reparented && !slug_changed {
+            if let (Some(path), Some(node)) = (
+                current.path.clone(),
+                nodes.iter().find(|n| n.id == current.id),
+            ) {
+                return Ok(vec![vyasa_db::repo::TreeChange {
+                    id: current.id,
+                    parent_id: node.parent_id,
+                    position: node.position,
+                    path,
+                }]);
+            }
+        }
         let mut changes = Vec::new();
         for id in hierarchy::subtree_ids(&nodes, current.id) {
             let Some(node) = nodes.iter().find(|n| n.id == id) else {
