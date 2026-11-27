@@ -7,8 +7,13 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Added
+- The `ai_harness` option (`vyasa`, the default, or `sarathi`) picks the agent harness a site's AI surfaces run on, read per request, so both run side by side without a restart. On Sarathi the registry's primary model is called with native tool use; usage rows, budget caps, the step list and the proposal stay as on Vyasa's own loop. In Theme Studio a Sarathi run must state its criteria with a `plan` tool and render the page with `look` after its last edit before it may finish; a finish without that is sent back to the model, and after three refusals the run ends as out of steps.
+
 ### Fixed
 - Plugin quotas: a plugin enabled, disabled or reinstalled at the same moment as one of its calls could keep its grants cached without its name, so its `VYASA_PLUGIN_QUOTAS` override stopped applying until the next change or a restart. The name and the grants are now cached and dropped together.
+
+## [0.4.6] - 2026-11-27
 
 ### Changed
 - The declared minimum supported Rust version is 1.97 (was 1.85, which no longer built: the plugin host's wasmtime needs 1.97); the pinned toolchain stays 1.99. CI checks that the workspace builds on 1.97.
