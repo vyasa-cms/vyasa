@@ -46,39 +46,63 @@ fn by_id(nodes: &[Node]) -> BTreeMap<i64, &Node> {
     nodes.iter().map(|n| (n.id, n)).collect()
 }
 
-/// How deep `id` sits (a root entry is 1), or `None` when the chain is
-/// broken or loops.
-#[must_use]
-pub fn depth_of(nodes: &[Node], id: i64) -> Option<usize> {
-    let map = by_id(nodes);
-    let mut depth = 0;
+/// The chain from `id` up to its root, `id` first. An orphan (an entry
+/// whose parent is not in `nodes`: trashed, deleted or of another type)
+/// ends the chain as a root, the way [`preorder`] shows it. `None` when
+/// `id` is not in `nodes` or the chain loops.
+fn chain<'a>(map: &BTreeMap<i64, &'a Node>, id: i64) -> Option<Vec<&'a Node>> {
+    let mut out = Vec::new();
     let mut cur = Some(id);
     while let Some(c) = cur {
-        depth += 1;
-        if depth > nodes.len() + 1 {
+        let Some(n) = map.get(&c) else {
+            if out.is_empty() {
+                return None;
+            }
+            break;
+        };
+        if out.len() >= map.len() {
             return None; // a loop
         }
-        cur = map.get(&c)?.parent_id;
-    }
-    Some(depth)
-}
-
-/// Slugs from the root down to `id`, joined by `/`.
-#[must_use]
-pub fn path_of(nodes: &[Node], id: i64) -> Option<String> {
-    let map = by_id(nodes);
-    let mut parts = Vec::new();
-    let mut cur = Some(id);
-    while let Some(c) = cur {
-        if parts.len() > nodes.len() {
-            return None;
-        }
-        let n = map.get(&c)?;
-        parts.push(n.slug.as_str());
+        out.push(*n);
         cur = n.parent_id;
     }
+    Some(out)
+}
+
+/// How deep `id` sits (a root entry, or an orphan, is 1), or `None` when
+/// `id` is unknown or the chain loops.
+#[must_use]
+pub fn depth_of(nodes: &[Node], id: i64) -> Option<usize> {
+    chain(&by_id(nodes), id).map(|c| c.len())
+}
+
+/// Slugs from the root (or the orphan heading the chain) down to `id`,
+/// joined by `/`.
+#[must_use]
+pub fn path_of(nodes: &[Node], id: i64) -> Option<String> {
+    let mut parts: Vec<&str> = chain(&by_id(nodes), id)?
+        .iter()
+        .map(|n| n.slug.as_str())
+        .collect();
     parts.reverse();
     Some(parts.join("/"))
+}
+
+/// Refuses `id` having a parent that is not among `nodes`. A write checks
+/// this for the entries it places, so it cannot create an orphan, while an
+/// orphan already in the type (its parent trashed earlier) does not block
+/// writes elsewhere.
+///
+/// # Errors
+/// A message naming the entry and the missing parent.
+pub fn check_parent(nodes: &[Node], id: i64) -> Result<(), String> {
+    let map = by_id(nodes);
+    match map.get(&id).and_then(|n| n.parent_id) {
+        Some(p) if !map.contains_key(&p) => Err(format!(
+            "entry {id} has a parent ({p}) that is not in this type"
+        )),
+        _ => Ok(()),
+    }
 }
 
 /// `id` and everything below it.
@@ -132,19 +156,15 @@ pub fn preorder(nodes: &[Node]) -> Vec<(i64, usize)> {
 /// Checks a whole tree: no loops, nothing deeper than [`MAX_DEPTH`], no
 /// reserved slug at the root, no two siblings sharing a slug.
 ///
+/// An orphan counts as a root for depth and is not itself an error: a
+/// type's tree with one old orphan would otherwise refuse every write to
+/// any entry of it. Writes that place an entry check it with
+/// [`check_parent`].
+///
 /// # Errors
 /// A message naming the offending entry.
 pub fn validate_tree(nodes: &[Node]) -> Result<(), String> {
-    let map = by_id(nodes);
     for n in nodes {
-        if let Some(p) = n.parent_id {
-            if !map.contains_key(&p) {
-                return Err(format!(
-                    "entry {} has a parent ({p}) that is not in this type",
-                    n.id
-                ));
-            }
-        }
         match depth_of(nodes, n.id) {
             None => return Err(format!("entry {} would become its own ancestor", n.id)),
             Some(d) if d > MAX_DEPTH => {
@@ -190,6 +210,9 @@ pub fn apply_moves(nodes: &[Node], moves: &[Move]) -> Result<Vec<Node>, String> 
             .ok_or_else(|| format!("entry {} is not in this type", m.id))?;
         node.parent_id = m.parent_id;
         node.position = m.position;
+    }
+    for m in moves {
+        check_parent(&out, m.id)?;
     }
     validate_tree(&out)?;
     Ok(out)
@@ -247,6 +270,58 @@ mod tests {
         t.push(n(9, Some(404), 5, "orphan"));
         let order = preorder(&t);
         assert_eq!(order, [(9, 1), (4, 1), (1, 1), (2, 2), (3, 3)]);
+    }
+
+    #[test]
+    fn an_old_orphan_does_not_block_other_writes() {
+        let mut t = sample();
+        // 9's parent (404) was trashed: not among the type's nodes.
+        t.push(n(9, Some(404), 5, "orphan"));
+        t.push(n(10, Some(9), 5, "child"));
+        validate_tree(&t).unwrap();
+        assert_eq!(depth_of(&t, 9), Some(1));
+        assert_eq!(depth_of(&t, 10), Some(2));
+        assert_eq!(path_of(&t, 10).as_deref(), Some("orphan/child"));
+        let moved = apply_moves(
+            &t,
+            &[Move {
+                id: 4,
+                parent_id: Some(1),
+                position: 30,
+            }],
+        )
+        .unwrap();
+        assert_eq!(path_of(&moved, 4).as_deref(), Some("guides/intro"));
+        // Moving the orphan itself to a live parent repairs it.
+        let repaired = apply_moves(
+            &t,
+            &[Move {
+                id: 9,
+                parent_id: Some(1),
+                position: 30,
+            }],
+        )
+        .unwrap();
+        assert_eq!(
+            path_of(&repaired, 10).as_deref(),
+            Some("guides/orphan/child")
+        );
+        check_parent(&t, 4).unwrap();
+        assert!(check_parent(&t, 9).unwrap_err().contains("(404)"));
+    }
+
+    #[test]
+    fn a_write_cannot_create_an_orphan() {
+        let err = apply_moves(
+            &sample(),
+            &[Move {
+                id: 2,
+                parent_id: Some(404),
+                position: 0,
+            }],
+        )
+        .unwrap_err();
+        assert_eq!(err, "entry 2 has a parent (404) that is not in this type");
     }
 
     #[test]
