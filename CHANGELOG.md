@@ -7,6 +7,8 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+## [0.4.6] - 2026-11-27
+
 ### Changed
 - The declared minimum supported Rust version is 1.97 (was 1.85, which no longer built: the plugin host's wasmtime needs 1.97); the pinned toolchain stays 1.99. CI checks that the workspace builds on 1.97.
 
