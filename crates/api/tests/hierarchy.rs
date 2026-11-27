@@ -508,6 +508,24 @@ async fn nested_entries_are_served_at_their_paths_and_the_mirror_and_listings_ag
     assert_eq!(s, 404, "a nested entry is not at its bare slug");
 }
 
+/// An archive address that a redirect row sends elsewhere has no page; the
+/// sitemap must not hand a crawler that address.
+#[tokio::test]
+async fn the_sitemap_leaves_out_an_archive_that_a_redirect_sends_elsewhere() {
+    let (db, server, a) = site().await;
+    let base = server.base();
+    let _g = post(base, &a, "guide", "Guides", None);
+    let (_, before) = get_public(base, "/sitemap.xml");
+    assert!(before.contains("/guide</loc>"), "{before}");
+    sqlx::query("INSERT INTO redirects (from_path, to_path) VALUES ('/guide', '/guide/guides')")
+        .execute(db.pool())
+        .await
+        .expect("redirect");
+    let (_, after) = get_public(base, "/sitemap.xml");
+    assert!(!after.contains("/guide</loc>"), "{after}");
+    assert!(after.contains("/guide/guides</loc>"), "{after}");
+}
+
 #[tokio::test]
 async fn the_archive_of_a_hierarchical_type_redirects_to_its_first_root_and_search_is_a_redirect() {
     let (_db, server, a) = site().await;

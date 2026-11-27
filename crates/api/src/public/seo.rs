@@ -78,6 +78,15 @@ pub async fn sitemap(State(state): State<AppState>, headers: HeaderMap) -> Respo
         else {
             continue;
         };
+        // An archive address that a redirect row sends elsewhere has no
+        // page of its own: listing it hands a crawler a 301.
+        let archive_path = format!("/{}", decl.slug);
+        if matches!(
+            crate::seo::redirect_for(&state.pool, &archive_path).await,
+            Ok(Some(_))
+        ) {
+            continue;
+        }
         xml.push_str("<url><loc>");
         xml.push_str(&esc(&format!("{base}/{}", decl.slug)));
         xml.push_str("</loc><lastmod>");
