@@ -11,11 +11,11 @@ PERSONAL='cppprograms|gopal|krishiv|/home/|gopal-XPS|076bc862'
 INTERNAL='docs/phases/|docs/superpowers/|STATUS\.md|HANDOVER\.md|PRODUCT-SITES\.md|deploy-tunnel\.sh'
 FORBIDDEN='(^|/)\.env$|\.dump$|\.vyplugin$|(^|/)plugin-signing-key|\.pem$|(^|/)\.opencode/|(^|/)deploy-tunnel\.sh$'
 # Deliberate public mentions: "path:fixed text" lines that may match.
-# The Sarathi agent harness (crates/ai) is a public git dependency: its URL, in these exact line shapes only.
+# The Sarathi agent harness (crates/ai, crates/ai-eval) is a public git dependency: its URL, in these exact line shapes only.
 SARATHI='https://github\.com/KrishivAI/sarathi'
 ALLOW='^GOVERNANCE\.md:.*\(\[@techgopal\]\(https://github\.com/techgopal\)\)'
 ALLOW+="|^Cargo\.lock:[0-9]+:source = \"git\+$SARATHI\?rev=[0-9a-f]{40}#[0-9a-f]{40}\"\$"
-ALLOW+="|^crates/ai/Cargo\.toml:[0-9]+:sarathi-[a-z]+ = \{ git = \"$SARATHI\", rev = \"[0-9a-f]{40}\" \}\$"
+ALLOW+="|^crates/ai(-eval)?/Cargo\.toml:[0-9]+:sarathi-[a-z]+ = \{ git = \"$SARATHI\", rev = \"[0-9a-f]{40}\" \}\$"
 ALLOW+="|^deny\.toml:[0-9]+:allow-git = \[\"$SARATHI\"\]\$"
 
 status=0

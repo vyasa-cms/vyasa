@@ -8,7 +8,12 @@ follows [semantic versioning](https://semver.org) as described in
 ## [Unreleased]
 
 ### Added
+- `ai-eval` (developer tool, `crates/ai-eval`, not published): runs both agent harnesses on a Theme Studio brief set with an offline renderer, and records each run's cost, steps and proposal under spend caps. A dry run unless `--live`.
+- The Sarathi harness can run a model without native tool calls, one JSON step at a time, and reports each call's prompt-cache write and read.
 - The `ai_harness` option (`vyasa`, the default, or `sarathi`) picks the agent harness a site's AI surfaces run on, read per request, so both run side by side without a restart. On Sarathi the registry's primary model is called with native tool use; usage rows, budget caps, the step list and the proposal stay as on Vyasa's own loop. In Theme Studio a Sarathi run must state its criteria with a `plan` tool and render the page with `look` after its last edit before it may finish; a finish without that is sent back to the model, and after three refusals the run ends as out of steps.
+
+### Fixed
+- OpenAI's reasoning models (`gpt-5` and the `o` series) can be used on Vyasa's own agent loop and assistants: requests to OpenAI send `max_completion_tokens`, not `max_tokens`, which those models refuse. Other OpenAI-compatible servers are sent `max_tokens` as before.
 
 ## [0.4.6] - 2026-11-27
 

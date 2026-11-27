@@ -19,11 +19,11 @@ vyasa-themes = { path = "../themes" }
 schemars = "1.2.2"
 # Sarathi, an embeddable agent harness: a git dependency pinned to a commit,
 # allowed by name in deny.toml. Bump `rev` deliberately, never to a branch.
-sarathi-core = { git = "https://github.com/KrishivAI/sarathi", rev = "3f16f77846a8e0f51bfdfe5ca149127fcc458353" }
-sarathi-log = { git = "https://github.com/KrishivAI/sarathi", rev = "3f16f77846a8e0f51bfdfe5ca149127fcc458353" }
-sarathi-protocol = { git = "https://github.com/KrishivAI/sarathi", rev = "3f16f77846a8e0f51bfdfe5ca149127fcc458353" }
-sarathi-provider = { git = "https://github.com/KrishivAI/sarathi", rev = "3f16f77846a8e0f51bfdfe5ca149127fcc458353" }
-sarathi-tools = { git = "https://github.com/KrishivAI/sarathi", rev = "3f16f77846a8e0f51bfdfe5ca149127fcc458353" }
+sarathi-core = { git = "https://github.com/KrishivAI/sarathi", rev = "8b76a3584396a27168fc26e6206eb00be8967b96" }
+sarathi-log = { git = "https://github.com/KrishivAI/sarathi", rev = "8b76a3584396a27168fc26e6206eb00be8967b96" }
+sarathi-protocol = { git = "https://github.com/KrishivAI/sarathi", rev = "8b76a3584396a27168fc26e6206eb00be8967b96" }
+sarathi-provider = { git = "https://github.com/KrishivAI/sarathi", rev = "8b76a3584396a27168fc26e6206eb00be8967b96" }
+sarathi-tools = { git = "https://github.com/KrishivAI/sarathi", rev = "8b76a3584396a27168fc26e6206eb00be8967b96" }
 serde = "1.0.229"
 serde_json = "1.0.151"
 tracing = "0.1"
