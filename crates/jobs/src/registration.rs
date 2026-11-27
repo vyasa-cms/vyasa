@@ -8,7 +8,7 @@ use vyasa_db::repo::UsersRepo;
 
 /// How often the purge runs. The lifetime is counted in days, so an hour's
 /// slack is nothing.
-pub const PURGE_INTERVAL: Duration = Duration::from_secs(60 * 60);
+pub const PURGE_INTERVAL: Duration = Duration::from_hours(1);
 
 /// Deletes unconfirmed accounts older than
 /// [`UNCONFIRMED_ACCOUNT_LIFETIME`], once. Returns how many went.

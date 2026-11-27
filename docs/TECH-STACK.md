@@ -2,7 +2,7 @@
 
 | Concern | Choice | Notes |
 |---|---|---|
-| Language | Rust (edition 2021, stable ≥1.85) | `#![forbid(unsafe_code)]` workspace-wide |
+| Language | Rust (edition 2021, stable ≥1.97; pinned 1.99) | `#![forbid(unsafe_code)]` workspace-wide |
 | Async runtime | tokio | |
 | HTTP framework | axum | only in `api` crate |
 | REST docs | utoipa + utoipa-swagger-ui | OpenAPI → TS client codegen |

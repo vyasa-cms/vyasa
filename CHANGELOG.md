@@ -7,7 +7,13 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Changed
+- The declared minimum supported Rust version is 1.97 (was 1.85, which no longer built: the plugin host's wasmtime needs 1.97); the pinned toolchain stays 1.99. CI checks that the workspace builds on 1.97.
+
 ### Fixed
+- Docs plugin 0.1.15: a site with a main tree and three sections of about 680 documents each (2,672 in all) never imported one: the importer refused more than 2,000 documents in one sync before any write, every minute, with `pages: 0`. The cap is 5,000 documents now (over the main tree and every section together); each run is still limited by its request and write budgets.
+- Docs plugin 0.1.15: a site made only of sections (Folder empty, no older versions) no longer lists the whole repository root as a main tree beside them, which imported every section's documents a second time.
+- Docs plugin 0.1.15: an import that takes several runs no longer uses up GitHub's 60 calls an hour on a site without a token. Each run asked for every branch and tag head in full, and listed again every folder of more than about 600 documents (its listing, over 64 KiB, was refused by the key-value store). Now each head is fetched once and later runs ask with its etag (a 304 is free), and a listing keeps only its documents, split across values below 64 KiB, so later runs of the same commit list nothing and the import is not stopped part way by `GitHub rate limit or permission problem (403)`.
 - A docs sidebar's `context.tree` holds up to 5,000 nodes, not 2,000, to match the docs plugin's 5,000-page import: on a site with several docs versions (about 2,700 pages) the sidebar left out the pages past the 2,000th.
 - A plugin that errored or was disabled no longer costs a full `plugins` query per section, block or filter on every page: the host remembers the refusal for a minute (enable, disable and install clear it at once) and logs it once a minute, where it used to fail each render with nothing in the log.
 
