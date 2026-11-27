@@ -39,6 +39,8 @@ pub const SITE_OPTION_KEYS: &[&str] = &[
     "ai_images",
     "ai_transcription",
     "ai_read_aloud",
+    // Which agent harness runs the assistants: "vyasa" (default) or "sarathi".
+    "ai_harness",
     // Audience (phase 61): the newsletter is off until an operator
     // turns it on — publishing must never surprise-email anyone.
     "newsletter_enabled",
@@ -580,6 +582,9 @@ impl OptionsService {
                 return Err(AppError::validation(
                     "ai_comment_screening must be off|flag|spam",
                 ));
+            }
+            "ai_harness" if !matches!(value.as_str(), Some("vyasa" | "sarathi")) => {
+                return Err(AppError::validation("ai_harness must be vyasa|sarathi"));
             }
             k if k.starts_with("registration_") => return registration_option(k, value),
             "footer_credit" if !value.is_boolean() => {
