@@ -305,6 +305,107 @@ pub struct Report {
     pub commit: String,
     /// Notes for the operator.
     pub warnings: Vec<String>,
+    /// Pages the host refused, as "path: what happened (why)": imported in a
+    /// simpler form or left out. Kept between runs until the page is written
+    /// as it is or leaves the repository. Empty on an up-to-date run, which
+    /// reads nothing: the last list still holds.
+    pub problems: Vec<String>,
+}
+
+impl Report {
+    fn count(&mut self, put: Put) {
+        match put {
+            Put::Created => self.created += 1,
+            Put::Updated => self.updated += 1,
+            Put::Unchanged => self.unchanged += 1,
+        }
+    }
+}
+
+/// Where the pages the host refused are listed between runs.
+pub const PROBLEMS_KEY: &str = "sync/problems";
+/// Most refused pages listed; the store refuses a value of 64 KiB.
+const MAX_PROBLEMS: usize = 100;
+
+/// Pages the host refused, by entry key: kept in one key-value entry.
+struct Problems {
+    map: BTreeMap<String, String>,
+    dirty: bool,
+}
+
+impl Problems {
+    fn load<E: Env>(env: &mut E) -> Result<Self, String> {
+        let map = env
+            .kv_get(PROBLEMS_KEY)?
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        Ok(Self { map, dirty: false })
+    }
+
+    fn set(&mut self, key: &str, text: String) {
+        if self.map.len() >= MAX_PROBLEMS && !self.map.contains_key(key) {
+            return;
+        }
+        if self.map.get(key) != Some(&text) {
+            self.map.insert(key.to_owned(), text);
+            self.dirty = true;
+        }
+    }
+
+    fn clear(&mut self, key: &str) {
+        self.dirty |= self.map.remove(key).is_some();
+    }
+
+    /// Forgets pages that are no longer in the plan.
+    fn retain(&mut self, live: &BTreeSet<&str>) {
+        let before = self.map.len();
+        self.map.retain(|k, _| live.contains(k.as_str()));
+        self.dirty |= self.map.len() != before;
+    }
+
+    /// Saves a changed list. A refused write is left for the next run, which
+    /// finds the same pages again.
+    fn flush<E: Env>(&mut self, env: &mut E) {
+        if !self.dirty {
+            return;
+        }
+        let ok = if self.map.is_empty() {
+            env.kv_delete(PROBLEMS_KEY);
+            true
+        } else {
+            serde_json::to_string(&self.map)
+                .ok()
+                .is_some_and(|t| env.kv_set(PROBLEMS_KEY, &t).is_ok())
+        };
+        self.dirty = !ok;
+    }
+
+    fn lines(&self) -> Vec<String> {
+        self.map.values().cloned().collect()
+    }
+}
+
+/// The host refused this entry for what it holds (its blocks, title or key,
+/// or a parent it could not write), not for a quota or a storage fault: the
+/// entry is imported another way or left out, and the sync goes on.
+fn is_refusal(e: &str) -> bool {
+    e.starts_with("validation failed")
+        || e.starts_with("blocks-json")
+        || e.starts_with("title must be")
+        || e.starts_with("key must be")
+        || (e.starts_with("parent ") && e.contains("has not been written"))
+}
+
+/// The page as one block of plain text: its Markdown as written.
+fn plain_text_entry(entry: &Entry, markdown: &str) -> Entry {
+    let code = markdown.strip_suffix('\n').unwrap_or(markdown);
+    Entry {
+        blocks_json: serde_json::json!([
+            {"kind": "code", "attrs": {"code": code, "language": null}, "children": []}
+        ])
+        .to_string(),
+        ..entry.clone()
+    }
 }
 
 struct Ctx<'a, E: Env> {
@@ -670,83 +771,127 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
         cx.env.kv_delete("sync/prune-cursor");
     }
     let today = civil_date(cx.env.now_ms());
-    for pe in &p.entries {
-        let hash_basis = match &pe.source {
-            Source::Page(f) => format!("{FORMAT}:{}:{sig}", f.sha),
-            Source::Generated => format!("{FORMAT}:{}", generated_basis(pe, &p.entries, &infos)),
-        };
-        let hash = hex(&Sha256::digest(hash_basis.as_bytes()));
-        if managed.get(&pe.planned.key) == Some(&hash) {
-            cx.report.unchanged += 1;
-            continue;
-        }
-        if cx.report.created + cx.report.updated >= cx.budget.max_writes {
-            return Err(Stop::Budget);
-        }
-        let entry = match &pe.source {
-            Source::Page(f) => {
-                let url = github::raw_url(
-                    &cx.cfg.repo,
-                    &f.tree.commit,
-                    &join_repo_path(&f.tree.folder, &f.path),
-                );
-                let body = match bodies.remove(&f.sha) {
-                    Some(b) => b,
-                    None => cx.get(&url, "text/plain", None)?.body,
-                };
-                build_page_entry(
-                    cx.cfg,
-                    &f.tree.commit,
-                    f,
-                    &body,
-                    pe,
-                    &p,
-                    &hash,
-                    &today,
-                    &infos,
-                )
+    let mut problems = Problems::load(cx.env)?;
+    let wrote = (|| -> Result<(), Stop> {
+        for pe in &p.entries {
+            let hash_basis = match &pe.source {
+                Source::Page(f) => format!("{FORMAT}:{}:{sig}", f.sha),
+                Source::Generated => {
+                    format!("{FORMAT}:{}", generated_basis(pe, &p.entries, &infos))
+                }
+            };
+            let hash = hex(&Sha256::digest(hash_basis.as_bytes()));
+            if managed.get(&pe.planned.key) == Some(&hash) {
+                cx.report.unchanged += 1;
+                continue;
             }
-            Source::Generated => {
-                // A root with its own top-level index page shows that page.
-                let overview = match overview_of(pe, &p) {
-                    Some((o, f)) => {
-                        let body = match bodies.get(&f.sha) {
-                            Some(b) => b.clone(),
-                            None => {
-                                let url = github::raw_url(
-                                    &cx.cfg.repo,
+            if cx.report.created + cx.report.updated >= cx.budget.max_writes {
+                return Err(Stop::Budget);
+            }
+            // The entry, what the problems list calls it, and what to write
+            // instead when the host refuses it.
+            let (entry, name, fallback) = match &pe.source {
+                Source::Page(f) => {
+                    let repo_path = join_repo_path(&f.tree.folder, &f.path);
+                    let url = github::raw_url(&cx.cfg.repo, &f.tree.commit, &repo_path);
+                    let body = match bodies.remove(&f.sha) {
+                        Some(b) => b,
+                        None => cx.get(&url, "text/plain", None)?.body,
+                    };
+                    let entry = build_page_entry(
+                        cx.cfg,
+                        &f.tree.commit,
+                        f,
+                        &body,
+                        pe,
+                        &p,
+                        &hash,
+                        &today,
+                        &infos,
+                    );
+                    let fallback = plain_text_entry(&entry, frontmatter::split(&body).body);
+                    (entry, repo_path, Some(fallback))
+                }
+                Source::Generated => {
+                    // A root with its own top-level index page shows that page.
+                    let overview = match overview_of(pe, &p) {
+                        Some((o, f)) => {
+                            let body = match bodies.get(&f.sha) {
+                                Some(b) => b.clone(),
+                                None => {
+                                    let url = github::raw_url(
+                                        &cx.cfg.repo,
+                                        &f.tree.commit,
+                                        &join_repo_path(&f.tree.folder, &f.path),
+                                    );
+                                    cx.get(&url, "text/plain", None)?.body
+                                }
+                            };
+                            Some(
+                                build_page_entry(
+                                    cx.cfg,
                                     &f.tree.commit,
-                                    &join_repo_path(&f.tree.folder, &f.path),
-                                );
-                                cx.get(&url, "text/plain", None)?.body
-                            }
-                        };
-                        Some(
-                            build_page_entry(
-                                cx.cfg,
-                                &f.tree.commit,
-                                f,
-                                &body,
-                                o,
-                                &p,
-                                &hash,
-                                &today,
-                                &infos,
+                                    f,
+                                    &body,
+                                    o,
+                                    &p,
+                                    &hash,
+                                    &today,
+                                    &infos,
+                                )
+                                .blocks_json,
                             )
-                            .blocks_json,
-                        )
-                    }
-                    None => None,
-                };
-                build_generated_entry(pe, &p, &hash, &infos, overview)
+                        }
+                        None => None,
+                    };
+                    // Without the overview it is a list of cards.
+                    let fallback = overview
+                        .is_some()
+                        .then(|| build_generated_entry(pe, &p, &hash, &infos, None));
+                    (
+                        build_generated_entry(pe, &p, &hash, &infos, overview),
+                        pe.planned.key.clone(),
+                        fallback,
+                    )
+                }
+            };
+            // A page the host refuses is imported in a simpler form, or left
+            // out, and listed; it never stops the rest of the sync.
+            let refusal = match cx.env.put_entry(&entry) {
+                Ok(put) => {
+                    cx.report.count(put);
+                    problems.clear(&entry.key);
+                    continue;
+                }
+                Err(e) if is_refusal(&e) => e,
+                Err(e) => return Err(e.into()),
+            };
+            let reason = refusal.chars().take(200).collect::<String>();
+            let Some(fallback) = fallback else {
+                problems.set(&entry.key, format!("{name}: not imported ({reason})"));
+                continue;
+            };
+            match cx.env.put_entry(&fallback) {
+                Ok(put) => {
+                    cx.report.count(put);
+                    let how = match pe.source {
+                        Source::Page(_) => "imported as plain text",
+                        Source::Generated => "imported as a list of its pages",
+                    };
+                    problems.set(&entry.key, format!("{name}: {how} ({reason})"));
+                }
+                Err(e) if is_refusal(&e) => {
+                    problems.set(&entry.key, format!("{name}: not imported ({reason})"));
+                }
+                Err(e) => return Err(e.into()),
             }
-        };
-        match cx.env.put_entry(&entry)? {
-            Put::Created => cx.report.created += 1,
-            Put::Updated => cx.report.updated += 1,
-            Put::Unchanged => cx.report.unchanged += 1,
         }
-    }
+        problems.retain(&wanted);
+        Ok(())
+    })();
+    problems.flush(cx.env);
+    cx.report.problems = problems.lines();
+    wrote?;
 
     // 7. Done: remember it, and forget what is no longer in the repository.
     // The per-blob scans stay: they are what lets the next run plan without
@@ -1611,6 +1756,10 @@ mod tests {
         etag_seen: Vec<Option<String>>,
         fail_status: Option<u16>,
         step_ms: u64,
+        /// Block kinds the host refuses, like a host that validates blocks.
+        refuse_kinds: Vec<&'static str>,
+        /// Entry keys the host refuses whatever their blocks.
+        refuse_keys: Vec<String>,
         /// Key-value reads (`kv_get` and `kv_list`): the broker allows 600 a minute.
         kv_reads: std::cell::Cell<u32>,
         /// Reads allowed per wall-clock minute, as the host's broker does;
@@ -1834,6 +1983,17 @@ mod tests {
         }
         fn put_entry(&mut self, e: &Entry) -> Result<Put, String> {
             let mut f = self.0.borrow_mut();
+            if f.refuse_keys.contains(&e.key) {
+                return Err(format!(
+                    "validation failed: blocks[$[0]]: {} refused",
+                    e.key
+                ));
+            }
+            for k in &f.refuse_kinds {
+                if e.blocks_json.contains(&format!("\"kind\":\"{k}\"")) {
+                    return Err(format!("validation failed: blocks[$[0]]: {k} refused"));
+                }
+            }
             if let Some(parent) = &e.parent_key {
                 if !f.entries.contains_key(parent) {
                     return Err(format!("parent {parent} has not been written"));
@@ -2007,6 +2167,107 @@ mod tests {
                 .map(String::as_str),
             Some(FORMAT)
         );
+    }
+
+    #[test]
+    fn a_page_the_host_refuses_is_imported_as_plain_text_and_listed() {
+        let f = fake_with(repo_one());
+        f.borrow_mut().refuse_kinds = vec!["callout"];
+        let b = budget(&f);
+        let report = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
+        assert!(report.finished, "{report:?}");
+        assert_eq!(
+            report.problems,
+            ["docs/guides/install.md: imported as plain text \
+              (validation failed: blocks[$[0]]: callout refused)"]
+        );
+        let blocks: serde_json::Value =
+            serde_json::from_str(&f.borrow().entries["main:guides/install.md"].0.blocks_json)
+                .unwrap();
+        assert_eq!(
+            blocks,
+            serde_json::json!([{"kind": "code", "attrs": {"code": "# Install\n\n<Callout type=\"tip\">Fast.</Callout>", "language": null}, "children": []}])
+        );
+        assert!(f.borrow().entries.contains_key("main:intro.md"));
+        // The list is kept while the page is unchanged ...
+        let b = budget(&f);
+        let again = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
+        assert!(again.up_to_date && again.problems.is_empty(), "{again:?}");
+        let kept = crate::status::Status::after(
+            &crate::status::Status::after(&crate::status::Status::default(), 1, Ok(&report)),
+            2,
+            Ok(&again),
+        );
+        assert_eq!(kept.problems, report.problems);
+        // ... and goes once the page is written as it is.
+        {
+            let mut fk = f.borrow_mut();
+            let mut files = fk.commits[SHA1].clone();
+            files.insert(
+                "docs/guides/install.md".into(),
+                "# Install\n\nFixed.\n".into(),
+            );
+            fk.commits.insert(SHA2.into(), files);
+            fk.head = SHA2.into();
+        }
+        let b = budget(&f);
+        let fixed = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
+        assert!(fixed.finished && fixed.problems.is_empty(), "{fixed:?}");
+        assert!(!f.borrow().kv.borrow().contains_key(PROBLEMS_KEY));
+    }
+
+    #[test]
+    fn a_page_refused_even_as_plain_text_is_left_out_and_the_sync_goes_on() {
+        let f = fake_with(repo_one());
+        f.borrow_mut().refuse_kinds = vec!["callout", "code"];
+        let b = budget(&f);
+        let report = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
+        assert!(report.finished, "{report:?}");
+        assert_eq!(
+            report.problems,
+            ["docs/guides/install.md: not imported \
+              (validation failed: blocks[$[0]]: callout refused)"]
+        );
+        assert!(!f.borrow().entries.contains_key("main:guides/install.md"));
+        assert!(f.borrow().entries.contains_key("main:intro.md"));
+    }
+
+    #[test]
+    fn the_children_of_a_refused_entry_are_left_out_and_listed() {
+        // The generated Guides page: the parent of install.
+        let probe = fake_with(repo_one());
+        let b = budget(&probe);
+        run(&mut Wrap(&probe), &cfg(), None, b).unwrap();
+        let guides = probe.borrow().entries["main:guides/install.md"]
+            .0
+            .parent_key
+            .clone()
+            .unwrap();
+        let f = fake_with(repo_one());
+        f.borrow_mut().refuse_keys = vec![guides.clone()];
+        let b = budget(&f);
+        let report = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
+        assert!(report.finished, "{report:?}");
+        assert_eq!(report.problems.len(), 2, "{:?}", report.problems);
+        assert!(report
+            .problems
+            .iter()
+            .any(|p| p.starts_with(&format!("{guides}: not imported (validation failed"))));
+        assert!(report
+            .problems
+            .iter()
+            .any(|p| p.starts_with("docs/guides/install.md: not imported (parent ")));
+        assert!(f.borrow().entries.contains_key("main:intro.md"));
+    }
+
+    #[test]
+    fn a_storage_fault_still_stops_the_run() {
+        assert!(!is_refusal("storage error during put-entry"));
+        assert!(!is_refusal("quota-exceeded: writes"));
+        assert!(is_refusal(
+            "validation failed: blocks[$[4]]: invalid code language \"rust,ignore\""
+        ));
+        assert!(is_refusal("title must be 1..=200 characters"));
     }
 
     #[test]

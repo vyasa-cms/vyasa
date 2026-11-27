@@ -10,6 +10,10 @@ follows [semantic versioning](https://semver.org) as described in
 ### Added
 - The `ai_harness` option (`vyasa`, the default, or `sarathi`) picks the agent harness a site's AI surfaces run on, read per request, so both run side by side without a restart. On Sarathi the registry's primary model is called with native tool use; usage rows, budget caps, the step list and the proposal stay as on Vyasa's own loop. In Theme Studio a Sarathi run must state its criteria with a `plan` tool and render the page with `look` after its last edit before it may finish; a finish without that is sent back to the model, and after three refusals the run ends as out of steps.
 
+### Fixed
+- Docs plugin 0.1.16: a fenced code block's language is the part of its info string before the first comma or space, lowercased: ```` ```rust,ignore ```` is Rust code. Vyasa 0.4.6 validates code languages, and refused every page with such a fence (`invalid code language "rust,ignore"`), which stopped the whole sync. A language the host would refuse anyway (for example `{.rust}`) is plain text.
+- Docs plugin 0.1.16: a page the site refuses no longer stops the sync. It is imported as plain text (its Markdown in one code block), a generated section page without its overview, or, if the site refuses that too, left out with its child pages; the sync goes on and finishes. The status line on the settings page lists each such page with the reason (the first five, then a count), the public status counts them as `refused_pages`, and a page leaves the list once it imports as it is. Storage faults and quota pauses stop a run as before.
+
 ## [0.4.6] - 2026-11-27
 
 ### Changed

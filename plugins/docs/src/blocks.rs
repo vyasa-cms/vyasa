@@ -730,10 +730,35 @@ impl Builder<'_, '_> {
     }
 }
 
+/// The language a fence's info string names: the part before the first
+/// comma or space, lowercased (`rust,ignore` and `rust ignore` are `rust`).
+/// Anything the host would refuse as a language (over 40 characters, or a
+/// character other than a letter, digit, `-`, `+`, `#` or `_`) is plain text:
+/// the empty string.
+pub(crate) fn fence_language(info: &str) -> String {
+    let head = info
+        .trim()
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .next()
+        .unwrap_or("");
+    let lang = head.to_ascii_lowercase();
+    let valid = lang.len() <= 40
+        && lang
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '+' | '#' | '_'));
+    if valid {
+        lang
+    } else {
+        String::new()
+    }
+}
+
 fn code_block(info: &str, code: &str) -> Value {
-    let mut parts = info.trim().splitn(2, char::is_whitespace);
-    let lang = parts.next().unwrap_or("").trim().to_ascii_lowercase();
-    let meta = parts.next().unwrap_or("");
+    let lang = fence_language(info);
+    let meta = info
+        .trim()
+        .split_once(char::is_whitespace)
+        .map_or("", |(_, m)| m);
     let code = code.strip_suffix('\n').unwrap_or(code);
     if lang == "tree" {
         return block(
@@ -963,6 +988,44 @@ mod tests {
             c.warnings.iter().any(|w| w.contains("list item")),
             "{:?}",
             c.warnings
+        );
+    }
+
+    #[test]
+    fn a_fence_language_is_the_part_before_a_comma_or_space_lowercased() {
+        for (info, want) in [
+            ("rust,ignore", "rust"),
+            ("Rust, no_run", "rust"),
+            ("rust ignore", "rust"),
+            ("  SQL  ", "sql"),
+            ("c++", "c++"),
+            ("c#", "c#"),
+            ("objective-c", "objective-c"),
+            ("", ""),
+            (",ignore", ""),
+        ] {
+            assert_eq!(fence_language(info), want, "{info:?}");
+        }
+    }
+
+    #[test]
+    fn a_language_the_host_would_refuse_is_plain_text() {
+        for info in ["{.rust}", "rust;ignore", "py/3", "é", &"x".repeat(41)] {
+            assert_eq!(fence_language(info), "", "{info:?}");
+        }
+        let c = plain("```{.rust}\nfn main() {}\n```\n");
+        assert_eq!(
+            c.blocks[0]["attrs"],
+            json!({"code": "fn main() {}", "language": null})
+        );
+    }
+
+    #[test]
+    fn a_rust_ignore_fence_is_rust_code_and_keeps_its_title() {
+        let c = plain("```rust,ignore title=\"lib.rs\"\nlet x = 1;\n```\n");
+        assert_eq!(
+            c.blocks[0]["attrs"],
+            json!({"code": "let x = 1;", "language": "rust", "title": "lib.rs"})
         );
     }
 

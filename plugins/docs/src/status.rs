@@ -11,6 +11,9 @@ pub const STATUS_KEY: &str = "sync/status";
 /// that stays ticked does not restart the import on every deploy.
 pub const NOW_SEEN_KEY: &str = "cfg/sync-now-seen";
 
+/// Refused pages named in the status line; the rest are counted.
+const SHOWN_PROBLEMS: usize = 5;
+
 /// What the last sync run did.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Status {
@@ -22,6 +25,8 @@ pub struct Status {
     pub complete: bool,
     /// The last run's error; empty when it had none.
     pub error: String,
+    /// Pages the host refused, as "path: what happened (why)".
+    pub problems: Vec<String>,
 }
 
 impl Status {
@@ -36,13 +41,22 @@ impl Status {
             pages: v["pages"].as_u64().unwrap_or(0),
             complete: v["complete"].as_bool().unwrap_or(false),
             error: v["error"].as_str().unwrap_or("").to_owned(),
+            problems: v["problems"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(Value::as_str)
+                        .map(str::to_owned)
+                        .collect()
+                })
+                .unwrap_or_default(),
         }
     }
 
     /// The stored form.
     #[must_use]
     pub fn to_json(&self) -> String {
-        json!({"at_ms": self.at_ms, "pages": self.pages, "complete": self.complete, "error": self.error})
+        json!({"at_ms": self.at_ms, "pages": self.pages, "complete": self.complete, "error": self.error, "problems": self.problems})
             .to_string()
     }
 
@@ -60,12 +74,19 @@ impl Status {
                 },
                 complete: r.finished,
                 error: String::new(),
+                // An up-to-date run looked at no page: the last list holds.
+                problems: if r.up_to_date {
+                    prev.problems.clone()
+                } else {
+                    r.problems.clone()
+                },
             },
             Err(e) => Self {
                 at_ms: now_ms,
                 pages: prev.pages,
                 complete: false,
                 error: e.chars().take(300).collect(),
+                problems: prev.problems.clone(),
             },
         }
     }
@@ -89,17 +110,32 @@ impl Status {
         } else {
             self.error.clone()
         };
-        format!(
+        let mut line = format!(
             "Last sync: {when}. Pages imported: {}. Sync complete: {}. Last error: {error}.",
             self.pages,
             if self.complete { "yes" } else { "no" },
-        )
+        );
+        if !self.problems.is_empty() {
+            let shown = self.problems.iter().take(SHOWN_PROBLEMS);
+            let more = self.problems.len().saturating_sub(SHOWN_PROBLEMS);
+            line.push_str(&format!(
+                " Pages the site refused: {}: {}{}.",
+                self.problems.len(),
+                shown.cloned().collect::<Vec<_>>().join("; "),
+                if more > 0 {
+                    format!("; and {more} more")
+                } else {
+                    String::new()
+                },
+            ));
+        }
+        line
     }
 
     /// The public, secret-free view served at `GET status`.
     #[must_use]
     pub fn public_json(&self) -> String {
-        json!({"last_sync_ms": self.at_ms, "pages": self.pages, "complete": self.complete, "ok": self.error.is_empty()})
+        json!({"last_sync_ms": self.at_ms, "pages": self.pages, "complete": self.complete, "ok": self.error.is_empty(), "refused_pages": self.problems.len()})
             .to_string()
     }
 }
@@ -206,6 +242,7 @@ mod tests {
             pages: 4,
             complete: true,
             error: "x".into(),
+            problems: vec!["a.md: imported as plain text (why)".into()],
         };
         assert_eq!(Status::parse(Some(&s.to_json())), s);
         assert_eq!(Status::parse(Some("not json")), Status::default());
@@ -219,11 +256,38 @@ mod tests {
             pages: 629,
             complete: false,
             error: String::new(),
+            problems: Vec::new(),
         };
         assert_eq!(
             s.line(1_000 + 120_000),
             "Last sync: 2 min ago. Pages imported: 629. Sync complete: no. Last error: none."
         );
+    }
+
+    #[test]
+    fn refused_pages_are_named_in_the_line_and_counted_publicly() {
+        let problems: Vec<String> = (0..7)
+            .map(|i| format!("p{i}.md: not imported (x)"))
+            .collect();
+        let r = Report {
+            problems: problems.clone(),
+            ..report(true)
+        };
+        let s = Status::after(&Status::default(), 9, Ok(&r));
+        assert_eq!(s.problems, problems);
+        let line = s.line(9);
+        assert!(
+            line.ends_with(
+                " Pages the site refused: 7: p0.md: not imported (x); p1.md: not imported (x); \
+                 p2.md: not imported (x); p3.md: not imported (x); p4.md: not imported (x); and 2 more."
+            ),
+            "{line}"
+        );
+        assert!(s.public_json().contains("\"refused_pages\":7"));
+        assert!(!s.public_json().contains("p0.md"));
+        // A failed run keeps the list of the last one.
+        let failed = Status::after(&s, 10, Err("boom"));
+        assert_eq!(failed.problems, problems);
     }
 
     #[test]
