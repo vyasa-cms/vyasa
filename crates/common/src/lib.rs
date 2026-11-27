@@ -7,6 +7,7 @@
 pub mod config;
 pub mod error;
 pub mod ids;
+pub mod plugin_quota;
 pub mod slug;
 pub mod telemetry;
 
