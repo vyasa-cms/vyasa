@@ -42,6 +42,7 @@ impl vyasa_ai::AiUsageSink for DbSink<'_> {
             vyasa_ai::Usage {
                 prompt_tokens: pt,
                 completion_tokens: ct,
+                ..Default::default()
             },
         );
         let repo = vyasa_db::repo::AiLogRepo::new(self.state.pool.clone());

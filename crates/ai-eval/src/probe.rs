@@ -1,6 +1,7 @@
-//! A layer at each arm's model seam. It notes a reply that carries no
-//! usage (spend that would go uncounted), and injects the one fault a brief
-//! can ask for: a malformed first step, without calling the model.
+//! A layer at each arm's model seam. It notes spend that would go
+//! uncounted (a reply that carries no usage, or one that cannot be read),
+//! and injects the one fault a brief can ask for: a malformed first step,
+//! without calling the model.
 
 use std::future::{ready, Future};
 use std::ops::Range;
@@ -31,6 +32,7 @@ const MALFORMED_TEXT: &str = "{\"thought\": \"edit the colours\", \"tool\": ";
 pub struct Probe {
     inject: AtomicBool,
     unbilled: AtomicBool,
+    unread: AtomicBool,
 }
 
 impl Probe {
@@ -41,6 +43,7 @@ impl Probe {
         Arc::new(Self {
             inject: AtomicBool::new(malformed),
             unbilled: AtomicBool::new(false),
+            unread: AtomicBool::new(false),
         })
     }
 
@@ -48,6 +51,16 @@ impl Probe {
     #[must_use]
     pub fn unbilled(&self) -> bool {
         self.unbilled.load(Ordering::SeqCst)
+    }
+
+    /// Whether the provider answered and the answer could not be read.
+    #[must_use]
+    pub fn unread(&self) -> bool {
+        self.unread.load(Ordering::SeqCst)
+    }
+
+    fn saw_unread(&self) {
+        self.unread.store(true, Ordering::SeqCst);
     }
 
     fn take_fault(&self) -> bool {
@@ -62,14 +75,14 @@ impl Probe {
 }
 
 /// The old arm's provider with the probe around it.
-pub struct ProbeProvider<P> {
+pub struct ProbeProvider {
     /// The provider that is called.
-    pub inner: P,
+    pub inner: Arc<dyn LlmProvider>,
     /// The run's probe.
     pub probe: Arc<Probe>,
 }
 
-impl<P: LlmProvider> LlmProvider for ProbeProvider<P> {
+impl LlmProvider for ProbeProvider {
     fn name(&self) -> &'static str {
         self.inner.name()
     }
@@ -87,13 +100,23 @@ impl<P: LlmProvider> LlmProvider for ProbeProvider<P> {
         let call = self.inner.complete(spec);
         let probe = Arc::clone(&self.probe);
         Box::pin(async move {
-            let reply = call.await?;
+            let reply = call.await.inspect_err(|e| {
+                if answered_unreadably(e) {
+                    probe.saw_unread();
+                }
+            })?;
             probe.saw_tokens(
                 u64::from(reply.usage.prompt_tokens) + u64::from(reply.usage.completion_tokens),
             );
             Ok(reply)
         })
     }
+}
+
+/// Whether Vyasa's client got an answer it could not read (`read:` and
+/// `decode:` come after the status line), which the provider may have billed.
+fn answered_unreadably(e: &ProviderError) -> bool {
+    matches!(e, ProviderError::Transport(m) if m.starts_with("read:") || m.starts_with("decode:"))
 }
 
 /// Puts the probe around the new arm's caller.
@@ -197,7 +220,12 @@ impl<C: ModelCaller> ModelCaller for ProbeCaller<C> {
         }
         let call = self.inner.send(request);
         Box::pin(async move {
-            let reply = call.await?;
+            // Sarathi calls an answer it could not read `Malformed`.
+            let reply = call.await.inspect_err(|e| {
+                if e.kind == sarathi_protocol::ErrorKind::Malformed {
+                    self.with.probe.saw_unread();
+                }
+            })?;
             let u = &reply.view.usage;
             self.with.probe.saw_tokens(
                 u.input_tokens

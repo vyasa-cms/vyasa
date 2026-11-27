@@ -148,10 +148,7 @@ impl Arm {
         let t = &self.target;
         let outcome = match self.harness {
             Harness::Vyasa => {
-                let provider = ProbeProvider {
-                    inner: chain(t)?,
-                    probe: Arc::clone(probe),
-                };
+                let provider = chain(t, probe)?;
                 harness::run(Harness::Vyasa, &provider, None, sink, spec, toolbox).await
             }
             Harness::Sarathi => {
@@ -205,11 +202,15 @@ pub fn arm_label(harness: Harness) -> &'static str {
 }
 
 /// The old arm's provider, built as the server builds its chain: one slot,
-/// no settings.
-fn chain(t: &Target) -> Result<FailoverProvider, String> {
-    let provider =
-        vyasa_ai::catalog::chat_provider(t.provider, &t.api_key, &t.base_url, &json!({}))
-            .map_err(|e| e.to_string())?;
+/// no settings. The probe sits inside the chain, where each provider's own
+/// error is still to be seen.
+fn chain(t: &Target, probe: &Arc<Probe>) -> Result<FailoverProvider, String> {
+    let inner = vyasa_ai::catalog::chat_provider(t.provider, &t.api_key, &t.base_url, &json!({}))
+        .map_err(|e| e.to_string())?;
+    let provider = Arc::new(ProbeProvider {
+        inner,
+        probe: Arc::clone(probe),
+    });
     let breaker = CircuitBreaker::new(3, Duration::from_secs(60));
     FailoverProvider::new(vec![ModelSlot {
         slot: ProviderSlot { provider, breaker },
@@ -248,6 +249,14 @@ impl EvalHarness for Arm {
             wall_ms,
         };
         let failure = match &done.outcome {
+            // The loop may have gone on past it; the cost is still unknown.
+            outcome if probe.unread() => Some(format!(
+                "a model reply could not be read: the run's cost is unknown{}",
+                outcome
+                    .as_ref()
+                    .err()
+                    .map_or_else(String::new, |e| format!(" ({e})"))
+            )),
             Err(e) => Some(e.clone()),
             Ok(_) if probe.unbilled() => {
                 Some("a model reply carried no usage: the run's cost is unknown".to_owned())

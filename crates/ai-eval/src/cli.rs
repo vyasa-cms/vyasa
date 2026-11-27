@@ -99,6 +99,22 @@ fn cost_tolerance(text: Option<String>) -> Result<Cost, String> {
         .ok_or_else(|| format!("`{text}` is not a cost tolerance"))
 }
 
+/// `path` as an absolute path, the links in the part of it that exists
+/// followed.
+fn resolved(path: &Path) -> Result<PathBuf, String> {
+    let shown = |e: std::io::Error| format!("{}: {e}", path.display());
+    let absolute = std::path::absolute(path).map_err(shown)?;
+    for existing in absolute.ancestors() {
+        if existing.symlink_metadata().is_ok() {
+            // A link that points nowhere is refused here.
+            let real = existing.canonicalize().map_err(shown)?;
+            let rest = absolute.strip_prefix(existing).unwrap_or(Path::new(""));
+            return Ok(real.join(rest));
+        }
+    }
+    Ok(absolute)
+}
+
 /// The pass root counts every file in it, so run outputs go elsewhere.
 fn check_apart(root: &Path, artifacts: &Path) -> Result<(), String> {
     if [root, artifacts]
@@ -107,8 +123,7 @@ fn check_apart(root: &Path, artifacts: &Path) -> Result<(), String> {
     {
         return Err("--root and --artifacts may not contain `..`".into());
     }
-    let absolute = |p: &Path| std::path::absolute(p).map_err(|e| format!("{}: {e}", p.display()));
-    if absolute(artifacts)?.starts_with(absolute(root)?) {
+    if resolved(artifacts)?.starts_with(resolved(root)?) {
         return Err("--artifacts must be outside --root".into());
     }
     Ok(())
@@ -391,6 +406,17 @@ pub fn execute(
         .map_err(|e| e.to_string())?;
     let io = |e: std::io::Error| format!("output: {e}");
     print_summary(pass.summary(), out).map_err(io)?;
+    let openai = options.base_urls.get(ProviderId::OpenAi.as_str());
+    if let Some(url) =
+        openai.filter(|u| u.trim_end_matches('/') != ProviderId::OpenAi.default_base_url())
+    {
+        writeln!(
+            out,
+            "warning: --base-url openai={url} is not OpenAI's own URL, so gpt models are sent \
+             `max_tokens`; OpenAI's reasoning models refuse it"
+        )
+        .map_err(io)?;
+    }
     if !options.live {
         writeln!(
             out,

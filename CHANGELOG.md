@@ -13,6 +13,7 @@ follows [semantic versioning](https://semver.org) as described in
 - The `ai_harness` option (`vyasa`, the default, or `sarathi`) picks the agent harness a site's AI surfaces run on, read per request, so both run side by side without a restart. On Sarathi the registry's primary model is called with native tool use; usage rows, budget caps, the step list and the proposal stay as on Vyasa's own loop. In Theme Studio a Sarathi run must state its criteria with a `plan` tool and render the page with `look` after its last edit before it may finish; a finish without that is sent back to the model, and after three refusals the run ends as out of steps.
 
 ### Fixed
+- Claude models that refuse a forced tool call (`claude-sonnet-5-5`, `claude-opus-5-5`, the Fable and Mythos 5.1 and 5.2 models) work on Vyasa's own agent loop and assistants: they are asked to call the result tool instead of being made to, where every request used to be answered with a 400.
 - OpenAI's reasoning models (`gpt-5` and the `o` series) can be used on Vyasa's own agent loop and assistants: requests to OpenAI send `max_completion_tokens`, not `max_tokens`, which those models refuse. Other OpenAI-compatible servers are sent `max_tokens` as before.
 
 ## [0.4.6] - 2026-11-27
