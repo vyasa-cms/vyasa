@@ -29,4 +29,4 @@ serde_json = "1.0.151"
 tracing = "0.1"
 
 [dev-dependencies]
-tokio = "1.53.1"
+tokio = { version = "1.53.1", features = ["macros", "rt", "net", "io-util"] }
