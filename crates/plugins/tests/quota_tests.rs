@@ -412,3 +412,35 @@ async fn fetched_bytes_count_on_their_own_calls_budget() {
     // A huge count saturates instead of wrapping past the limit.
     assert!(!broker.record_bytes(id, u64::MAX, true).await);
 }
+
+/// An eviction between the fetch gate and the byte count (an operator
+/// enabling, disabling or reinstalling the plugin) drops the cached name the
+/// overrides match; the byte count loads it again instead of falling back to
+/// the default limit.
+#[tokio::test]
+async fn bytes_after_an_eviction_keep_the_plugins_override() {
+    let db = TestDb::new().await;
+    let pool = db.pool().clone();
+    let repo = vyasa_db::repo::PluginsRepo::new(pool.clone());
+    let id = plugin(
+        &repo,
+        "sync",
+        serde_json::json!(["net:fetch:api.github.com"]),
+    )
+    .await;
+    let overrides = parse_plugin_quotas("sync:bytes=100").unwrap();
+    let broker = Broker::new(repo, pool).with_overrides(overrides);
+    inside_one_minute().await;
+    assert_eq!(
+        broker
+            .fetch_gate(id, "https://api.github.com/x", false)
+            .await,
+        Gate::Allowed
+    );
+    broker.evict(id).await;
+    assert!(broker.record_bytes(id, 100, false).await);
+    assert!(
+        !broker.record_bytes(id, 1, false).await,
+        "the override's 100 bytes apply, not the default limit"
+    );
+}
