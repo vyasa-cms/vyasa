@@ -237,6 +237,19 @@ impl Broker {
         base.with_overrides(&self.overrides, &name, task)
     }
 
+    /// Loads the plugin's name (with its grants) when overrides exist and
+    /// the name is not cached, so [`Broker::quotas_as`] can match them. A
+    /// plugin that is gone keeps the default limits.
+    async fn load_name_for_overrides(&self, plugin_id: i64) {
+        if self.overrides.is_empty() {
+            return;
+        }
+        let known = self.names.lock().is_ok_and(|m| m.contains_key(&plugin_id));
+        if !known {
+            let _ = self.granted_for(plugin_id).await;
+        }
+    }
+
     /// [`Broker::new`] with explicit per-window quotas.
     #[must_use]
     pub fn with_quotas(repo: PluginsRepo, pool: sqlx::PgPool, quotas: Quotas) -> Self {
@@ -607,9 +620,12 @@ impl Broker {
     /// Records fetched bytes against the byte quota; over-budget callers
     /// should abort the transfer. `task` picks the budget, as for
     /// [`Broker::check_fetch`]. Call it after [`Broker::fetch_gate`] allowed
-    /// the request: the gate loads the plugin's name, which per-plugin
-    /// overrides (`VYASA_PLUGIN_QUOTAS`) are matched by.
+    /// the request. Per-plugin overrides (`VYASA_PLUGIN_QUOTAS`) are matched
+    /// by the plugin's name; an [`Broker::evict`] between the gate and this
+    /// call drops the cached name, so it is loaded again here rather than
+    /// checking the bytes against the default limit.
     pub async fn record_bytes(&self, plugin_id: i64, n: u64, task: bool) -> bool {
+        self.load_name_for_overrides(plugin_id).await;
         let limit = self.quotas_as(plugin_id, task).bytes_per_min;
         let mut counters = self.counters.lock().await;
         let c = counters.entry(plugin_id).or_default().spent(task);
