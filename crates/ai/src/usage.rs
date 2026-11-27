@@ -18,6 +18,12 @@ pub trait AiUsageSink: Send + Sync {
         completion_tokens: u32,
     );
 
+    /// How much of the prompt of the success just logged was written to and
+    /// read from the provider's prompt cache (both are part of its prompt
+    /// tokens). Default is to ignore: only a recorder that prices the cache
+    /// apart needs it.
+    fn log_cache(&self, _provider: &str, _model: &str, _purpose: &str, _written: u32, _read: u32) {}
+
     /// Records a failed/invalid attempt (zero tokens).
     fn log_failure(&self, provider: &str, model: &str, purpose: &str, error: &str);
 

@@ -18,7 +18,7 @@ pub mod sarathi;
 use serde_json::Value;
 use vyasa_common::AppError;
 
-pub use self::sarathi::{SarathiModel, Wire};
+pub use self::sarathi::{SarathiModel, Wire, WrapCaller};
 use crate::agent::{run_agent, truncate, AgentOutcome, AgentSpec, Toolbox};
 use crate::provider::LlmProvider;
 use crate::usage::AiUsageSink;

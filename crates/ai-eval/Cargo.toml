@@ -1,0 +1,30 @@
+[package]
+publish = false
+name = "vyasa-ai-eval"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description = "Runs both agent harnesses on a Theme Studio brief set and records what each run cost and produced"
+
+[lints]
+workspace = true
+
+[dependencies]
+serde_json = "1.0.151"
+tokio = { version = "1.53.1", features = ["rt", "time", "net"] }
+vyasa-ai = { path = "../ai" }
+vyasa-core = { path = "../core" }
+vyasa-themes = { path = "../themes" }
+# Sarathi, pinned to the same commit as vyasa-ai's.
+sarathi-core = { git = "https://github.com/KrishivAI/sarathi", rev = "8b76a3584396a27168fc26e6206eb00be8967b96" }
+sarathi-eval = { git = "https://github.com/KrishivAI/sarathi", rev = "8b76a3584396a27168fc26e6206eb00be8967b96" }
+sarathi-log = { git = "https://github.com/KrishivAI/sarathi", rev = "8b76a3584396a27168fc26e6206eb00be8967b96" }
+sarathi-protocol = { git = "https://github.com/KrishivAI/sarathi", rev = "8b76a3584396a27168fc26e6206eb00be8967b96" }
+
+[dev-dependencies]
+tokio = { version = "1.53.1", features = ["macros", "rt", "net", "io-util"] }
+
+[[bin]]
+name = "ai-eval"
+path = "src/main.rs"

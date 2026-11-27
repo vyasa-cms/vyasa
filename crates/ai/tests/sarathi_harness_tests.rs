@@ -135,6 +135,7 @@ fn model(url: &str) -> SarathiModel {
         base_url: format!("{url}/v1"),
         api_key: "k".to_owned(),
         max_tokens: 1024,
+        native_tools: true,
     }
 }
 
@@ -432,4 +433,102 @@ async fn a_surface_without_look_offers_no_plan_and_finishes_freely() {
     assert_eq!(out.reply, "Done.");
     assert!(!out.ran_out);
     assert!(tools_of(&bodies[0]).iter().all(|t| t["name"] != "plan"));
+}
+
+/// A model without native tool calls, over the chat-completions format.
+fn step_model(url: &str) -> SarathiModel {
+    SarathiModel {
+        provider: "gemini",
+        wire: Wire::OpenAi,
+        native_tools: false,
+        ..model(url)
+    }
+}
+
+/// A chat-completions answer holding one JSON step.
+fn step(tool: &str, input: &Value, reply: &str) -> String {
+    let text =
+        json!({"thought": format!("use {tool}"), "tool": tool, "input": input, "reply": reply});
+    json!({
+        "id": "c1", "object": "chat.completion", "model": "m-1",
+        "choices": [{"index": 0, "finish_reason": "stop",
+                     "message": {"role": "assistant", "content": text.to_string()}}],
+        "usage": {"prompt_tokens": 20, "completion_tokens": 5,
+                  "prompt_tokens_details": {"cached_tokens": 8}}
+    })
+    .to_string()
+}
+
+#[derive(Default)]
+struct Split(Mutex<Vec<(u32, u32, u32)>>);
+impl AiUsageSink for Split {
+    fn log_success(&self, _p: &str, _m: &str, _u: &str, prompt: u32, _ct: u32) {
+        self.0.lock().unwrap().push((prompt, 0, 0));
+    }
+    fn log_cache(&self, _p: &str, _m: &str, _u: &str, write: u32, read: u32) {
+        let mut rows = self.0.lock().unwrap();
+        let last = rows
+            .last_mut()
+            .expect("the call is logged before its cache split");
+        (last.1, last.2) = (write, read);
+    }
+    fn log_failure(&self, _p: &str, _m: &str, _u: &str, error: &str) {
+        panic!("a call failed: {error}");
+    }
+}
+
+#[tokio::test]
+async fn a_model_without_native_tools_runs_on_json_steps() {
+    let (_, planned, plan_input) = plan("c0");
+    let (_, edited, edit_input) = edit("c1");
+    let (_, looked, look_input) = look("c2");
+    let (url, bodies) = serve(vec![
+        step(planned, &plan_input, ""),
+        step(edited, &edit_input, ""),
+        step(looked, &look_input, ""),
+        step("done", &json!({}), "The title is red."),
+    ])
+    .await;
+    let state = blog();
+    let mut tools = StudioToolbox::new(
+        &state,
+        vyasa_themes::builtin_registry(),
+        Vec::new(),
+        Some(Eyes),
+    );
+    let sink = Split::default();
+    let out = harness::run(
+        Harness::Sarathi,
+        &Unused,
+        Some(&step_model(&url)),
+        &sink,
+        &spec(8),
+        &mut tools,
+    )
+    .await
+    .expect("the run ends");
+
+    assert_eq!(out.reply, "The title is red.");
+    assert!(!out.ran_out);
+    let names: Vec<&str> = out.steps.iter().map(|s| s.tool.as_str()).collect();
+    assert_eq!(names, ["plan", "edit", "look"]);
+    assert_eq!(out.steps[1].thought, "use edit");
+    assert_eq!(out.steps[1].input, edit_input);
+    assert!(
+        out.steps[1].observation.starts_with("Applied:"),
+        "{}",
+        out.steps[1].observation
+    );
+    assert!(out.steps[2].observation.contains("rendered"));
+
+    let bodies = bodies.lock().unwrap();
+    let first: Value = serde_json::from_str(&bodies[0]).unwrap();
+    assert!(first.get("tools").is_none(), "no native tools are offered");
+    let system = first["messages"][0]["content"].as_str().unwrap();
+    assert!(
+        system.contains("Each reply is ONE action as JSON"),
+        "{system}"
+    );
+    // Four calls, each with the cache read the provider reported.
+    assert_eq!(*sink.0.lock().unwrap(), vec![(20, 0, 8); 4]);
 }

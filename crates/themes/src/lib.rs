@@ -7,6 +7,7 @@ pub mod binding;
 pub mod cache;
 pub mod css;
 pub mod custom_css;
+pub mod digest;
 pub mod dynblocks;
 pub mod engine;
 pub mod layout;
@@ -27,6 +28,7 @@ pub use binding::{
 pub use cache::{etag_for, CacheMetrics, CacheService, CachedPage, ConditionalGet};
 pub use css::{font_stack, scopes_css, scopes_to_css, tokens_to_css};
 pub use custom_css::namespace_custom_css;
+pub use digest::page_digest;
 pub use dynblocks::card_html_for_test;
 pub use dynblocks::queries::{EntryContextData, PageNodeData, TocEntryData, TreeNodeData};
 pub use dynblocks::{

@@ -8,12 +8,15 @@ follows [semantic versioning](https://semver.org) as described in
 ## [Unreleased]
 
 ### Added
+- `ai-eval` (developer tool, `crates/ai-eval`, not published): runs both agent harnesses on a Theme Studio brief set with an offline renderer, and records each run's cost, steps and proposal under spend caps. A dry run unless `--live`.
+- The Sarathi harness can run a model without native tool calls, one JSON step at a time, and reports each call's prompt-cache write and read.
 - The `ai_harness` option (`vyasa`, the default, or `sarathi`) picks the agent harness a site's AI surfaces run on, read per request, so both run side by side without a restart. On Sarathi the registry's primary model is called with native tool use; usage rows, budget caps, the step list and the proposal stay as on Vyasa's own loop. In Theme Studio a Sarathi run must state its criteria with a `plan` tool and render the page with `look` after its last edit before it may finish; a finish without that is sent back to the model, and after three refusals the run ends as out of steps.
 
 ### Changed
 - The declared minimum supported Rust version is 1.97 (was 1.85, which no longer built: the plugin host's wasmtime needs 1.97); the pinned toolchain stays 1.99. CI checks that the workspace builds on 1.97.
 
 ### Fixed
+- OpenAI's reasoning models (`gpt-5` and the `o` series) can be used on Vyasa's own agent loop and assistants: requests to OpenAI send `max_completion_tokens`, not `max_tokens`, which those models refuse. Other OpenAI-compatible servers are sent `max_tokens` as before.
 - Docs plugin 0.1.15: a site with a main tree and three sections of about 680 documents each (2,672 in all) never imported one: the importer refused more than 2,000 documents in one sync before any write, every minute, with `pages: 0`. The cap is 5,000 documents now (over the main tree and every section together); each run is still limited by its request and write budgets.
 - Docs plugin 0.1.15: a site made only of sections (Folder empty, no older versions) no longer lists the whole repository root as a main tree beside them, which imported every section's documents a second time.
 - Docs plugin 0.1.15: an import that takes several runs no longer uses up GitHub's 60 calls an hour on a site without a token. Each run asked for every branch and tag head in full, and listed again every folder of more than about 600 documents (its listing, over 64 KiB, was refused by the key-value store). Now each head is fetched once and later runs ask with its etag (a 304 is free), and a listing keeps only its documents, split across values below 64 KiB, so later runs of the same commit list nothing and the import is not stopped part way by `GitHub rate limit or permission problem (403)`.

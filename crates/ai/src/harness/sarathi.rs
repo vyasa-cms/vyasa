@@ -80,6 +80,10 @@ pub struct SarathiModel {
     pub api_key: String,
     /// The longest answer a step may give.
     pub max_tokens: u32,
+    /// Whether the model is offered native tool calls. Without them it
+    /// answers one JSON step at a time, with the tools described in the
+    /// system prompt. Registry models use native tools.
+    pub native_tools: bool,
 }
 
 /// Never prints the key.
@@ -90,6 +94,7 @@ impl std::fmt::Debug for SarathiModel {
             .field("wire", &self.wire)
             .field("model", &self.model)
             .field("base_url", &self.base_url)
+            .field("native_tools", &self.native_tools)
             .finish_non_exhaustive()
     }
 }
@@ -117,6 +122,17 @@ impl SarathiModel {
             base_url: m.base_url.clone(),
             api_key: m.api_key.clone(),
             max_tokens,
+            native_tools: true,
+        }
+    }
+
+    fn profile(&self) -> ModelProfile {
+        if self.native_tools {
+            ModelProfile::native()
+        } else {
+            // No response format: Vyasa's loop asks these models for JSON
+            // in the prompt too.
+            ModelProfile::json_object(false)
         }
     }
 
@@ -153,22 +169,61 @@ pub async fn run(
     spec: &AgentSpec<'_>,
     toolbox: &mut dyn Toolbox,
 ) -> Result<AgentOutcome, AppError> {
+    run_wrapped(model, Unwrapped, sink, spec, toolbox).await
+}
+
+/// Puts a layer around the caller a run builds, whichever wire the model
+/// speaks: an evaluation observes or injects at the model seam this way.
+pub trait WrapCaller {
+    /// The wrapped caller.
+    type Caller<C: ModelCaller>: ModelCaller;
+
+    /// Wraps `caller`.
+    fn wrap<C: ModelCaller>(self, caller: C) -> Self::Caller<C>;
+}
+
+/// The caller as built.
+struct Unwrapped;
+
+impl WrapCaller for Unwrapped {
+    type Caller<C: ModelCaller> = C;
+
+    fn wrap<C: ModelCaller>(self, caller: C) -> C {
+        caller
+    }
+}
+
+/// [`run`] with `wrap` around the model caller.
+///
+/// # Errors
+/// As [`run`].
+pub async fn run_wrapped<W: WrapCaller>(
+    model: &SarathiModel,
+    wrap: W,
+    sink: &dyn AiUsageSink,
+    spec: &AgentSpec<'_>,
+    toolbox: &mut dyn Toolbox,
+) -> Result<AgentOutcome, AppError> {
     let chain = model.chain()?;
+    let profile = model.profile();
     match model.wire {
         Wire::Anthropic => {
             let caller = sarathi_core::anthropic::AnthropicCaller::new(chain, model.max_tokens)
                 .map_err(|e| external(&e.detail))?;
-            run_with(caller, model.provider, sink, spec, toolbox, true).await
+            let caller = wrap.wrap(caller);
+            run_with(caller, profile, model.provider, sink, spec, toolbox, true).await
         }
         Wire::OpenAi => {
             let caller = sarathi_core::openai::OpenAiCaller::new(chain, model.max_tokens)
                 .map_err(|e| external(&e.detail))?;
-            run_with(caller, model.provider, sink, spec, toolbox, false).await
+            let caller = wrap.wrap(caller);
+            run_with(caller, profile, model.provider, sink, spec, toolbox, false).await
         }
     }
 }
 
-/// Runs one agent on Sarathi through `caller`. `images` says whether the
+/// Runs one agent on Sarathi through `caller`, reading its steps as
+/// `profile` says. `images` says whether the
 /// caller's protocol carries image blocks; when it does not, attachments
 /// are left out with a warning (the model is told nothing it cannot see).
 ///
@@ -176,6 +231,7 @@ pub async fn run(
 /// As [`run`].
 pub async fn run_with<C: ModelCaller>(
     caller: C,
+    profile: ModelProfile,
     provider: &'static str,
     sink: &dyn AiUsageSink,
     spec: &AgentSpec<'_>,
@@ -192,8 +248,8 @@ pub async fn run_with<C: ModelCaller>(
     let (tools, gate) = gated(tools, spec.purpose)?;
     let defs = tools.defs().map_err(|e| external(&e.to_string()))?;
     let steps = u32::try_from(spec.max_steps.clamp(1, MAX_STEPS_CEILING)).unwrap_or(1);
-    let mut config = DriverConfig::new(ModelProfile::native(), defs, spec.system)
-        .with_limits(Limits::with_max_steps(steps));
+    let mut config =
+        DriverConfig::new(profile, defs, spec.system).with_limits(Limits::with_max_steps(steps));
     if let Some(gate) = gate {
         config = config.with_completion(Arc::new(gate));
     }
@@ -239,6 +295,13 @@ pub async fn run_with<C: ModelCaller>(
                     spec.purpose,
                     clamp_u32(prompt),
                     clamp_u32(usage.output_tokens),
+                );
+                sink.log_cache(
+                    provider,
+                    &model_name,
+                    spec.purpose,
+                    clamp_u32(usage.cache_creation_input_tokens),
+                    clamp_u32(usage.cache_read_input_tokens),
                 );
             }
             Event::Error { kind, detail } => {
@@ -343,7 +406,7 @@ fn read_steps(log: &Log, views: &HashMap<u64, ResponseView>) -> Vec<AgentStep> {
     }
     let mut steps = Vec::new();
     for entry in log.entries() {
-        let Body::AssistantMessage { from, .. } = &entry.body else {
+        let Body::AssistantMessage { from, calls } = &entry.body else {
             continue;
         };
         let (Some(body), Some(view)) = (responses.get(&from.0), views.get(&entry.seq.0)) else {
@@ -358,6 +421,23 @@ fn read_steps(log: &Log, views: &HashMap<u64, ResponseView>) -> Vec<AgentStep> {
             .filter_map(|b| text_of(cut(&b.range)))
             .collect();
         let thought = thought.join("\n");
+        if view.tool_uses().next().is_none() {
+            // A JSON step: the answer's text is the step, and the log names
+            // the call it asked for.
+            let step = json_step(&thought);
+            for call in calls {
+                steps.push(AgentStep {
+                    thought: step["thought"].as_str().unwrap_or_default().to_owned(),
+                    tool: call.name.to_string(),
+                    input: step
+                        .get("input")
+                        .cloned()
+                        .unwrap_or_else(|| serde_json::json!({})),
+                    observation: results.get(&*call.id).cloned().unwrap_or_default(),
+                });
+            }
+            continue;
+        }
         for (id, name, input) in view.tool_uses() {
             steps.push(AgentStep {
                 thought: thought.clone(),
@@ -368,6 +448,17 @@ fn read_steps(log: &Log, views: &HashMap<u64, ResponseView>) -> Vec<AgentStep> {
         }
     }
     steps
+}
+
+/// The JSON step in an answer's text, a Markdown code fence around it
+/// removed; null when it is not one.
+fn json_step(text: &str) -> Value {
+    let text = text.trim();
+    let body = text
+        .strip_prefix("```")
+        .map(|rest| rest.strip_prefix("json").unwrap_or(rest))
+        .map_or(text, |rest| rest.strip_suffix("```").unwrap_or(rest));
+    serde_json::from_str(body.trim()).unwrap_or(Value::Null)
 }
 
 /// A text block's text: a JSON string (the OpenAI form) or an object with
@@ -390,7 +481,8 @@ fn input_of(raw: &str) -> Value {
 }
 
 /// What a result block told the model: its `content`, a string or text
-/// blocks (both wire formats name it `content`).
+/// blocks (both wire formats name it `content`), or under JSON steps the
+/// text block of an observation.
 fn result_text(block: &RawJson) -> String {
     let Ok(v) = serde_json::from_str::<Value>(block.as_str()) else {
         return block.as_str().to_owned();
@@ -402,7 +494,13 @@ fn result_text(block: &RawJson) -> String {
             .filter_map(|p| p["text"].as_str())
             .collect::<Vec<_>>()
             .join("\n"),
-        _ => block.as_str().to_owned(),
+        _ => match v["text"].as_str() {
+            Some(text) => text
+                .strip_prefix("observation:\n")
+                .unwrap_or(text)
+                .to_owned(),
+            None => block.as_str().to_owned(),
+        },
     }
 }
 
@@ -679,7 +777,8 @@ mod tests {
         page: &mut Page,
     ) -> Result<AgentOutcome, AppError> {
         let images = model.wire == Wire::Anthropic;
-        run_with(model, "anthropic", sink, spec, page, images).await
+        let profile = ModelProfile::native();
+        run_with(model, profile, "anthropic", sink, spec, page, images).await
     }
 
     #[tokio::test]
@@ -907,6 +1006,7 @@ mod tests {
             base_url: base.to_owned(),
             api_key: "k".to_owned(),
             max_tokens: 1,
+            native_tools: true,
         };
         let base = |t: Target| match t {
             Target::Provider { kind, base_url, .. } => (kind.as_str(), base_url),
@@ -931,6 +1031,11 @@ mod tests {
     #[test]
     fn result_and_block_texts_read_both_wire_formats() {
         let raw = |s: &str| RawJson::from_text(s).unwrap();
+        // A JSON step's observation is a text block of its own.
+        assert_eq!(
+            result_text(&raw(r#"{"type":"text","text":"observation:\nApplied"}"#)),
+            "Applied"
+        );
         assert_eq!(
             result_text(&raw(
                 r#"{"type":"tool_result","tool_use_id":"a","content":"hi"}"#
