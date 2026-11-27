@@ -220,7 +220,9 @@ impl vyasa_ai::AiUsageSink for Sink {
         let model = model.to_owned();
         let purpose = purpose.to_owned();
         tokio::spawn(async move {
-            let _ = repo
+            // A lost row hides spend from the usage page and the month cap,
+            // so a failed write is reported, not dropped.
+            if let Err(e) = repo
                 .record(
                     &provider_name,
                     &model,
@@ -229,7 +231,10 @@ impl vyasa_ai::AiUsageSink for Sink {
                     i32::try_from(ct).unwrap_or(i32::MAX),
                     cost,
                 )
-                .await;
+                .await
+            {
+                tracing::error!(purpose, model, error = %e, "AI usage row not recorded");
+            }
         });
     }
 
@@ -253,7 +258,7 @@ pub async fn log_flat(
 ) {
     let cost = model.row.input_cost_per_mtok.unwrap_or(0.0);
     let repo = vyasa_db::repo::AiLogRepo::new(state.pool.clone());
-    let _ = repo
+    if let Err(e) = repo
         .record(
             model.provider.as_str(),
             &model.row.model,
@@ -262,7 +267,10 @@ pub async fn log_flat(
             0,
             cost,
         )
-        .await;
+        .await
+    {
+        tracing::error!(purpose, model = %model.row.model, error = %e, "AI usage row not recorded");
+    }
 }
 
 /// The text model as plugins see it: a plain reply, logged under the

@@ -49,7 +49,7 @@ impl AiLogRepo {
         cost_usd: f64,
     ) -> Result<(), AppError> {
         sqlx::query(
-            "INSERT INTO ai_logs (id, provider, model, purpose, prompt_tokens, \\
+            "INSERT INTO ai_logs (id, provider, model, purpose, prompt_tokens, \
              completion_tokens, cost_usd) VALUES ($1, $2, $3, $4, $5, $6, $7)",
         )
         .bind(vyasa_common::next_id_i64())
@@ -71,7 +71,7 @@ impl AiLogRepo {
     /// [`AppError::Db`] on failure.
     pub async fn recent(&self, limit: i64) -> Result<Vec<AiLogRow>, AppError> {
         sqlx::query_as::<_, AiLogRow>(
-            "SELECT id, provider, model, purpose, prompt_tokens, completion_tokens, \\
+            "SELECT id, provider, model, purpose, prompt_tokens, completion_tokens, \
              cost_usd FROM ai_logs ORDER BY created_at DESC LIMIT $1",
         )
         .bind(limit)

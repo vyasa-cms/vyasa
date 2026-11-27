@@ -10,6 +10,9 @@ follows [semantic versioning](https://semver.org) as described in
 ### Added
 - The `ai_harness` option (`vyasa`, the default, or `sarathi`) picks the agent harness a site's AI surfaces run on, read per request, so both run side by side without a restart. On Sarathi the registry's primary model is called with native tool use; usage rows, budget caps, the step list and the proposal stay as on Vyasa's own loop. In Theme Studio a Sarathi run must state its criteria with a `plan` tool and render the page with `look` after its last edit before it may finish; a finish without that is sent back to the model, and after three refusals the run ends as out of steps.
 
+### Fixed
+- AI usage is recorded: every model call's row in the usage log was refused by the database (a stray backslash in the insert), so the AI usage page stayed empty, its recent-calls list failed, and neither the monthly AI budget nor the daily image-generation limit ever saw any spend. A failed usage write is now logged as an error.
+
 ## [0.4.6] - 2026-11-27
 
 ### Changed
