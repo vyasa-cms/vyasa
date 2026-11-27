@@ -318,7 +318,7 @@ pub async fn sweep_once(pool: &PgPool, batch: i64) -> usize {
 /// stays only so the composition root need not change in step.
 pub fn spawn_sweep(pool: PgPool) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
-        let mut interval = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
+        let mut interval = tokio::time::interval(std::time::Duration::from_hours(1));
         loop {
             interval.tick().await;
             let n = sweep_once(&pool, 25).await;

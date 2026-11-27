@@ -471,7 +471,7 @@ impl ScaleRatio {
             Self::MinorThird => 1.2,
             Self::MajorThird => 1.25,
             Self::PerfectFourth => 1.333_333_333_333_333_3,
-            Self::Golden => 1.618_033_988_749_895,
+            Self::Golden => std::f64::consts::GOLDEN_RATIO,
             Self::Custom(v) => v,
         }
     }
