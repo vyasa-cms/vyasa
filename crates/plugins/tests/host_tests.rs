@@ -88,6 +88,8 @@ async fn hello_loads_from_db_and_init_logs() {
         "disabled must refuse load"
     );
     repo.set_enabled(plugin_id, true).await.unwrap();
+    // The host remembers the refusal until evicted, as the enable route does.
+    host.evict(plugin_id).await;
 
     // init runs and accepts config; status becomes loaded.
     let result = host.call_init(plugin_id, r#"{"name":"hello"}"#, &env).await;
@@ -131,7 +133,9 @@ async fn broker_matrix_no_caps_denies_and_audits() {
     );
     // fetch denied for any host.
     assert_eq!(
-        broker.check_fetch(row.id, "https://a.example.com/x").await,
+        broker
+            .check_fetch(row.id, "https://a.example.com/x", false)
+            .await,
         Decision::Denied
     );
     // event emit denied.
@@ -177,22 +181,32 @@ async fn broker_grants_allow_and_quota_exhausts() {
         Decision::Allowed
     );
     assert_eq!(
-        broker.check_fetch(row.id, "https://a.example.com/x").await,
+        broker
+            .check_fetch(row.id, "https://a.example.com/x", false)
+            .await,
         Decision::Allowed
     );
     assert_eq!(
-        broker.check_fetch(row.id, "https://b.example.com/y").await,
+        broker
+            .check_fetch(row.id, "https://b.example.com/y", false)
+            .await,
         Decision::Allowed
     );
     assert_eq!(
-        broker.check_fetch(row.id, "https://evil.com/z").await,
+        broker
+            .check_fetch(row.id, "https://evil.com/z", false)
+            .await,
         Decision::Denied
     );
     assert_eq!(broker.check_event_emit(row.id).await, Decision::Allowed);
 
     // Byte quota: record_bytes over budget returns false.
-    assert!(broker.record_bytes(row.id, 100).await);
-    assert!(!broker.record_bytes(row.id, 10u64 * 1024 * 1024).await);
+    assert!(broker.record_bytes(row.id, 100, false).await);
+    assert!(
+        !broker
+            .record_bytes(row.id, 10u64 * 1024 * 1024, false)
+            .await
+    );
 
     // Quota rows recorded as kind='quota' eventually; here we only assert
     // fetch audit entries exist (3 calls: 2 allowed + 1 denied).

@@ -75,7 +75,7 @@ async fn ai_calls_are_budgeted_per_plugin_per_minute() {
         );
         granted = 0;
         for _ in 0..budget + 5 {
-            if fresh.check_ai(env.ai).await == Decision::Allowed {
+            if fresh.check_ai(env.ai, false).await == Decision::Allowed {
                 granted += 1;
             }
         }
@@ -88,7 +88,10 @@ async fn ai_calls_are_budgeted_per_plugin_per_minute() {
 
     // The budget is the plugin's own: a plugin without the grant is
     // refused for the grant, never for someone else's spending.
-    assert_eq!(env.broker.check_ai(env.plain).await, Decision::Denied);
+    assert_eq!(
+        env.broker.check_ai(env.plain, false).await,
+        Decision::Denied
+    );
     assert_eq!(quota_rows(&env, env.plain).await, 0);
     env.pool.close().await;
 }
