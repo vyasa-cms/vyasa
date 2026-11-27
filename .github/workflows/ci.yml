@@ -59,6 +59,24 @@ jobs:
           VYASA_TEST_DATABASE_URL: postgres://postgres:postgres@localhost:5432/vyasa_test
         run: cargo test --workspace
 
+  # The declared rust-version (Cargo.toml) must stay true: the workspace builds
+  # on it, not only on the pinned toolchain. Lints are gated above on the pin;
+  # this job only checks that every target compiles. The floor is set by
+  # wasmtime (plugins host), which needs 1.97.
+  msrv:
+    name: MSRV (1.97)
+    runs-on: ubuntu-latest
+    env:
+      RUSTFLAGS: ""
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@1.97
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: msrv
+      # `+1.97` overrides rust-toolchain.toml, which would otherwise select the pin.
+      - run: cargo +1.97 check --workspace --all-targets --locked
+
   docs-plugin:
     name: vyasa-docs plugin
     runs-on: ubuntu-latest

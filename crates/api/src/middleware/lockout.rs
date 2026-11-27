@@ -35,7 +35,7 @@ const FREE_ATTEMPTS: u32 = 3;
 const MAX_DELAY: Duration = Duration::from_secs(300);
 
 /// A failure record older than this is forgotten entirely.
-const FORGET_AFTER: Duration = Duration::from_secs(900);
+const FORGET_AFTER: Duration = Duration::from_mins(15);
 
 /// One `(account, ip)` pair's failure history.
 #[derive(Clone, Copy)]
