@@ -7,6 +7,9 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Changed
+- The declared minimum supported Rust version is 1.97 (was 1.85, which no longer built: the plugin host's wasmtime needs 1.97); the pinned toolchain stays 1.99. CI checks that the workspace builds on 1.97.
+
 ### Fixed
 - Plugin quotas: writes, fetches, fetched bytes and model calls are counted per call budget too, like reads. A page render or hook that ran while the plugin's extended task was going got the task's larger limits and spent the same counters; it now keeps the ordinary limits on its own counters, and the task keeps its whole budget.
 - Plugin quotas: an over-quota `fetch`, `fetch-with` or `ai-complete` returns `quota-exceeded`, as reads and writes do, instead of `capability-denied` (or `byte quota exceeded` for the fetched-bytes quota), so a task pauses instead of treating it as a missing grant. The audit row says which budget ran out. While an extended task runs, a plugin can make 20 model calls a minute on the ordinary budget and 20 on the task's (`task_ai_calls` lowers the task's share).
