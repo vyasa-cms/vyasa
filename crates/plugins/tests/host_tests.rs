@@ -88,6 +88,8 @@ async fn hello_loads_from_db_and_init_logs() {
         "disabled must refuse load"
     );
     repo.set_enabled(plugin_id, true).await.unwrap();
+    // The host remembers the refusal until evicted, as the enable route does.
+    host.evict(plugin_id).await;
 
     // init runs and accepts config; status becomes loaded.
     let result = host.call_init(plugin_id, r#"{"name":"hello"}"#, &env).await;

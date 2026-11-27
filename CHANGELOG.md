@@ -7,6 +7,10 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Fixed
+- A docs sidebar's `context.tree` holds up to 5,000 nodes, not 2,000, to match the docs plugin's 5,000-page import: on a site with several docs versions (about 2,700 pages) the sidebar left out the pages past the 2,000th.
+- A plugin that errored or was disabled no longer costs a full `plugins` query per section, block or filter on every page: the host remembers the refusal for a minute (enable, disable and install clear it at once) and logs it once a minute, where it used to fail each render with nothing in the log.
+
 ## [0.4.5] - 2026-11-26
 
 ### Fixed

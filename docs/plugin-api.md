@@ -347,7 +347,7 @@ A section that lists `"context": ["entry", "tree", "toc"]` in its
 `register-sections` descriptor receives `context` in the `render-section`
 payload when it renders an entry of a hierarchical type: `entry` (the entry
 as a node plus `post_type` and `ancestors`), `tree` (the published tree of
-the type in reading order, at most 2000 nodes, with scalar field values) and
+the type in reading order, at most 5000 nodes, with scalar field values) and
 `toc` (the entry's headings with their anchors). Ids are strings. Only the
 requested keys are present; a failure to fetch degrades to no `context`.
 
