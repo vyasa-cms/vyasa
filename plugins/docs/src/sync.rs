@@ -522,13 +522,16 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
     };
 
     // 2. Files of every tree.
-    let mut trees: Vec<TreeSpec> = vec![TreeSpec {
-        label: cx.cfg.latest_version.clone(),
-        folder: cx.cfg.folder.clone(),
-        tag: "main".to_owned(),
-        git_ref: cx.cfg.branch.clone(),
-        commit: commit.clone(),
-    }];
+    let mut trees: Vec<TreeSpec> = Vec::new();
+    if lists_main_tree(cx.cfg) {
+        trees.push(TreeSpec {
+            label: cx.cfg.latest_version.clone(),
+            folder: cx.cfg.folder.clone(),
+            tag: "main".to_owned(),
+            git_ref: cx.cfg.branch.clone(),
+            commit: commit.clone(),
+        });
+    }
     for (label, folder) in &cx.cfg.versions {
         let git_ref = cx
             .cfg
@@ -807,6 +810,14 @@ struct SrcFile {
 
 fn file_key(f: &SrcFile) -> String {
     format!("{}:{}", f.tree.tag, f.path)
+}
+
+/// Whether the sync lists the main tree (Folder on Branch). A site made only
+/// of sections leaves Folder empty: the main tree would then be the whole
+/// repository root, listing every section's pages a second time. Older
+/// versions belong to the main tree, so with any configured it is listed.
+fn lists_main_tree(cfg: &Config) -> bool {
+    !(cfg.folder.is_empty() && !cfg.sections.is_empty() && cfg.versions.is_empty())
 }
 
 fn join_repo_path(folder: &[String], path: &str) -> String {
@@ -2148,6 +2159,60 @@ mod tests {
         let b = budget(&f);
         assert!(run(&mut Wrap(&f), &cfg(), None, b).unwrap().finished);
         assert_eq!(api(&f), listed, "the second round listed again");
+    }
+
+    /// A site of sections only, with Folder empty: before, the main tree was
+    /// the repository root and every section's pages were listed twice.
+    #[test]
+    fn a_sections_only_site_with_an_empty_folder_lists_each_tree_once() {
+        let mut files = Files::new();
+        files.insert("README.md".into(), "# Repo readme\n".into());
+        for i in 0..5 {
+            files.insert(format!("docs/page{i}.md"), format!("# Page {i}\n"));
+        }
+        let sections = vec![crate::settings::SectionDef {
+            slug: "engine".into(),
+            title: "Engine".into(),
+            folder: vec!["docs".into()],
+            git_ref: None,
+        }];
+        let pages = |f: &RefCell<Fake>| -> (usize, usize) {
+            let fk = f.borrow();
+            let md = fk.entries.keys().filter(|k| k.ends_with(".md"));
+            let (sec, other): (Vec<_>, Vec<_>) = md.partition(|k| k.starts_with("s:"));
+            (sec.len(), other.len())
+        };
+        let big = |f: &RefCell<Fake>| Budget {
+            deadline_ms: f.borrow().now + 60_000,
+            max_requests: 5000,
+            max_writes: 5000,
+        };
+
+        let f = fake_with(files.clone());
+        let mut c = cfg();
+        c.folder = Vec::new();
+        c.sections = sections.clone();
+        let b = big(&f);
+        assert!(run(&mut Wrap(&f), &c, None, b).unwrap().finished);
+        assert_eq!(pages(&f), (5, 0), "only the section's pages, once");
+
+        // With an older version configured the main tree stays: its versions belong to it.
+        let f = fake_with(files.clone());
+        c.versions = vec![("v1".into(), vec!["docs".into()])];
+        let b = big(&f);
+        assert!(run(&mut Wrap(&f), &c, None, b).unwrap().finished);
+        assert!(
+            pages(&f).1 > 0,
+            "the main tree is listed beside its versions"
+        );
+
+        // Without sections an empty Folder is still the repository root.
+        let f = fake_with(files);
+        let mut c = cfg();
+        c.folder = Vec::new();
+        let b = big(&f);
+        assert!(run(&mut Wrap(&f), &c, None, b).unwrap().finished);
+        assert_eq!(pages(&f), (0, 6), "the repository root is the main tree");
     }
 
     /// The broker allows 600 key-value reads a minute, extended task or not.
