@@ -2324,10 +2324,28 @@ mod tests {
     #[test]
     fn four_trees_of_seven_hundred_pages_are_listed_and_imported() {
         let (f, c) = three_versions_of(700);
-        let b = task_budget(&f);
-        let r = run(&mut Wrap(&f), &c, None, b);
-        let r = r.expect("2,800 documents are under the cap");
-        assert!(r.created > 0, "the first run writes pages: {r:?}");
+        let mut runs = 0;
+        let mut created = 0;
+        loop {
+            runs += 1;
+            assert!(runs <= 40, "the sync did not finish in 40 scheduled runs");
+            let b = task_budget(&f);
+            let r = run(&mut Wrap(&f), &c, None, b).expect("2,800 documents are under the cap");
+            assert!(!r.throttled, "run {runs} was throttled: {r:?}");
+            created += r.created;
+            f.borrow_mut().now += 60_000;
+            if r.finished {
+                break;
+            }
+        }
+        let fk = f.borrow();
+        let pages = fk
+            .entries
+            .keys()
+            .filter(|k| k.starts_with("s:") && k.ends_with(".md"))
+            .count();
+        assert_eq!(pages, 2100, "every page of every version is imported");
+        assert!(created > 0, "the sync writes pages");
     }
 
     #[test]
@@ -2335,7 +2353,10 @@ mod tests {
         let (f, c) = three_versions_of(MAX_PAGES / 4 + 1);
         let b = task_budget(&f);
         let e = run(&mut Wrap(&f), &c, None, b).unwrap_err();
-        assert!(e.contains("documents found") && e.contains(&MAX_PAGES.to_string()), "{e}");
+        assert!(
+            e.contains("documents found") && e.contains(&MAX_PAGES.to_string()),
+            "{e}"
+        );
     }
 
     /// Without a token GitHub allows 60 API calls an hour and a 304 is free.
@@ -2353,7 +2374,10 @@ mod tests {
             let r = run(&mut Wrap(&f), &c, None, b).unwrap();
             f.borrow_mut().now += 60_000;
             if r.finished {
-                assert!(!r.up_to_date, "an unchanged head does not end an unfinished sync");
+                assert!(
+                    !r.up_to_date,
+                    "an unchanged head does not end an unfinished sync"
+                );
                 break;
             }
         }
