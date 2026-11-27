@@ -431,6 +431,7 @@ fn read_steps(log: &Log, views: &HashMap<u64, ResponseView>) -> Vec<AgentStep> {
                     tool: call.name.to_string(),
                     input: step
                         .get("input")
+                        .filter(|input| !input.is_null())
                         .cloned()
                         .unwrap_or_else(|| serde_json::json!({})),
                     observation: results.get(&*call.id).cloned().unwrap_or_default(),
@@ -851,6 +852,32 @@ mod tests {
             }
             assert!(sink.failures.lock().unwrap().is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn a_json_step_with_a_null_input_is_read_back_as_the_empty_object() {
+        let model = Scripted::new(
+            Wire::OpenAi,
+            &[
+                openai(Some(r#"{"thought":"t","tool":"edit","input":null}"#), &[]),
+                openai(Some(r#"{"thought":"d","tool":"done","reply":"ok"}"#), &[]),
+            ],
+        );
+        let sink = Recorder::default();
+        let mut page = Page::default();
+        let out = run_with(
+            &model,
+            ModelProfile::json_object(false),
+            "openai",
+            &sink,
+            &spec(12, Vec::new()),
+            &mut page,
+            false,
+        )
+        .await
+        .expect("runs");
+        assert_eq!(page.edits, vec![json!({})]);
+        assert_eq!(out.steps[0].input, json!({}));
     }
 
     #[tokio::test]

@@ -16,6 +16,7 @@ follows [semantic versioning](https://semver.org) as described in
 - The declared minimum supported Rust version is 1.97 (was 1.85, which no longer built: the plugin host's wasmtime needs 1.97); the pinned toolchain stays 1.99. CI checks that the workspace builds on 1.97.
 
 ### Fixed
+- Claude models that refuse a forced tool call (`claude-sonnet-5-5`, `claude-opus-5-5`, the Fable and Mythos 5.1 and 5.2 models) work on Vyasa's own agent loop and assistants: they are asked to call the result tool instead of being made to, where every request used to be answered with a 400.
 - OpenAI's reasoning models (`gpt-5` and the `o` series) can be used on Vyasa's own agent loop and assistants: requests to OpenAI send `max_completion_tokens`, not `max_tokens`, which those models refuse. Other OpenAI-compatible servers are sent `max_tokens` as before.
 - Docs plugin 0.1.15: a site with a main tree and three sections of about 680 documents each (2,672 in all) never imported one: the importer refused more than 2,000 documents in one sync before any write, every minute, with `pages: 0`. The cap is 5,000 documents now (over the main tree and every section together); each run is still limited by its request and write budgets.
 - Docs plugin 0.1.15: a site made only of sections (Folder empty, no older versions) no longer lists the whole repository root as a main tree beside them, which imported every section's documents a second time.

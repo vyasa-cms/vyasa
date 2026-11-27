@@ -51,12 +51,21 @@ where
 
         match parsed {
             Ok(value) => {
+                let answered_by = completion.provider.unwrap_or_else(|| provider.name());
+                let model = completion.model.as_deref().unwrap_or(&spec.model);
                 sink.log_success(
-                    completion.provider.unwrap_or_else(|| provider.name()),
-                    completion.model.as_deref().unwrap_or(&spec.model),
+                    answered_by,
+                    model,
                     &spec.purpose,
                     completion.usage.prompt_tokens,
                     completion.usage.completion_tokens,
+                );
+                sink.log_cache(
+                    answered_by,
+                    model,
+                    &spec.purpose,
+                    0,
+                    completion.usage.cached_tokens,
                 );
                 return Ok(value);
             }
@@ -69,6 +78,13 @@ where
                     &spec.purpose,
                     completion.usage.prompt_tokens,
                     completion.usage.completion_tokens,
+                );
+                sink.log_cache(
+                    provider.name(),
+                    &spec.model,
+                    &spec.purpose,
+                    0,
+                    completion.usage.cached_tokens,
                 );
                 if attempt < MAX_ATTEMPTS {
                     // Repair prompt: include the previous output and errors.

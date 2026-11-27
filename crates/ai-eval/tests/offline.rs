@@ -29,6 +29,15 @@ type Seen = Arc<Mutex<Vec<String>>>;
 /// either arm, deciding from what the request already holds. `usage` is what
 /// each reply reports.
 fn stub(usage: Value) -> (String, Seen) {
+    stub_with(move |_, body, _| reply(body, &usage).to_string())
+}
+
+/// A local server for both wires: `answer(path, body, n)` is the 200 body
+/// of the `n`th model call, from 0.
+fn stub_with(
+    answer: impl Fn(&str, &str, usize) -> String + Send + Sync + 'static,
+) -> (String, Seen) {
+    let answer = Arc::new(answer);
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let url = format!("http://{}/v1", listener.local_addr().unwrap());
     let seen: Seen = Arc::default();
@@ -37,7 +46,7 @@ fn stub(usage: Value) -> (String, Seen) {
         for sock in listener.incoming() {
             let mut sock = sock.unwrap();
             let log = Arc::clone(&log);
-            let usage = usage.clone();
+            let answer = Arc::clone(&answer);
             std::thread::spawn(move || {
                 let mut buf = Vec::new();
                 let mut tmp = [0u8; 8192];
@@ -63,12 +72,15 @@ fn stub(usage: Value) -> (String, Seen) {
                 };
                 let path = head.split(' ').nth(1).unwrap_or_default();
                 let answer = if path.ends_with("/count_tokens") {
-                    json!({"input_tokens": 100})
+                    json!({"input_tokens": 100}).to_string()
                 } else {
-                    log.lock().unwrap().push(body.clone());
-                    reply(&body, &usage)
-                }
-                .to_string();
+                    let n = {
+                        let mut log = log.lock().unwrap();
+                        log.push(body.clone());
+                        log.len() - 1
+                    };
+                    answer(path, &body, n)
+                };
                 let response = format!(
                     "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{answer}",
                     answer.len()
@@ -119,6 +131,74 @@ fn reply(body: &str, usage: &Value) -> Value {
     };
     json!({"id": "msg", "type": "message", "role": "assistant", "model": "claude-test",
            "content": content, "stop_reason": stop, "usage": usage})
+}
+
+/// A chat-completions server playing the same agent, in each form the two
+/// arms ask for: Vyasa's JSON step, Sarathi's native tool calls and its
+/// JSON steps. Part of every prompt is reported as read from the cache.
+fn chat_reply(body: &str) -> Value {
+    let request: Value = serde_json::from_str(body).unwrap();
+    let steps = [
+        (
+            "toolu_plan",
+            "plan",
+            json!({"criteria": [{"id": "r", "text": "rounder", "kind": "look"}]}),
+        ),
+        (
+            "toolu_edit",
+            "edit",
+            json!({"ops": [{"op": "patch_tokens", "patch": {"radius_px": 3}}]}),
+        ),
+        ("toolu_look", "look", json!({"path": "/"})),
+    ];
+    let step = |tool: &str, input: &Value, reply: &str| {
+        let text = json!({"thought": "next", "tool": tool, "input": input, "reply": reply});
+        json!({"role": "assistant", "content": text.to_string()})
+    };
+    let done = step("done", &json!({}), "Rounded the corners.");
+    let message = if body.contains("Respond with exactly one JSON object") {
+        if !body.contains("called: edit(") {
+            step("edit", &steps[1].2, "")
+        } else if !body.contains("called: look(") {
+            step("look", &steps[2].2, "")
+        } else {
+            done
+        }
+    } else if request.get("tools").is_some() {
+        steps
+            .iter()
+            .find(|(id, ..)| !body.contains(id))
+            .map_or_else(
+                || json!({"role": "assistant", "content": "Rounded the corners."}),
+                |(id, name, input)| {
+                    json!({"role": "assistant", "content": null, "tool_calls": [{
+                        "id": id, "type": "function",
+                        "function": {"name": name, "arguments": input.to_string()}}]})
+                },
+            )
+    } else {
+        let called: Vec<String> = request["messages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|m| m["role"] == "assistant")
+            .filter_map(|m| serde_json::from_str::<Value>(m["content"].as_str()?).ok())
+            .filter_map(|v| v["tool"].as_str().map(str::to_owned))
+            .collect();
+        steps
+            .iter()
+            .find(|(_, name, _)| !called.iter().any(|c| c == name))
+            .map_or(done, |(_, name, input)| step(name, input, ""))
+    };
+    let finish = if message.get("tool_calls").is_some() {
+        "tool_calls"
+    } else {
+        "stop"
+    };
+    json!({"id": "c", "object": "chat.completion", "model": request["model"],
+           "choices": [{"index": 0, "message": message, "finish_reason": finish}],
+           "usage": {"prompt_tokens": 100, "completion_tokens": 20,
+                     "prompt_tokens_details": {"cached_tokens": 40}}})
 }
 
 fn usage() -> Value {
@@ -453,5 +533,146 @@ fn run_outputs_may_not_go_into_the_pass_root_and_flags_are_checked() {
     assert!(with("--base-url", "elsewhere=http://x").is_err());
     assert!(with("--colour", "red").is_err());
     assert!(parse(&["smoke".to_owned()]).is_err());
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn both_arms_on_chat_completions_pay_the_same_for_a_cached_prompt() {
+    let (url, seen) = stub_with(|path, body, _| {
+        assert!(path.ends_with("/chat/completions"), "{path}");
+        chat_reply(body).to_string()
+    });
+    let dir = scratch("chat");
+    let mut args = files(&dir, &["smoke"], &url);
+    let price = json!({"input": 1_000_000, "output": 2_000_000, "cached_input": 100_000});
+    let config = json!({
+        "version": 1, "runs": 1, "harnesses": ["old", "new"], "total_cap_usd": 10,
+        "slots": [
+            {"slot": "strong", "model": "gpt-test", "native_tools": true, "cap_usd": 5,
+             "price": price.clone()},
+            {"slot": "cheap", "model": "gemini-test", "native_tools": false, "cap_usd": 5,
+             "price": price}
+        ]
+    });
+    std::fs::write(dir.join("run.json"), config.to_string()).unwrap();
+    let mut briefs = [
+        brief("plain-02", LAW, None),
+        brief("adv-03", SAAS, Some("malformed_steps")),
+    ];
+    for b in &mut briefs {
+        b.allowed_models = vec!["strong".into(), "cheap".into()];
+    }
+    std::fs::write(dir.join("briefs.jsonl"), write_brief_set(&briefs).unwrap()).unwrap();
+    for provider in ["openai", "gemini"] {
+        args.extend(["--base-url".to_owned(), format!("{provider}={url}")]);
+    }
+    args.push("--live".to_owned());
+    let keys = |name: &str| {
+        ["VYASA_AI_OPENAI_KEY", "VYASA_AI_GEMINI_KEY"]
+            .contains(&name)
+            .then(|| "test-key".to_owned())
+    };
+    let mut out = Vec::new();
+    execute(&parse(&args).unwrap(), &keys, &mut out).unwrap();
+    let out = String::from_utf8(out).unwrap();
+    // An override URL for OpenAI changes the limit field the old arm and the
+    // new send, so the caller says so.
+    assert!(out.contains("warning: --base-url openai="), "{out}");
+
+    for slot in ["strong", "cheap"] {
+        for (arm, calls) in [("old", 3), ("new", 4)] {
+            for id in ["plain-02", "adv-03"] {
+                let path = dir.join(format!(
+                    "root/smoke/2026-01-01/measure/{arm}.{slot}/{id}/0.json"
+                ));
+                let record: Value = serde_json::from_str(
+                    &std::fs::read_to_string(&path)
+                        .unwrap_or_else(|e| panic!("{}: {e}", path.display())),
+                )
+                .unwrap();
+                assert_eq!(record["accepted"], true, "{arm}.{slot} {record}");
+                assert_eq!(record["steps"], calls, "{arm}.{slot} {record}");
+                assert_eq!(record["valid_ops"], 1, "{record}");
+                assert_eq!(
+                    record["usage"]["cached_input_tokens"],
+                    40 * calls,
+                    "{arm}.{slot} {record}"
+                );
+                assert_eq!(
+                    record["usage"]["input_tokens"],
+                    60 * calls,
+                    "{arm}.{slot} {record}"
+                );
+            }
+        }
+    }
+    // The injected step is not sent: the provider saw the same calls for the
+    // faulty brief as for the plain one.
+    assert_eq!(seen.lock().unwrap().len(), 2 * 2 * (3 + 4));
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn the_old_arm_on_a_model_without_forced_tool_use_counts_the_repair_call() {
+    let (url, seen) = stub_with(|_, body, n| {
+        let mut answer = reply(body, &usage());
+        if n == 0 {
+            // Allowed to choose, the model answers in text.
+            answer["content"] = json!([{"type": "text", "text": "Sure."}]);
+            answer["stop_reason"] = json!("end_turn");
+        }
+        answer.to_string()
+    });
+    let dir = scratch("auto");
+    let mut old = arm(Harness::Vyasa, &url, &dir);
+    old.target.model = "claude-sonnet-5-5".into();
+    let out = old
+        .run(&brief("plain-02", LAW, None), "claude-sonnet-5-5", 0)
+        .unwrap();
+    assert_eq!(out.steps, 4);
+    assert_eq!(out.usage.input_tokens, 400);
+    assert_eq!(out.valid_ops, 1);
+    for body in seen.lock().unwrap().iter() {
+        let body: Value = serde_json::from_str(body).unwrap();
+        assert_eq!(body["tool_choice"]["type"], "auto", "{body}");
+    }
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[test]
+fn a_200_that_cannot_be_read_fails_the_run_instead_of_losing_its_cost() {
+    for harness in [Harness::Vyasa, Harness::Sarathi] {
+        let (url, _) = stub_with(|_, body, n| {
+            if n == 0 {
+                "{\"id\": \"msg\", \"cont".to_owned()
+            } else {
+                reply(body, &usage()).to_string()
+            }
+        });
+        let dir = scratch(&format!("unreadable-{harness:?}"));
+        let why = arm(harness, &url, &dir)
+            .run(&brief("plain-02", LAW, None), "claude-test", 0)
+            .unwrap_err();
+        assert!(
+            why.message.contains("could not be read"),
+            "{harness:?}: {}",
+            why.message
+        );
+        assert!(why.partial.artifact.is_empty());
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_link_into_the_pass_root_is_refused() {
+    let dir = scratch("link");
+    std::fs::create_dir_all(dir.join("root/inner")).unwrap();
+    std::os::unix::fs::symlink(dir.join("root/inner"), dir.join("elsewhere")).unwrap();
+    let mut args = files(&dir, &["smoke"], "http://127.0.0.1:1/v1");
+    let at = args.iter().position(|a| a == "--artifacts").unwrap();
+    args[at + 1] = dir.join("elsewhere/outputs").display().to_string();
+    let why = parse(&args).unwrap_err();
+    assert!(why.contains("outside --root"), "{why}");
     let _ = std::fs::remove_dir_all(dir);
 }

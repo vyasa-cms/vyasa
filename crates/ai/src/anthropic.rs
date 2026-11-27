@@ -1,4 +1,4 @@
-//! Anthropic Messages API client (tool-use forced JSON mode).
+//! Anthropic Messages API client (JSON through one tool call).
 
 use std::time::Duration;
 
@@ -11,6 +11,29 @@ use super::provider::{Completion, LlmProvider, PromptSpec, ProviderError, Usage}
 
 /// Default request timeout.
 pub const DEFAULT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// Models that answer 400 to a `tool_choice` of `any` or a named tool.
+const NO_FORCED_TOOL_USE: &[&str] = &[
+    "claude-fable-5-1",
+    "claude-fable-5-2",
+    "claude-mythos-5-1",
+    "claude-mythos-5-2",
+    "claude-opus-5-5",
+    "claude-sonnet-5-5",
+];
+
+/// What such a model is told instead.
+const CALL_THE_TOOL: &str = "\n\nAnswer by calling the `emit_result` tool exactly once, with \
+                             your result as its input. Do not answer in text.";
+
+/// Whether `model` (an id, dated or not) refuses a forced tool call.
+fn refuses_forced_tool_use(model: &str) -> bool {
+    NO_FORCED_TOOL_USE.iter().any(|m| {
+        model
+            .strip_prefix(m)
+            .is_some_and(|rest| rest.is_empty() || rest.starts_with(['-', '@']))
+    })
+}
 
 /// Anthropic client bound to one API key.
 pub struct AnthropicProvider {
@@ -108,11 +131,8 @@ impl AnthropicProvider {
         Ok(payload["data"].as_array().cloned().unwrap_or_default())
     }
 
-    /// Issues one messages call and extracts text + usage.
-    ///
-    /// # Errors
-    /// [`ProviderError`] variants for transport/status problems.
-    pub async fn complete(&self, spec: &PromptSpec) -> Result<Completion, ProviderError> {
+    /// The request body of one messages call.
+    fn messages_body(&self, spec: &PromptSpec) -> Value {
         // A vision request carries its images as content blocks before the
         // text; a plain request keeps the simpler string form.
         let user_content: Value = if spec.attachments.is_empty() {
@@ -129,10 +149,22 @@ impl AnthropicProvider {
             blocks.push(json!({"type": "text", "text": spec.user}));
             Value::Array(blocks)
         };
+        // The reply should be the one tool call. Where the model cannot be
+        // made to call it, it is asked to; a text answer is then read like
+        // any other provider's. The tool is not `strict`: callers' schemas
+        // leave objects open (an agent step's `input`), which strict
+        // schemas may not.
+        let mut system = spec.system.clone();
+        let tool_choice = if refuses_forced_tool_use(&spec.model) {
+            system.push_str(CALL_THE_TOOL);
+            json!({"type": "auto", "disable_parallel_tool_use": true})
+        } else {
+            json!({"type": "tool", "name": "emit_result"})
+        };
         let mut body = json!({
             "model": spec.model,
             "max_tokens": self.max_tokens.unwrap_or(4096),
-            "system": spec.system,
+            "system": system,
             "messages": [{ "role": "user", "content": user_content }],
             "tools": [{
                 "name": "emit_result",
@@ -140,11 +172,20 @@ impl AnthropicProvider {
                     "Emit the final structured result conforming to the requested schema",
                 "input_schema": spec.output_schema,
             }],
-            "tool_choice": { "type": "tool", "name": "emit_result" },
+            "tool_choice": tool_choice,
         });
         if let Some(t) = self.temperature {
             body["temperature"] = json!(t);
         }
+        body
+    }
+
+    /// Issues one messages call and extracts text + usage.
+    ///
+    /// # Errors
+    /// [`ProviderError`] variants for transport/status problems.
+    pub async fn complete(&self, spec: &PromptSpec) -> Result<Completion, ProviderError> {
+        let body = self.messages_body(spec);
 
         let response = self
             .client
@@ -185,8 +226,8 @@ impl AnthropicProvider {
             })
             .unwrap_or_default();
 
-        // When tool_choice forces the tool, arguments arrive as a
-        // tool_use block's input; prefer it over plain text.
+        // The tool call's arguments arrive as a tool_use block's input;
+        // prefer it over plain text.
         let tool_input = payload["content"]
             .as_array()
             .and_then(|blocks| {
@@ -213,6 +254,7 @@ impl AnthropicProvider {
                     .as_u64()
                     .and_then(|v| u32::try_from(v).ok())
                     .unwrap_or_else(missing_usage),
+                cached_tokens: 0,
             },
             provider: None,
             model: None,
@@ -267,4 +309,66 @@ impl AnthropicProvider {
 fn missing_usage() -> u32 {
     tracing::warn!("provider reply carried no usage; recording zero tokens");
     0
+}
+
+#[cfg(test)]
+mod tool_choice_tests {
+    #![allow(clippy::unwrap_used)]
+    use super::AnthropicProvider;
+    use crate::provider::PromptSpec;
+    use serde_json::{json, Value};
+
+    fn body(model: &str) -> Value {
+        AnthropicProvider::new("k")
+            .unwrap()
+            .messages_body(&PromptSpec {
+                model: model.to_owned(),
+                system: "You edit pages.".to_owned(),
+                user: "u".to_owned(),
+                output_schema: json!({"type": "object"}),
+                ..PromptSpec::default()
+            })
+    }
+
+    #[test]
+    fn a_model_that_refuses_forced_tool_use_is_asked_to_call_the_tool() {
+        for model in [
+            "claude-sonnet-5-5",
+            "claude-sonnet-5-5-20261001",
+            "claude-opus-5-5",
+            "claude-fable-5-1",
+            "claude-fable-5-2",
+            "claude-mythos-5-1",
+            "claude-mythos-5-2",
+        ] {
+            let b = body(model);
+            assert_eq!(
+                b["tool_choice"],
+                json!({"type": "auto", "disable_parallel_tool_use": true}),
+                "{model}"
+            );
+            let system = b["system"].as_str().unwrap();
+            assert!(system.starts_with("You edit pages."), "{system}");
+            assert!(system.contains("`emit_result`"), "{system}");
+        }
+    }
+
+    #[test]
+    fn other_models_are_still_made_to_call_it() {
+        for model in [
+            "claude-sonnet-5",
+            "claude-opus-5",
+            "claude-fable-5",
+            "claude-haiku-5-5",
+            "claude-sonnet-4-5",
+        ] {
+            let b = body(model);
+            assert_eq!(
+                b["tool_choice"],
+                json!({"type": "tool", "name": "emit_result"}),
+                "{model}"
+            );
+            assert_eq!(b["system"], "You edit pages.", "{model}");
+        }
+    }
 }

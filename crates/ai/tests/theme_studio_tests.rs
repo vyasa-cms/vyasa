@@ -45,6 +45,7 @@ impl LlmProvider for Scripted {
             usage: Usage {
                 prompt_tokens: 10,
                 completion_tokens: 10,
+                ..Default::default()
             },
             provider: None,
             model: None,

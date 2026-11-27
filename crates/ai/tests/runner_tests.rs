@@ -39,6 +39,8 @@ fn spec() -> PromptSpec {
 struct RecordingSink {
     successes: std::sync::Arc<Mutex<Vec<(String, u32, u32)>>>,
     failures: std::sync::Arc<Mutex<Vec<String>>>,
+    /// `(written, read)` per `log_cache`.
+    cached: std::sync::Arc<Mutex<Vec<(u32, u32)>>>,
 }
 
 impl AiUsageSink for RecordingSink {
@@ -55,6 +57,10 @@ impl AiUsageSink for RecordingSink {
             prompt_tokens,
             completion_tokens,
         ));
+    }
+
+    fn log_cache(&self, _: &str, _: &str, _: &str, written: u32, read: u32) {
+        self.cached.lock().unwrap().push((written, read));
     }
 
     fn log_failure(&self, provider: &str, model: &str, _purpose: &str, error: &str) {
@@ -109,6 +115,7 @@ async fn happy_path_validates_and_logs() {
         usage: Usage {
             prompt_tokens: 100,
             completion_tokens: 20,
+            cached_tokens: 0,
         },
     };
     let result: ThemeResult = run_structured(&provider, &sink, &spec())
@@ -131,6 +138,7 @@ async fn invalid_json_retries_then_succeeds() {
         usage: Usage {
             prompt_tokens: 50,
             completion_tokens: 10,
+            cached_tokens: 0,
         },
     };
     let result: ThemeResult = run_structured(&provider, &sink, &spec())
@@ -143,6 +151,23 @@ async fn invalid_json_retries_then_succeeds() {
         "first attempt audited as failure"
     );
     assert_eq!(sink.successes.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn cached_prompt_tokens_are_logged_for_every_billed_attempt() {
+    let sink = RecordingSink::default();
+    let provider = ScriptedProvider {
+        responses: Mutex::new(vec![Ok(String::from("not json at all")), Ok(good_json())]),
+        usage: Usage {
+            prompt_tokens: 50,
+            completion_tokens: 10,
+            cached_tokens: 30,
+        },
+    };
+    let _: ThemeResult = run_structured(&provider, &sink, &spec())
+        .await
+        .expect("second attempt wins");
+    assert_eq!(*sink.cached.lock().unwrap(), [(0, 30), (0, 30)]);
 }
 
 #[tokio::test]

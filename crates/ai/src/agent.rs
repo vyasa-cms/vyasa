@@ -381,6 +381,7 @@ pub(crate) mod tests {
                         usage: crate::provider::Usage {
                             prompt_tokens: 1,
                             completion_tokens: 1,
+                            ..Default::default()
                         },
                         provider: None,
                         model: None,
