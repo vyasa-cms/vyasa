@@ -323,32 +323,32 @@ mod tests {
 
     const B: &str = "https://x.test";
 
-    fn out(m: serde_json::Value) -> bool {
-        kept_out_of_sitemap(&m, B, "/a")
+    fn out(m: &serde_json::Value) -> bool {
+        kept_out_of_sitemap(m, B, "/a")
     }
 
     #[test]
     fn noindex_and_canonical_elsewhere_stay_out_of_the_sitemap() {
-        assert!(out(json!({"seo_noindex": true})));
-        assert!(out(json!({"seo_canonical_path": "/docs/a"})));
-        assert!(out(json!({"seo_canonical": "https://x.test/other"})));
+        assert!(out(&json!({"seo_noindex": true})));
+        assert!(out(&json!({"seo_canonical_path": "/docs/a"})));
+        assert!(out(&json!({"seo_canonical": "https://x.test/other"})));
     }
 
     #[test]
     fn an_ordinary_entry_is_listed() {
-        assert!(!out(json!({})));
-        assert!(!out(json!({"seo_noindex": false})));
-        assert!(!out(json!({"seo_canonical_path": "  "})));
-        assert!(!out(json!({"seo_noindex": "yes"})));
+        assert!(!out(&json!({})));
+        assert!(!out(&json!({"seo_noindex": false})));
+        assert!(!out(&json!({"seo_canonical_path": "  "})));
+        assert!(!out(&json!({"seo_noindex": "yes"})));
     }
 
     #[test]
     fn a_self_canonical_or_one_the_head_ignores_stays_listed() {
-        assert!(!out(json!({"seo_canonical": "https://x.test/a"})));
-        assert!(!out(json!({"seo_canonical": "https://x.test/a/"})));
-        assert!(!out(json!({"seo_canonical_path": "/a"})));
-        assert!(!out(json!({"seo_canonical": "example.com/a"})));
-        assert!(!out(json!({"seo_canonical_path": "docs/a"})));
-        assert!(!out(json!({"seo_canonical_path": "//evil.test/a"})));
+        assert!(!out(&json!({"seo_canonical": "https://x.test/a"})));
+        assert!(!out(&json!({"seo_canonical": "https://x.test/a/"})));
+        assert!(!out(&json!({"seo_canonical_path": "/a"})));
+        assert!(!out(&json!({"seo_canonical": "example.com/a"})));
+        assert!(!out(&json!({"seo_canonical_path": "docs/a"})));
+        assert!(!out(&json!({"seo_canonical_path": "//evil.test/a"})));
     }
 }
