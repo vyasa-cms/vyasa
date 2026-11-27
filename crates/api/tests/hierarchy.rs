@@ -82,6 +82,19 @@ fn create_type(base: &str, cookie: &str, slug: &str, singular: &str, plural: &st
     assert_eq!(status, 201, "create type {slug}: {body}");
 }
 
+/// Asks `get` until `done` holds or 10 s pass, and returns the last answer. The search index is filled from the
+/// event bus, so a write shows up in search a moment after it returns; a fixed sleep was too short under CI load.
+fn eventually<T>(done: impl Fn(&T) -> bool, mut get: impl FnMut() -> T) -> T {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let got = get();
+        if done(&got) || std::time::Instant::now() >= deadline {
+            return got;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
+
 #[tokio::test]
 async fn an_administrator_can_make_a_type_hierarchical_and_back() {
     let db = TestDb::new().await;
@@ -632,8 +645,6 @@ async fn search_is_scoped_by_type_and_term_on_rest_graphql_and_the_public_page()
     mk("post", "A post about zebra", &news);
     mk("guide", "Guide zebra news", &news);
     mk("guide", "Guide zebra reference", &ref_);
-    std::thread::sleep(std::time::Duration::from_millis(800)); // the indexer runs on the event bus
-
     let titles = |v: &Value| -> Vec<String> {
         let mut t: Vec<String> = v["hits"]
             .as_array()
@@ -644,7 +655,11 @@ async fn search_is_scoped_by_type_and_term_on_rest_graphql_and_the_public_page()
         t.sort();
         t
     };
-    let (_, all) = call("GET", base, &a, "/api/v1/search?q=zebra", None);
+    // The indexer runs on the event bus: wait for all three.
+    let all = eventually(
+        |v: &Value| titles(v).len() == 3,
+        || call("GET", base, &a, "/api/v1/search?q=zebra", None).1,
+    );
     assert_eq!(titles(&all).len(), 3, "{all}");
     let (_, only_guides) = call("GET", base, &a, "/api/v1/search?q=zebra&type=guide", None);
     assert_eq!(
@@ -722,7 +737,6 @@ async fn a_term_change_reaches_the_index() {
     );
     assert_eq!(status, 201, "{created}");
     let id = sid(&created["id"]);
-    std::thread::sleep(std::time::Duration::from_millis(800));
     let hits = |term: &str| -> usize {
         let (_, v) = call(
             "GET",
@@ -733,7 +747,8 @@ async fn a_term_change_reaches_the_index() {
         );
         v["hits"].as_array().unwrap().len()
     };
-    assert_eq!((hits("category:news"), hits("category:reference")), (1, 0));
+    let both = || (hits("category:news"), hits("category:reference"));
+    assert_eq!(eventually(|h: &(usize, usize)| *h == (1, 0), both), (1, 0));
     let (status, _) = call(
         "PUT",
         base,
@@ -742,8 +757,7 @@ async fn a_term_change_reaches_the_index() {
         Some(json!({"term_ids": [sid(&reference["id"])]})),
     );
     assert_eq!(status, 200);
-    std::thread::sleep(std::time::Duration::from_millis(800));
-    assert_eq!((hits("category:news"), hits("category:reference")), (0, 1));
+    assert_eq!(eventually(|h: &(usize, usize)| *h == (0, 1), both), (0, 1));
 }
 
 #[tokio::test]
