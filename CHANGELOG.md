@@ -10,6 +10,14 @@ follows [semantic versioning](https://semver.org) as described in
 ### Added
 - Cookieless audience analytics, counted on the server with no cookies, no script and no stored IP address: bots and crawlers on their own line, `X-Vyasa-Internal: 1`, Do Not Track, Global Privacy Control and signed-in sessions not counted; views and unique visitors per day (a visitor is a hash keyed by a secret that lives in memory for one UTC day, and the day's hashes are deleted when the next day starts); a trend per page; referrer, `utm_source`/`utm_medium`/`utm_campaign`, device class and browser family; entry pages, 404s with their referrers, internal search terms, outbound clicks through a `/go/<name>` redirect table, and form and newsletter conversions. The Audience page shows them and manages the redirect table (`GET /api/v1/analytics/links`, `PUT`/`DELETE /api/v1/analytics/links/{name}`). Migration 0057. See [docs/ANALYTICS.md](docs/ANALYTICS.md).
 
+### Changed
+- The declared minimum supported Rust version is 1.97 (was 1.85, which no longer built: the plugin host's wasmtime needs 1.97); the pinned toolchain stays 1.99. CI checks that the workspace builds on 1.97.
+
+### Fixed
+- Docs plugin 0.1.15: a site with a main tree and three sections of about 680 documents each (2,672 in all) never imported one: the importer refused more than 2,000 documents in one sync before any write, every minute, with `pages: 0`. The cap is 5,000 documents now (over the main tree and every section together); each run is still limited by its request and write budgets.
+- Docs plugin 0.1.15: a site made only of sections (Folder empty, no older versions) no longer lists the whole repository root as a main tree beside them, which imported every section's documents a second time.
+- Docs plugin 0.1.15: an import that takes several runs no longer uses up GitHub's 60 calls an hour on a site without a token. Each run asked for every branch and tag head in full, and listed again every folder of more than about 600 documents (its listing, over 64 KiB, was refused by the key-value store). Now each head is fetched once and later runs ask with its etag (a 304 is free), and a listing keeps only its documents, split across values below 64 KiB, so later runs of the same commit list nothing and the import is not stopped part way by `GitHub rate limit or permission problem (403)`.
+
 ## [0.4.5] - 2026-11-26
 
 ### Fixed
