@@ -49,7 +49,7 @@ impl vyasa_ai::AiUsageSink for DbSink<'_> {
         let model = model.to_owned();
         let purpose = purpose.to_owned();
         tokio::spawn(async move {
-            let _ = repo
+            if let Err(e) = repo
                 .record(
                     &provider_name,
                     &model,
@@ -58,7 +58,10 @@ impl vyasa_ai::AiUsageSink for DbSink<'_> {
                     i32::try_from(ct).unwrap_or(i32::MAX),
                     cost,
                 )
-                .await;
+                .await
+            {
+                tracing::error!(purpose, model, error = %e, "AI usage row not recorded");
+            }
         });
     }
 
