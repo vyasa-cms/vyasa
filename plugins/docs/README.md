@@ -38,7 +38,7 @@ the layout editor adds `data-docs-copy` to keep the Copy buttons.
 |---|---|
 | Repository | `https://github.com/owner/name` |
 | Branch | Default `main` |
-| Folder | Default `docs`; leave empty to use the repository root |
+| Folder | Default `docs`; leave empty to use the repository root. With Sections set and no Older versions, an empty Folder means no main tree: only the sections are imported |
 | Token | A fine-grained token with Contents: read, for a private repository or a higher rate limit. Write-only: it is never shown again |
 | Webhook secret | The key shared with the GitHub webhook (below). Write-only |
 | Check every (minutes) | 5 to 1440, default 60. The webhook makes changes appear at once; polling is the safety net |
@@ -165,7 +165,7 @@ line trashes the section's pages on the next sync.
 
 ## Limits
 
-512 KiB per page, 2000 pages, nesting up to 8 levels, 12 versions. Images are
+512 KiB per page, 5000 documents over the main tree and every section together, nesting up to 8 levels, 12 versions. Images are
 shown from public repositories only (their address is the raw file at the
 commit). Footnotes and math are left as literal text.
 

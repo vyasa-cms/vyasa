@@ -27,8 +27,14 @@ pub const FORMAT: &str = "f3";
 pub const MAX_PAGE_BYTES: u64 = 512 * 1024;
 /// Page text kept between the scan and the write of one run.
 const MAX_KEPT_BODIES: usize = 8 * 1024 * 1024;
-/// Most pages one site may import.
-pub const MAX_PAGES: usize = 2000;
+/// Most documents one sync may list, over the main tree and every section
+/// together. 2,000 stopped a site with three sections of 650 pages plus its
+/// main tree (2,672) before any write; each run is limited by its request and
+/// write budgets anyway, so the cap only guards against a wrong folder.
+pub const MAX_PAGES: usize = 5000;
+/// Key prefix of the commit an unfinished sync works on, per ref: its hash
+/// and GitHub's etag for it, one value, so a 304 names the right commit.
+const WORKING_PREFIX: &str = "sync/working/";
 /// Key prefix of the packed scan cache. The broker allows 600 key-value
 /// reads a minute even in an extended task, so a site of a thousand pages
 /// cannot keep one key per page: the cache is a few packs of ~40 KB.
@@ -442,22 +448,42 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
                     cx.cfg.repo.name,
                     github::encode_path(r)
                 );
-                let kept = cx.env.kv_get(&head_key)?;
-                let etag = cx.env.kv_get(&etag_key)?;
-                let use_etag = done && kept.is_some();
+                // A finished sync asks with the etag of the commit it
+                // finished. An unfinished one asks with the etag of the
+                // commit it is working on, kept beside that commit in one
+                // value: without a token GitHub allows 60 API calls an hour,
+                // and a 304 does not count, while asking for every head in
+                // full each minute used them all within half an hour, so a
+                // long import failed with 403 before it could finish.
+                let (kept, etag) = if done {
+                    (cx.env.kv_get(&head_key)?, cx.env.kv_get(&etag_key)?)
+                } else {
+                    match cx.env.kv_get(&format!("{WORKING_PREFIX}{i}"))? {
+                        Some(v) => match v.split_once('\n') {
+                            Some((sha, e)) => (Some(sha.to_owned()), Some(e.to_owned())),
+                            None => (None, None),
+                        },
+                        None => (None, None),
+                    }
+                };
+                let use_etag = kept.is_some() && etag.is_some();
                 let reply = cx.get(
                     &url,
                     "application/vnd.github.sha",
                     if use_etag { etag.as_deref() } else { None },
                 )?;
-                if reply.status == 304 {
+                if reply.status == 304 && use_etag {
                     kept.unwrap_or_default()
                 } else {
                     all_unchanged = false;
+                    let sha = reply.body.trim().to_owned();
                     if let Some(e) = &reply.etag {
                         let _ = cx.env.kv_set(&format!("{etag_key}-next"), e);
+                        let _ = cx
+                            .env
+                            .kv_set(&format!("{WORKING_PREFIX}{i}"), &format!("{sha}\n{e}"));
                     }
-                    reply.body.trim().to_owned()
+                    sha
                 }
             }
         };
@@ -466,7 +492,9 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
         }
         heads.push(sha);
     }
-    if all_unchanged {
+    // Unchanged heads mean nothing to do only once the sync of them finished;
+    // an unfinished one carries on with them.
+    if all_unchanged && done {
         cx.report.up_to_date = true;
         return Ok(());
     }
@@ -494,13 +522,16 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
     };
 
     // 2. Files of every tree.
-    let mut trees: Vec<TreeSpec> = vec![TreeSpec {
-        label: cx.cfg.latest_version.clone(),
-        folder: cx.cfg.folder.clone(),
-        tag: "main".to_owned(),
-        git_ref: cx.cfg.branch.clone(),
-        commit: commit.clone(),
-    }];
+    let mut trees: Vec<TreeSpec> = Vec::new();
+    if lists_main_tree(cx.cfg) {
+        trees.push(TreeSpec {
+            label: cx.cfg.latest_version.clone(),
+            folder: cx.cfg.folder.clone(),
+            tag: "main".to_owned(),
+            git_ref: cx.cfg.branch.clone(),
+            commit: commit.clone(),
+        });
+    }
     for (label, folder) in &cx.cfg.versions {
         let git_ref = cx
             .cfg
@@ -742,6 +773,11 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
             cx.env.kv_set(&key, &next)?;
         }
     }
+    // The working commits of the unfinished sync: a finished one asks with
+    // `sync/commit-etag`, and the next unfinished one starts afresh.
+    for k in cx.env.kv_list(WORKING_PREFIX)? {
+        cx.env.kv_delete(&k);
+    }
     // Listings of commits no longer in use.
     for k in cx.env.kv_list(TREE_PREFIX)? {
         if !heads
@@ -779,6 +815,14 @@ struct SrcFile {
 
 fn file_key(f: &SrcFile) -> String {
     format!("{}:{}", f.tree.tag, f.path)
+}
+
+/// Whether the sync lists the main tree (Folder on Branch). A site made only
+/// of sections leaves Folder empty: the main tree would then be the whole
+/// repository root, listing every section's pages a second time. Older
+/// versions belong to the main tree, so with any configured it is listed.
+fn lists_main_tree(cfg: &Config) -> bool {
+    !(cfg.folder.is_empty() && !cfg.sections.is_empty() && cfg.versions.is_empty())
 }
 
 fn join_repo_path(folder: &[String], path: &str) -> String {
@@ -1126,8 +1170,7 @@ fn list_folder<E: Env>(
     // A listing is fixed by its commit, so a round cut short by the budget
     // reuses it: an anonymous run has 60 GitHub API calls an hour, and
     // listing again on every round used them all before any page was made.
-    let key = format!("{TREE_PREFIX}{commit}/{}", folder.join("/"));
-    if let Some(t) = cx.env.kv_get(&key)?.and_then(|v| parse_cached_tree(&v)) {
+    if let Some(t) = cached_tree(cx.env, commit, folder)? {
         return Ok(t);
     }
     let mut tree_ref = commit.to_owned();
@@ -1147,34 +1190,103 @@ fn list_folder<E: Env>(
     if t.truncated {
         return Err(Stop::Fail("the folder is too large for GitHub to list in one answer; point the importer at a smaller folder".to_owned()));
     }
-    // Best effort: a full quota only costs the next round its requests.
-    let rows: Vec<(&str, bool, &str, u64)> = t
-        .entries
-        .iter()
-        .map(|e| (e.path.as_str(), e.is_dir, e.sha.as_str(), e.size))
-        .collect();
-    let json = serde_json::json!({"sha": t.sha, "entries": rows}).to_string();
-    let _ = cx.env.kv_set(&key, &json);
+    cache_tree(cx.env, commit, folder, &t);
     Ok(t)
 }
 
-fn parse_cached_tree(v: &str) -> Option<github::Tree> {
+/// The key of part `part` of a cached listing. The part comes before the
+/// folder so that no folder name can make one listing's key another's.
+fn tree_key(commit: &str, folder: &[String], part: usize) -> String {
+    format!("{TREE_PREFIX}{commit}/{part:03}/{}", folder.join("/"))
+}
+
+/// Keeps the files the sync reads (path and blob sha of each document) in
+/// parts below the key-value store's 64 KiB, like the scan packs. Directories,
+/// images and sizes are left out: a folder of 700 pages listed in full is
+/// about 66 KB, which the store refused, so it was listed again every run.
+/// Best effort: a full quota only costs the next round its requests.
+fn cache_tree<E: Env>(env: &mut E, commit: &str, folder: &[String], t: &github::Tree) {
+    let rows: Vec<String> = github::doc_files(t, MAX_PAGE_BYTES)
+        .into_iter()
+        .map(|e| serde_json::json!([e.path, e.sha]).to_string())
+        .collect();
+    let mut parts: Vec<Vec<&str>> = vec![Vec::new()];
+    // Room for {"sha":...,"parts":NNN,"files":[]}.
+    let overhead = t.sha.len() + 64;
+    let mut size = overhead;
+    for r in &rows {
+        if size + r.len() + 1 > PACK_MAX_BYTES && !parts.last().is_some_and(Vec::is_empty) {
+            parts.push(Vec::new());
+            size = overhead;
+        }
+        size += r.len() + 1;
+        if let Some(p) = parts.last_mut() {
+            p.push(r);
+        }
+    }
+    // Part 0 says how many parts there are; it is written last, so a listing
+    // whose writes stopped part way is never read as complete.
+    for (i, p) in parts.iter().enumerate().rev() {
+        let json = format!(
+            "{{\"sha\":{},\"parts\":{},\"files\":[{}]}}",
+            serde_json::Value::from(t.sha.as_str()),
+            parts.len(),
+            p.join(",")
+        );
+        if env.kv_set(&tree_key(commit, folder, i), &json).is_err() {
+            return;
+        }
+    }
+}
+
+/// A listing kept by [`cache_tree`], or `None` when any part is missing or
+/// unreadable (it is then listed again). A refused read stops the run.
+fn cached_tree<E: Env>(
+    env: &mut E,
+    commit: &str,
+    folder: &[String],
+) -> Result<Option<github::Tree>, String> {
+    let Some(first) = env.kv_get(&tree_key(commit, folder, 0))? else {
+        return Ok(None);
+    };
+    let Some((sha, parts, mut entries)) = parse_tree_part(&first) else {
+        return Ok(None);
+    };
+    for i in 1..parts {
+        let Some(v) = env.kv_get(&tree_key(commit, folder, i))? else {
+            return Ok(None);
+        };
+        match parse_tree_part(&v) {
+            Some((s, n, more)) if s == sha && n == parts => entries.extend(more),
+            _ => return Ok(None),
+        }
+    }
+    Ok(Some(github::Tree {
+        sha,
+        truncated: false,
+        entries,
+    }))
+}
+
+/// One part of a cached listing: the tree sha, the number of parts and its
+/// files (documents only, so no directory and a size that passes the cap).
+fn parse_tree_part(v: &str) -> Option<(String, usize, Vec<github::TreeEntry>)> {
     let c: serde_json::Value = serde_json::from_str(v).ok()?;
     let mut entries = Vec::new();
-    for row in c.get("entries")?.as_array()? {
+    for row in c.get("files")?.as_array()? {
         let r = row.as_array()?;
         entries.push(github::TreeEntry {
             path: r.first()?.as_str()?.to_owned(),
-            is_dir: r.get(1)?.as_bool()?,
-            sha: r.get(2)?.as_str()?.to_owned(),
-            size: r.get(3)?.as_u64()?,
+            is_dir: false,
+            sha: r.get(1)?.as_str()?.to_owned(),
+            size: 0,
         });
     }
-    Some(github::Tree {
-        sha: c.get("sha")?.as_str()?.to_owned(),
-        truncated: false,
-        entries,
-    })
+    let parts = usize::try_from(c.get("parts")?.as_u64()?).ok()?;
+    if parts == 0 {
+        return None;
+    }
+    Some((c.get("sha")?.as_str()?.to_owned(), parts, entries))
 }
 
 /// The field values of an entry. Empty text is left out: the host reads
@@ -1686,6 +1798,10 @@ mod tests {
             Ok(v)
         }
         fn kv_set(&mut self, key: &str, value: &str) -> Result<(), String> {
+            // As the host does (`KV_MAX_VALUE`).
+            if value.len() > 64 * 1024 {
+                return Err(format!("value exceeds {} bytes", 64 * 1024));
+            }
             {
                 let f = self.0.borrow();
                 if f.refuse_writes_from.as_deref() == Some(key) {
@@ -2122,6 +2238,60 @@ mod tests {
         assert_eq!(api(&f), listed, "the second round listed again");
     }
 
+    /// A site of sections only, with Folder empty: before, the main tree was
+    /// the repository root and every section's pages were listed twice.
+    #[test]
+    fn a_sections_only_site_with_an_empty_folder_lists_each_tree_once() {
+        let mut files = Files::new();
+        files.insert("README.md".into(), "# Repo readme\n".into());
+        for i in 0..5 {
+            files.insert(format!("docs/page{i}.md"), format!("# Page {i}\n"));
+        }
+        let sections = vec![crate::settings::SectionDef {
+            slug: "engine".into(),
+            title: "Engine".into(),
+            folder: vec!["docs".into()],
+            git_ref: None,
+        }];
+        let pages = |f: &RefCell<Fake>| -> (usize, usize) {
+            let fk = f.borrow();
+            let md = fk.entries.keys().filter(|k| k.ends_with(".md"));
+            let (sec, other): (Vec<_>, Vec<_>) = md.partition(|k| k.starts_with("s:"));
+            (sec.len(), other.len())
+        };
+        let big = |f: &RefCell<Fake>| Budget {
+            deadline_ms: f.borrow().now + 60_000,
+            max_requests: 5000,
+            max_writes: 5000,
+        };
+
+        let f = fake_with(files.clone());
+        let mut c = cfg();
+        c.folder = Vec::new();
+        c.sections = sections.clone();
+        let b = big(&f);
+        assert!(run(&mut Wrap(&f), &c, None, b).unwrap().finished);
+        assert_eq!(pages(&f), (5, 0), "only the section's pages, once");
+
+        // With an older version configured the main tree stays: its versions belong to it.
+        let f = fake_with(files.clone());
+        c.versions = vec![("v1".into(), vec!["docs".into()])];
+        let b = big(&f);
+        assert!(run(&mut Wrap(&f), &c, None, b).unwrap().finished);
+        assert!(
+            pages(&f).1 > 0,
+            "the main tree is listed beside its versions"
+        );
+
+        // Without sections an empty Folder is still the repository root.
+        let f = fake_with(files);
+        let mut c = cfg();
+        c.folder = Vec::new();
+        let b = big(&f);
+        assert!(run(&mut Wrap(&f), &c, None, b).unwrap().finished);
+        assert_eq!(pages(&f), (0, 6), "the repository root is the main tree");
+    }
+
     /// The broker allows 600 key-value reads a minute, extended task or not.
     /// A site with two sections of about 620 pages each (one folder each)
     /// must sync inside that, on the first run, on a run that
@@ -2202,11 +2372,17 @@ mod tests {
     /// A large docs site: three versions of about 200
     /// pages each, two read from release tags, one from the branch.
     fn three_versions() -> (RefCell<Fake>, Config) {
+        three_versions_of(200)
+    }
+
+    /// Three sections (two tags and the main branch) of `pages` pages each,
+    /// beside the main tree of the same `pages`.
+    fn three_versions_of(pages: usize) -> (RefCell<Fake>, Config) {
         const SHA_02: &str = "0202020202020202020202020202020202020202";
         const SHA_03: &str = "0303030303030303030303030303030303030303";
         let version = |v: &str| -> Files {
             let mut files = Files::new();
-            for i in 0..200 {
+            for i in 0..pages {
                 files.insert(
                     format!("docs/area{}/page{i}.md", i % 12),
                     format!("---\ntitle: Page {i}\n---\n# Page {i} ({v})\n\nBody {i} of {v}.\n"),
@@ -2283,6 +2459,157 @@ mod tests {
             .filter(|k| k.starts_with("s:") && k.ends_with(".md"))
             .count();
         assert_eq!(pages, 600, "every page of every version is imported");
+    }
+
+    /// A main tree and three sections of about 700 pages each (2,800
+    /// documents) was refused before any write at 2,000.
+    #[test]
+    fn four_trees_of_seven_hundred_pages_are_listed_and_imported() {
+        let (f, c) = three_versions_of(700);
+        let mut runs = 0;
+        let mut created = 0;
+        loop {
+            runs += 1;
+            assert!(runs <= 40, "the sync did not finish in 40 scheduled runs");
+            let b = task_budget(&f);
+            let r = run(&mut Wrap(&f), &c, None, b).expect("2,800 documents are under the cap");
+            assert!(!r.throttled, "run {runs} was throttled: {r:?}");
+            created += r.created;
+            f.borrow_mut().now += 60_000;
+            if r.finished {
+                break;
+            }
+        }
+        let fk = f.borrow();
+        let pages = fk
+            .entries
+            .keys()
+            .filter(|k| k.starts_with("s:") && k.ends_with(".md"))
+            .count();
+        assert_eq!(pages, 2100, "every page of every version is imported");
+        assert!(created > 0, "the sync writes pages");
+    }
+
+    #[test]
+    fn more_documents_than_the_cap_are_refused_with_the_count() {
+        let (f, c) = three_versions_of(MAX_PAGES / 4 + 1);
+        let b = task_budget(&f);
+        let e = run(&mut Wrap(&f), &c, None, b).unwrap_err();
+        assert!(
+            e.contains("documents found") && e.contains(&MAX_PAGES.to_string()),
+            "{e}"
+        );
+    }
+
+    /// The listing of a folder of a thousand pages is more than the
+    /// key-value store keeps in one value (64 KiB). Kept whole, it was
+    /// refused, so every run listed the folder again: two GitHub calls a
+    /// tree a run, which ran an anonymous site out of its 60 calls an hour.
+    /// Now only the documents are kept, in parts, and a later run of the
+    /// same commit lists nothing.
+    #[test]
+    fn a_thousand_page_listing_is_kept_and_not_listed_again() {
+        let mut files = Files::new();
+        for i in 0..1000 {
+            files.insert(
+                format!("docs/reference/area{}/a-longer-page-name-{i:04}.md", i % 12),
+                format!("---\ntitle: Page {i}\n---\n# Page {i}\n\nBody {i}.\n"),
+            );
+        }
+        for a in 0..12 {
+            files.insert(
+                format!("docs/reference/area{a}/images/diagram.png"),
+                "png".into(),
+            );
+        }
+        let f = fake_with(files);
+        f.borrow_mut().read_quota = Some(600);
+        let c = cfg();
+        let tree_calls = |f: &RefCell<Fake>| {
+            f.borrow()
+                .requests
+                .iter()
+                .filter(|u| u.contains("/git/trees/"))
+                .count()
+        };
+        let mut runs = 0;
+        let mut first = 0;
+        loop {
+            runs += 1;
+            assert!(runs <= 20, "the sync did not finish in 20 scheduled runs");
+            let b = task_budget(&f);
+            let r = run(&mut Wrap(&f), &c, None, b).unwrap();
+            assert!(!r.throttled, "run {runs} was throttled: {r:?}");
+            if runs == 1 {
+                first = tree_calls(&f);
+            }
+            f.borrow_mut().now += 60_000;
+            if r.finished {
+                break;
+            }
+        }
+        assert!(runs > 1, "the import takes several runs");
+        assert!(first > 0, "the first run lists the folder");
+        assert_eq!(
+            tree_calls(&f),
+            first,
+            "later runs of the same commit read the kept listing"
+        );
+        let fk = f.borrow();
+        let kv = fk.kv.borrow();
+        let parts: Vec<&String> = kv.keys().filter(|k| k.starts_with(TREE_PREFIX)).collect();
+        assert!(parts.len() > 1, "the listing is kept in parts: {parts:?}");
+        let pages = fk
+            .entries
+            .keys()
+            .filter(|k| k.starts_with("main:") && k.ends_with(".md"))
+            .count();
+        assert_eq!(pages, 1000, "every page is imported");
+    }
+
+    /// Without a token GitHub allows 60 API calls an hour and a 304 is free.
+    /// An unfinished sync asked for every head in full each minute, used the
+    /// hour's calls within half an hour and then failed every run with 403.
+    /// Now each head is fetched in full once; later runs ask with its etag.
+    #[test]
+    fn an_unfinished_sync_asks_for_its_heads_with_their_etags() {
+        let (f, c) = three_versions();
+        let mut runs = 0;
+        loop {
+            runs += 1;
+            assert!(runs <= 12, "the sync did not finish in 12 scheduled runs");
+            let b = task_budget(&f);
+            let r = run(&mut Wrap(&f), &c, None, b).unwrap();
+            f.borrow_mut().now += 60_000;
+            if r.finished {
+                assert!(
+                    !r.up_to_date,
+                    "an unchanged head does not end an unfinished sync"
+                );
+                break;
+            }
+        }
+        assert!(runs > 1, "the import takes several runs");
+        let fk = f.borrow();
+        let commit_asks: Vec<&Option<String>> = fk
+            .requests
+            .iter()
+            .zip(&fk.etag_seen)
+            .filter(|(u, _)| u.contains("/commits/"))
+            .map(|(_, e)| e)
+            .collect();
+        assert_eq!(commit_asks.len(), 3 * runs, "three refs a run");
+        assert_eq!(
+            commit_asks.iter().filter(|e| e.is_none()).count(),
+            3,
+            "each head is fetched in full once"
+        );
+        let pages = fk
+            .entries
+            .keys()
+            .filter(|k| k.starts_with("s:") && k.ends_with(".md"))
+            .count();
+        assert_eq!(pages, 600);
     }
 
     /// Page renders spend most of the plugin's read budget. A run that the
