@@ -22,6 +22,16 @@ async fn base_url(state: &AppState, headers: &HeaderMap) -> String {
 use vyasa_db::content_models::PostStatus;
 use vyasa_db::repo::PostFilter;
 
+/// An entry that asks search engines to skip it (`seo_noindex`), or whose
+/// head names another address as its canonical (an older docs version), is
+/// not listed: the sitemap names the pages worth indexing, and a crawler sent
+/// to a page that points elsewhere wastes the visit. A canonical equal to the
+/// entry's own address, or one the head ignores, leaves it listed.
+fn kept_out_of_sitemap(meta: &serde_json::Value, base: &str, own_path: &str) -> bool {
+    let noindex = meta.get("seo_noindex").and_then(serde_json::Value::as_bool) == Some(true);
+    noindex || crate::public::page_meta::canonical_is_elsewhere(meta, base, own_path)
+}
+
 /// `GET /sitemap.xml` — published posts and pages.
 pub async fn sitemap(State(state): State<AppState>, headers: HeaderMap) -> Response {
     let pattern = crate::permalinks::pattern(&state).await;
@@ -88,7 +98,8 @@ pub async fn sitemap(State(state): State<AppState>, headers: HeaderMap) -> Respo
     for p in &rows {
         // A protected entry is `noindex` when fetched, so listing it only
         // sends a crawler to a page that then refuses to be indexed.
-        if p.password_hash.is_some() {
+        let path = pattern.path_for(p);
+        if p.password_hash.is_some() || kept_out_of_sitemap(&p.meta, &base, &path) {
             continue;
         }
         // The one permalink rule, not a second copy of it. The copy here
@@ -96,7 +107,6 @@ pub async fn sitemap(State(state): State<AppState>, headers: HeaderMap) -> Respo
         // published at /book/{slug} — was advertised at /post/{slug}, and
         // every custom-type URL a crawler was handed was a 404. The feeds
         // had the same bug and the same fix.
-        let path = pattern.path_for(p);
         xml.push_str("<url><loc>");
         xml.push_str(&esc(&format!("{base}{path}")));
         // Without a `lastmod` a crawler has no way to tell an edited page
@@ -304,4 +314,41 @@ fn esc(t: &str) -> String {
 
 fn internal() -> Response {
     (StatusCode::INTERNAL_SERVER_ERROR, "internal error").into_response()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::kept_out_of_sitemap;
+    use serde_json::json;
+
+    const B: &str = "https://x.test";
+
+    fn out(m: &serde_json::Value) -> bool {
+        kept_out_of_sitemap(m, B, "/a")
+    }
+
+    #[test]
+    fn noindex_and_canonical_elsewhere_stay_out_of_the_sitemap() {
+        assert!(out(&json!({"seo_noindex": true})));
+        assert!(out(&json!({"seo_canonical_path": "/docs/a"})));
+        assert!(out(&json!({"seo_canonical": "https://x.test/other"})));
+    }
+
+    #[test]
+    fn an_ordinary_entry_is_listed() {
+        assert!(!out(&json!({})));
+        assert!(!out(&json!({"seo_noindex": false})));
+        assert!(!out(&json!({"seo_canonical_path": "  "})));
+        assert!(!out(&json!({"seo_noindex": "yes"})));
+    }
+
+    #[test]
+    fn a_self_canonical_or_one_the_head_ignores_stays_listed() {
+        assert!(!out(&json!({"seo_canonical": "https://x.test/a"})));
+        assert!(!out(&json!({"seo_canonical": "https://x.test/a/"})));
+        assert!(!out(&json!({"seo_canonical_path": "/a"})));
+        assert!(!out(&json!({"seo_canonical": "example.com/a"})));
+        assert!(!out(&json!({"seo_canonical_path": "docs/a"})));
+        assert!(!out(&json!({"seo_canonical_path": "//evil.test/a"})));
+    }
 }
