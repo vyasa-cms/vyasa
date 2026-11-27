@@ -148,7 +148,7 @@ async fn the_shared_fetch_and_byte_quotas_apply() {
         c.fetch_with(req("https://api.github.com/c"))
             .await
             .unwrap_err(),
-        "capability-denied"
+        "quota-exceeded"
     );
     let quotas = Quotas {
         bytes_per_min: 10,
@@ -165,7 +165,7 @@ async fn the_shared_fetch_and_byte_quotas_apply() {
         c.fetch_with(req("https://api.github.com/a"))
             .await
             .unwrap_err(),
-        "byte quota exceeded"
+        "quota-exceeded"
     );
 }
 

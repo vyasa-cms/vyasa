@@ -222,7 +222,8 @@ pub struct HostCtx {
     pub ai_window: AiWindow,
     /// When the host will stop this call, for `call-budget-ms`.
     pub call_deadline: Option<std::time::Instant>,
-    /// The call's budget: an extended task's reads have their own quota.
+    /// The call's budget: an extended task counts every quota (reads,
+    /// writes, fetches, fetched bytes, model calls) on its own budget.
     pub budget: TaskBudget,
 }
 
@@ -260,13 +261,6 @@ impl HostEnv {
         }
     }
 
-    /// The same environment under the extended budget.
-    #[must_use]
-    pub fn extended(mut self) -> Self {
-        self.budget = TaskBudget::Extended;
-        self
-    }
-
     /// The same environment, serving `viewer`.
     #[must_use]
     pub fn for_viewer(mut self, viewer: Option<Viewer>) -> Self {
@@ -283,8 +277,14 @@ impl HostCtx {
             broker: &self.broker,
             pool: &self.dest,
             plugin_id: self.plugin_id,
-            task: self.budget == TaskBudget::Extended,
+            task: self.extended_budget(),
         }
+    }
+
+    /// Whether this call spends the extended-task quotas (its own counters)
+    /// rather than the ordinary ones.
+    fn extended_budget(&self) -> bool {
+        self.budget == TaskBudget::Extended
     }
 }
 
@@ -455,8 +455,16 @@ impl host::Host for HostCtx {
         if !url.starts_with("https://") {
             return Err(String::from("only https:// URLs may be fetched"));
         }
-        if self.broker.check_fetch(self.plugin_id, &url).await != crate::broker::Decision::Allowed {
-            return Err(String::from("capability-denied"));
+        match self
+            .broker
+            .fetch_gate(self.plugin_id, &url, self.extended_budget())
+            .await
+        {
+            crate::broker::Gate::Allowed => {}
+            crate::broker::Gate::NotGranted => return Err(String::from("capability-denied")),
+            crate::broker::Gate::OverQuota => {
+                return Err(String::from(crate::hostdata::QUOTA_EXCEEDED));
+            }
         }
         let Some(fetch) = self.fetch.clone() else {
             return Err(String::from(
@@ -468,10 +476,10 @@ impl host::Host for HostCtx {
         // gets the body it already paid for and is refused next time.
         if !self
             .broker
-            .record_bytes(self.plugin_id, body.len() as u64)
+            .record_bytes(self.plugin_id, body.len() as u64, self.extended_budget())
             .await
         {
-            return Err(String::from("byte quota exceeded"));
+            return Err(String::from(crate::hostdata::QUOTA_EXCEEDED));
         }
         Ok(body)
     }
@@ -573,10 +581,16 @@ impl host::Host for HostCtx {
         if !req.url.starts_with("https://") {
             return Err(String::from("only https:// URLs may be fetched"));
         }
-        if self.broker.check_fetch(self.plugin_id, &req.url).await
-            != crate::broker::Decision::Allowed
+        match self
+            .broker
+            .fetch_gate(self.plugin_id, &req.url, self.extended_budget())
+            .await
         {
-            return Err(String::from("capability-denied"));
+            crate::broker::Gate::Allowed => {}
+            crate::broker::Gate::NotGranted => return Err(String::from("capability-denied")),
+            crate::broker::Gate::OverQuota => {
+                return Err(String::from(crate::hostdata::QUOTA_EXCEEDED));
+            }
         }
         let Some(fetch) = self.fetch.clone() else {
             return Err(String::from(
@@ -586,10 +600,14 @@ impl host::Host for HostCtx {
         let reply = fetch.get_with(&req.url, req.headers).await?;
         if !self
             .broker
-            .record_bytes(self.plugin_id, reply.body.len() as u64)
+            .record_bytes(
+                self.plugin_id,
+                reply.body.len() as u64,
+                self.extended_budget(),
+            )
             .await
         {
-            return Err(String::from("byte quota exceeded"));
+            return Err(String::from(crate::hostdata::QUOTA_EXCEEDED));
         }
         Ok(host::FetchResponse {
             status: reply.status,
@@ -675,8 +693,16 @@ impl host::Host for HostCtx {
         if system.chars().count() > MAX_AI_SYSTEM_CHARS {
             return Err(String::from("system prompt too long"));
         }
-        if self.broker.check_ai(self.plugin_id).await != crate::broker::Decision::Allowed {
-            return Err(String::from("capability-denied"));
+        match self
+            .broker
+            .ai_gate(self.plugin_id, self.extended_budget())
+            .await
+        {
+            crate::broker::Gate::Allowed => {}
+            crate::broker::Gate::NotGranted => return Err(String::from("capability-denied")),
+            crate::broker::Gate::OverQuota => {
+                return Err(String::from(crate::hostdata::QUOTA_EXCEEDED));
+            }
         }
         let Some(ai) = self.ai.clone() else {
             return Err(String::from("no text model is set up on this site"));
@@ -1649,16 +1675,16 @@ impl WasmtimeHost {
                 .await
                 == crate::broker::Decision::Allowed;
         let extended_env;
-        let (env, _scope) = if granted {
+        let env = if granted {
             extended_env = HostEnv {
                 broker: env.broker.clone(),
                 dest: env.dest.clone(),
                 viewer: env.viewer.clone(),
                 budget: TaskBudget::Extended,
             };
-            (&extended_env, Some(env.broker.extended_scope(plugin_id)))
+            &extended_env
         } else {
-            (env, None)
+            env
         };
         let (bindings, mut store) = match self.begin_call_v2(plugin_id, env).await {
             Ok(Some(pair)) => pair,
