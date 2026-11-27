@@ -334,6 +334,8 @@ async fn a_finish_refused_after_three_refusals_ends_the_run_as_out_of_steps() {
     answers.extend((0..4).map(|i| finish(&format!("Done {i}."))));
     let (out, bodies) = studio_run(answers, 12).await;
     assert!(out.ran_out, "{out:?}");
+    // The last refused claim is not passed on as the answer.
+    assert_eq!(out.reply, harness::sarathi::RAN_OUT_REPLY);
     // The edit, then four finishes: three refusals go back to the model, the
     // fourth ends the run (Sarathi's MAX_COMPLETION_REFUSALS is 3).
     assert_eq!(bodies.len(), 5);

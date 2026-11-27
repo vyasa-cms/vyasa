@@ -263,12 +263,28 @@ pub async fn run_with<C: ModelCaller>(
         ));
     }
     let steps = read_steps(driver.log(), &views);
+    let ran_out = end.outcome == Outcome::RanOut;
+    // A run that stopped on its limits (steps, or a finish the gate kept
+    // refusing) has no answer of its own: the model's last text is a claim
+    // the gate did not accept, so the person is told the run stopped, as
+    // Vyasa's loop does.
+    let reply = if ran_out {
+        RAN_OUT_REPLY.to_owned()
+    } else {
+        end.reply.map(String::from).unwrap_or_default()
+    };
     Ok(AgentOutcome {
-        reply: end.reply.map(String::from).unwrap_or_default(),
+        reply,
         steps,
-        ran_out: end.outcome == Outcome::RanOut,
+        ran_out,
     })
 }
+
+/// The reply of a run that stopped on its limits before a finish was
+/// accepted.
+pub const RAN_OUT_REPLY: &str = "I stopped before finishing cleanly: the run reached its limit \
+     before the result was checked. What is applied so far is what the steps show; ask again to \
+     continue.";
 
 /// The surface's tools behind Sarathi's completion gate, when one of them
 /// supplies evidence (the studio's `look`): the model gets a `plan` tool to
@@ -822,6 +838,7 @@ mod tests {
             .await
             .expect("runs");
         assert!(out.ran_out);
+        assert_eq!(out.reply, RAN_OUT_REPLY);
         assert_eq!(out.steps.len(), 2);
         assert_eq!(page.edits.len(), 2);
     }
