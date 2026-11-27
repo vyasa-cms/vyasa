@@ -445,8 +445,10 @@ async fn bytes_after_an_eviction_keep_the_plugins_override() {
     );
 }
 
+/// End to end: the override still applies after gate calls and evictions. The race itself (grants cached
+/// without a name) is checked on several threads by `broker::name_cache_tests`.
 #[tokio::test]
-async fn bytes_keep_the_override_after_gates_race_evictions() {
+async fn bytes_keep_the_override_through_gates_and_evictions() {
     let db = TestDb::new().await;
     let pool = db.pool().clone();
     let repo = vyasa_db::repo::PluginsRepo::new(pool.clone());
