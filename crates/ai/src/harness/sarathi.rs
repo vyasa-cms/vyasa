@@ -16,14 +16,21 @@
 //! - observations are cut at the length Vyasa's loop cuts them, so the
 //!   switch does not quietly change what a run costs.
 //!
+//! On a surface with a `look` tool (Theme Studio) the run is behind
+//! Sarathi's completion gate: the model states its criteria with a `plan`
+//! tool, and a finish without a render taken after the last edit is sent
+//! back to the model (the run ends as ran out after Sarathi's limit).
+//!
 //! The session lives in memory for the one request, as Vyasa's loop does:
 //! nothing persists until a person accepts the proposal.
 
 use std::collections::HashMap;
 use std::ops::Range;
+use std::sync::Arc;
 
 use sarathi_core::driver::{DenyAsks, Driver, DriverConfig, DriverError, ModelCaller};
-use sarathi_core::toolbox::ToolboxTools;
+use sarathi_core::gate::EvidenceKinds;
+use sarathi_core::toolbox::{SharedGate, ToolboxTools, PLAN_TOOL};
 use sarathi_core::{Limits, ModelProfile};
 use sarathi_log::{Body, Log, MemoryStore};
 use sarathi_protocol::{BlockKind, Event, Op, Outcome, RawJson, ResponseView};
@@ -182,10 +189,14 @@ pub async fn run_with<C: ModelCaller>(
         Policy::new(Mode::Bypass),
         Hooks::new(),
     );
+    let (tools, gate) = gated(tools, spec.purpose)?;
     let defs = tools.defs().map_err(|e| external(&e.to_string()))?;
     let steps = u32::try_from(spec.max_steps.clamp(1, MAX_STEPS_CEILING)).unwrap_or(1);
-    let config = DriverConfig::new(ModelProfile::native(), defs, spec.system)
+    let mut config = DriverConfig::new(ModelProfile::native(), defs, spec.system)
         .with_limits(Limits::with_max_steps(steps));
+    if let Some(gate) = gate {
+        config = config.with_completion(Arc::new(gate));
+    }
     let (mut driver, _handle) = Driver::new(config, MemoryStore::new(), caller, tools, DenyAsks)
         .await
         .map_err(|e| driver_error(&e))?;
@@ -257,6 +268,41 @@ pub async fn run_with<C: ModelCaller>(
         steps,
         ran_out: end.outcome == Outcome::RanOut,
     })
+}
+
+/// The surface's tools behind Sarathi's completion gate, when one of them
+/// supplies evidence (the studio's `look`): the model gets a `plan` tool to
+/// state what must hold, and a finish is accepted only with evidence for
+/// every criterion gathered after the last edit. A finish refused more
+/// than Sarathi's limit ends the run as ran out, as a run out of steps does.
+///
+/// A surface with no evidence tool runs without a gate (nothing could
+/// satisfy it); one that has its own `plan` tool does too, with a warning,
+/// since the gate's tool would shadow it.
+fn gated<T: sarathi_tools::Toolbox>(
+    tools: ToolboxTools<T>,
+    purpose: &str,
+) -> Result<(ToolboxTools<T>, Option<SharedGate>), AppError> {
+    let kinds: Vec<String> = tools
+        .specs()
+        .iter()
+        .filter_map(|s| s.evidence.clone())
+        .collect();
+    if kinds.is_empty() {
+        return Ok((tools, None));
+    }
+    if tools.specs().iter().any(|s| s.name == PLAN_TOOL) {
+        tracing::warn!(
+            purpose,
+            "a surface tool is named `{PLAN_TOOL}`; the Sarathi run has no completion gate"
+        );
+        return Ok((tools, None));
+    }
+    // The name was checked above, so `with_gate` does not refuse here.
+    let (tools, gate) = tools
+        .with_gate(EvidenceKinds::new(kinds))
+        .map_err(|e| external(&e.to_string()))?;
+    Ok((tools, Some(gate)))
 }
 
 /// The first user message: the task, then the attachments as image blocks
@@ -556,16 +602,39 @@ mod tests {
     }
 
     /// Edits count, `look` renders, `long` answers past the observation cap,
-    /// anything else fails as an observation.
+    /// anything else fails as an observation. `look` is offered only on a
+    /// [`Page::studio`], which puts the run behind the completion gate.
     #[derive(Default)]
     struct Page {
         edits: Vec<Value>,
+        look: bool,
     }
+
+    impl Page {
+        fn studio() -> Self {
+            Self {
+                look: true,
+                ..Self::default()
+            }
+        }
+    }
+
+    /// A `plan` call stating one criterion a `look` shows.
+    fn plan(id: &str) -> (&str, &'static str, Value) {
+        (
+            id,
+            PLAN_TOOL,
+            json!({"criteria": [{"id": "red", "text": "The title is red.", "kind": LOOK}]}),
+        )
+    }
+
+    const LOOK: &str = super::super::LOOK_EVIDENCE;
 
     impl Toolbox for Page {
         fn tools(&self) -> Vec<ToolDef> {
             ["edit", "look", "long"]
                 .into_iter()
+                .filter(|name| self.look || *name != "look")
                 .map(|name| ToolDef {
                     name,
                     description: "d",
@@ -627,7 +696,7 @@ mod tests {
                 &[
                     answer(
                         Some("Edit, then check."),
-                        &[("c1", "edit", json!({"title": "red"}))],
+                        &[plan("c0"), ("c1", "edit", json!({"title": "red"}))],
                     ),
                     answer(None, &[("c2", "look", json!({}))]),
                     answer(None, &[("c3", "frobnicate", json!({}))]),
@@ -635,7 +704,7 @@ mod tests {
                 ],
             );
             let sink = Recorder::default();
-            let mut page = Page::default();
+            let mut page = Page::studio();
             let out = go(&model, &sink, &spec(12, Vec::new()), &mut page)
                 .await
                 .expect("runs");
@@ -650,19 +719,21 @@ mod tests {
             assert_eq!(
                 steps,
                 vec![
+                    ("Edit, then check.", PLAN_TOOL, &plan("c0").2),
                     ("Edit, then check.", "edit", &json!({"title": "red"})),
                     ("", "look", &json!({})),
                     ("", "frobnicate", &json!({})),
                 ],
                 "{wire:?}"
             );
-            assert_eq!(out.steps[0].observation, "edited");
-            assert_eq!(out.steps[1].observation, "rendered");
+            assert!(out.steps[0].observation.starts_with("Plan taken"));
+            assert_eq!(out.steps[1].observation, "edited");
+            assert_eq!(out.steps[2].observation, "rendered");
             // A tool the surface does not offer is refused before it runs.
             assert!(
-                out.steps[2].observation.contains("frobnicate"),
+                out.steps[3].observation.contains("frobnicate"),
                 "{wire:?}: {}",
-                out.steps[2].observation
+                out.steps[3].observation
             );
             let rows = sink.rows.lock().unwrap().clone();
             assert_eq!(rows.len(), 4, "{wire:?}");
@@ -681,6 +752,62 @@ mod tests {
             }
             assert!(sink.failures.lock().unwrap().is_empty());
         }
+    }
+
+    #[tokio::test]
+    async fn a_studio_finish_needs_a_plan_and_a_look_after_the_last_edit() {
+        let model = Scripted::new(
+            Wire::Anthropic,
+            &[
+                anthropic(None, &[("c1", "edit", json!({"title": "red"}))]),
+                // Refused: no plan yet.
+                anthropic(Some("Done."), &[]),
+                anthropic(None, &[plan("c2"), ("c3", "look", json!({}))]),
+                anthropic(Some("Checked, done."), &[]),
+            ],
+        );
+        let sink = Recorder::default();
+        let mut page = Page::studio();
+        let out = go(&model, &sink, &spec(12, Vec::new()), &mut page)
+            .await
+            .expect("runs");
+        assert_eq!(out.reply, "Checked, done.");
+        assert!(!out.ran_out);
+        let tools: Vec<_> = out.steps.iter().map(|s| s.tool.as_str()).collect();
+        assert_eq!(tools, ["edit", PLAN_TOOL, "look"]);
+        let bodies = model.bodies.lock().unwrap().clone();
+        assert_eq!(bodies.len(), 4);
+        // The gate's tool is offered from the first call; the refusal reaches
+        // the model as a message before the third.
+        assert!(bodies[0].contains(r#""name":"plan""#), "{}", bodies[0]);
+        let refusal = "Completion refused: state a plan first";
+        assert!(!bodies[1].contains(refusal));
+        assert!(bodies[2].contains(refusal), "{}", bodies[2]);
+        assert_eq!(sink.rows.lock().unwrap().len(), 4);
+    }
+
+    #[tokio::test]
+    async fn a_surface_without_look_runs_ungated() {
+        let model = Scripted::new(
+            Wire::Anthropic,
+            &[
+                anthropic(None, &[("c1", "edit", json!({}))]),
+                anthropic(Some("Done."), &[]),
+            ],
+        );
+        let mut page = Page::default();
+        let out = go(
+            &model,
+            &Recorder::default(),
+            &spec(12, Vec::new()),
+            &mut page,
+        )
+        .await
+        .expect("runs");
+        assert_eq!(out.reply, "Done.");
+        assert!(!out.ran_out);
+        let first = model.bodies.lock().unwrap()[0].clone();
+        assert!(!first.contains(r#""name":"plan""#), "{first}");
     }
 
     #[tokio::test]

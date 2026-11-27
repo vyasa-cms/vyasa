@@ -4129,7 +4129,7 @@ dependencies = [
 [[package]]
 name = "sarathi-context"
 version = "0.0.0"
-source = "git+https://github.com/KrishivAI/sarathi?rev=33eba76d7370bc2e3952603598047123116eba5b#33eba76d7370bc2e3952603598047123116eba5b"
+source = "git+https://github.com/KrishivAI/sarathi?rev=3f16f77846a8e0f51bfdfe5ca149127fcc458353#3f16f77846a8e0f51bfdfe5ca149127fcc458353"
 dependencies = [
  "sarathi-log",
  "sarathi-protocol",
@@ -4143,7 +4143,7 @@ dependencies = [
 [[package]]
 name = "sarathi-core"
 version = "0.0.0"
-source = "git+https://github.com/KrishivAI/sarathi?rev=33eba76d7370bc2e3952603598047123116eba5b#33eba76d7370bc2e3952603598047123116eba5b"
+source = "git+https://github.com/KrishivAI/sarathi?rev=3f16f77846a8e0f51bfdfe5ca149127fcc458353#3f16f77846a8e0f51bfdfe5ca149127fcc458353"
 dependencies = [
  "bytes",
  "sarathi-context",
@@ -4160,7 +4160,7 @@ dependencies = [
 [[package]]
 name = "sarathi-log"
 version = "0.0.0"
-source = "git+https://github.com/KrishivAI/sarathi?rev=33eba76d7370bc2e3952603598047123116eba5b#33eba76d7370bc2e3952603598047123116eba5b"
+source = "git+https://github.com/KrishivAI/sarathi?rev=3f16f77846a8e0f51bfdfe5ca149127fcc458353#3f16f77846a8e0f51bfdfe5ca149127fcc458353"
 dependencies = [
  "sarathi-protocol",
  "serde",
@@ -4174,7 +4174,7 @@ dependencies = [
 [[package]]
 name = "sarathi-protocol"
 version = "0.0.0"
-source = "git+https://github.com/KrishivAI/sarathi?rev=33eba76d7370bc2e3952603598047123116eba5b#33eba76d7370bc2e3952603598047123116eba5b"
+source = "git+https://github.com/KrishivAI/sarathi?rev=3f16f77846a8e0f51bfdfe5ca149127fcc458353#3f16f77846a8e0f51bfdfe5ca149127fcc458353"
 dependencies = [
  "serde",
  "serde_json",
@@ -4184,7 +4184,7 @@ dependencies = [
 [[package]]
 name = "sarathi-provider"
 version = "0.0.0"
-source = "git+https://github.com/KrishivAI/sarathi?rev=33eba76d7370bc2e3952603598047123116eba5b#33eba76d7370bc2e3952603598047123116eba5b"
+source = "git+https://github.com/KrishivAI/sarathi?rev=3f16f77846a8e0f51bfdfe5ca149127fcc458353#3f16f77846a8e0f51bfdfe5ca149127fcc458353"
 dependencies = [
  "async-stream",
  "bytes",
@@ -4200,7 +4200,7 @@ dependencies = [
 [[package]]
 name = "sarathi-tools"
 version = "0.0.0"
-source = "git+https://github.com/KrishivAI/sarathi?rev=33eba76d7370bc2e3952603598047123116eba5b#33eba76d7370bc2e3952603598047123116eba5b"
+source = "git+https://github.com/KrishivAI/sarathi?rev=3f16f77846a8e0f51bfdfe5ca149127fcc458353#3f16f77846a8e0f51bfdfe5ca149127fcc458353"
 dependencies = [
  "sarathi-protocol",
  "serde_json",
