@@ -444,3 +444,44 @@ async fn bytes_after_an_eviction_keep_the_plugins_override() {
         "the override's 100 bytes apply, not the default limit"
     );
 }
+
+#[tokio::test]
+async fn bytes_keep_the_override_after_gates_race_evictions() {
+    let db = TestDb::new().await;
+    let pool = db.pool().clone();
+    let repo = vyasa_db::repo::PluginsRepo::new(pool.clone());
+    let id = plugin(
+        &repo,
+        "sync",
+        serde_json::json!(["net:fetch:api.github.com"]),
+    )
+    .await;
+    let overrides = parse_plugin_quotas("sync:bytes=100,fetches=1000").unwrap();
+    let broker = std::sync::Arc::new(Broker::new(repo, pool).with_overrides(overrides));
+    inside_one_minute().await;
+    let mut tasks = Vec::new();
+    for i in 0..64 {
+        let b = broker.clone();
+        tasks.push(tokio::spawn(async move {
+            if i % 2 == 0 {
+                let _ = b.fetch_gate(id, "https://api.github.com/x", false).await;
+            } else {
+                b.evict(id).await;
+            }
+        }));
+    }
+    for t in tasks {
+        t.await.unwrap();
+    }
+    // Whatever order the gates and evictions ran in, cached grants come with
+    // the plugin's name, so the override's byte limit applies.
+    let _ = broker
+        .fetch_gate(id, "https://api.github.com/x", false)
+        .await;
+    assert!(broker.has_cached_grants(id).await);
+    assert!(broker.record_bytes(id, 100, false).await);
+    assert!(
+        !broker.record_bytes(id, 1, false).await,
+        "the override's 100 bytes apply, not the default limit"
+    );
+}

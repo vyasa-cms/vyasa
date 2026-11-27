@@ -7,6 +7,9 @@ follows [semantic versioning](https://semver.org) as described in
 
 ## [Unreleased]
 
+### Fixed
+- Plugin quotas: a plugin enabled, disabled or reinstalled at the same moment as one of its calls could keep its grants cached without its name, so its `VYASA_PLUGIN_QUOTAS` override stopped applying until the next change or a restart. The name and the grants are now cached and dropped together.
+
 ### Changed
 - The declared minimum supported Rust version is 1.97 (was 1.85, which no longer built: the plugin host's wasmtime needs 1.97); the pinned toolchain stays 1.99. CI checks that the workspace builds on 1.97.
 

@@ -246,7 +246,9 @@ impl Broker {
         }
         let known = self.names.lock().is_ok_and(|m| m.contains_key(&plugin_id));
         if !known {
-            let _ = self.granted_for(plugin_id).await;
+            if let Err(e) = self.granted_for(plugin_id).await {
+                tracing::debug!(plugin_id, "plugin quota overrides not applied: {e}");
+            }
         }
     }
 
@@ -271,10 +273,15 @@ impl Broker {
             .find(|p| p.id == plugin_id)
             .ok_or_else(|| AppError::not_found("plugin", plugin_id))?;
         let caps = Capability::parse_list(&row.capabilities).unwrap_or_default();
+        // The name and the grants change under one grants guard, here and in
+        // `evict`, so cached grants always come with a cached name: an evict
+        // between two separate inserts left grants without a name, and
+        // overrides stopped matching until the next eviction.
+        let mut grants = self.grants.write().await;
         if let Ok(mut names) = self.names.lock() {
             names.insert(plugin_id, row.name.clone());
         }
-        self.grants.write().await.insert(plugin_id, caps.clone());
+        grants.insert(plugin_id, caps.clone());
         Ok(caps)
     }
 
@@ -486,10 +493,11 @@ impl Broker {
     /// plugin with a different capability list kept enforcing the old one
     /// until the next restart.
     pub async fn evict(&self, plugin_id: i64) {
+        let mut grants = self.grants.write().await;
         if let Ok(mut names) = self.names.lock() {
             names.remove(&plugin_id);
         }
-        self.grants.write().await.remove(&plugin_id);
+        grants.remove(&plugin_id);
     }
 
     /// Whether the plugin's capability set is cached.
