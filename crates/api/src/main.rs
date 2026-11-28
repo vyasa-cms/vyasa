@@ -1503,7 +1503,8 @@ fn app_router(state: &AppState) -> axum::Router {
         .nest("/api/v1", rest::router())
         .nest("/api", graphql_router)
         .merge(swagger)
-        .layer(axum::middleware::from_fn(
+        .layer(axum::middleware::from_fn_with_state(
+            middleware::headers::csp_value(state.config.csp_cloudflare_web_analytics),
             middleware::headers::security_headers,
         ))
         .layer(axum::middleware::from_fn(middleware::csrf::csrf_check))

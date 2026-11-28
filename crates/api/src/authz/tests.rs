@@ -75,6 +75,7 @@ fn dummy_config(dir: &Path) -> VyasaConfig {
         storage: None,
         trusted_proxies: Vec::new(),
         trust_cf_connecting_ip: false,
+        csp_cloudflare_web_analytics: false,
         social_card_cache_bytes: vyasa_common::config::DEFAULT_SOCIAL_CARD_CACHE_BYTES,
         demo: vyasa_common::config::DemoConfig::default(),
     }

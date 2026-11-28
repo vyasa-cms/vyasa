@@ -319,6 +319,14 @@ Security headers are applied to every response: a CSP with `script-src
 'self'`, `frame-ancestors 'self'`, `X-Content-Type-Options: nosniff` and a
 `Referrer-Policy`.
 
+Sites behind Cloudflare that use Web Analytics' automatic setup can set
+`VYASA_CSP_CLOUDFLARE_WEB_ANALYTICS=true` (default off). That adds
+`https://static.cloudflareinsights.com` to `script-src` and nothing else. The
+edge-injected beacon reports to `/cdn-cgi/rum` on the site's own origin, so no
+`connect-src` entry is needed. The manual snippet (`data-cf-beacon` without a
+`version`) reports to `cloudflareinsights.com`, which `default-src 'self'`
+blocks; it is not supported by this setting.
+
 ## Input and output
 
 - Every JSON body is capped by the body-limit middleware.
