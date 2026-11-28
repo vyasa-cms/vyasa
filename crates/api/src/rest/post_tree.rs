@@ -108,6 +108,7 @@ fn build(post_type: PostType, rows: &[TreeRow], everything: bool) -> TreeRespons
             parent_id: r.parent_id,
             position: r.position,
             slug: r.slug.clone(),
+            path: r.path.clone(),
         })
         .collect();
     let by_id: BTreeMap<i64, &TreeRow> = rows.iter().map(|r| (r.id, r)).collect();
@@ -231,6 +232,7 @@ pub async fn put(
             parent_id: r.parent_id,
             position: r.position,
             slug: r.slug.clone(),
+            path: r.path.clone(),
         })
         .collect();
     let after = hierarchy::apply_moves(&before, &moves).map_err(AppError::validation)?;

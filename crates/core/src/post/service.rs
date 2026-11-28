@@ -277,6 +277,7 @@ impl PostService {
                 parent_id: r.parent_id,
                 position: r.position,
                 slug: r.slug,
+                path: r.path,
             })
             .collect())
     }
@@ -865,6 +866,7 @@ impl PostService {
                 parent_id: current.parent_id,
                 position: current.position,
                 slug: current.slug.clone(),
+                path: current.path.clone(),
             });
         }
         for node in &mut nodes {
@@ -889,9 +891,10 @@ impl PostService {
             hierarchy::check_parent(&nodes, current.id).map_err(AppError::validation)?;
         }
         hierarchy::validate_tree(&nodes).map_err(AppError::validation)?;
-        // Only the position changes (a sync re-puts every entry with its
-        // parent and position): no path moves, so the stored one is kept.
-        // Recomputing it would put an orphan's subtree at the root.
+        // Parent and slug unchanged (a sync re-puts every entry with its
+        // parent and position, or a PUT changes nothing about the tree): no
+        // path moves, so the stored one is kept and the subtree is not
+        // rewritten.
         let slug_changed = new_slug.is_some_and(|s| s != current.slug);
         if !joining && !reparented && !slug_changed {
             if let (Some(path), Some(node)) = (

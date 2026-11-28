@@ -214,6 +214,7 @@ impl QueryRoot {
                 parent_id: r.parent_id,
                 position: r.position,
                 slug: r.slug.clone(),
+                path: r.path.clone(),
             })
             .collect();
         let by_id: std::collections::HashMap<i64, &vyasa_db::repo::TreeRow> =

@@ -29,6 +29,9 @@ pub struct Node {
     pub position: i32,
     /// URL segment.
     pub slug: String,
+    /// The stored path, when the row has one. Only an orphan's is read: see
+    /// [`path_of`].
+    pub path: Option<String>,
 }
 
 /// One requested change.
@@ -76,15 +79,33 @@ pub fn depth_of(nodes: &[Node], id: i64) -> Option<usize> {
     chain(&by_id(nodes), id).map(|c| c.len())
 }
 
-/// Slugs from the root (or the orphan heading the chain) down to `id`,
-/// joined by `/`.
+/// The part of an orphan's stored path above it (`a` for `a/b`): the
+/// address of the parent it lost, which its subtree keeps. `None` for an
+/// entry with a live parent or at the root, a stored path with no parent
+/// part, or an import's throwaway path (`~<id>/<slug>`).
+fn orphan_prefix<'a>(map: &BTreeMap<i64, &Node>, head: &'a Node) -> Option<&'a str> {
+    let parent = head.parent_id?;
+    if map.contains_key(&parent) {
+        return None;
+    }
+    let (prefix, _) = head.path.as_deref()?.rsplit_once('/')?;
+    (!prefix.is_empty() && !prefix.starts_with('~')).then_some(prefix)
+}
+
+/// Slugs from the root down to `id`, joined by `/`.
+///
+/// An orphan's subtree keeps the address of the parent it lost: the chain
+/// ends at the orphan, and the part of the orphan's stored path above it is
+/// put in front. A trashed group `a` leaves its child `b` at `a/b` and a
+/// grandchild `c` at `a/b/c` however they are reordered or renamed, until
+/// the orphan is moved under a live parent.
 #[must_use]
 pub fn path_of(nodes: &[Node], id: i64) -> Option<String> {
-    let mut parts: Vec<&str> = chain(&by_id(nodes), id)?
-        .iter()
-        .map(|n| n.slug.as_str())
-        .collect();
-    parts.reverse();
+    let map = by_id(nodes);
+    let chain = chain(&map, id)?;
+    let prefix = chain.last().and_then(|head| orphan_prefix(&map, head));
+    let mut parts: Vec<&str> = prefix.into_iter().collect();
+    parts.extend(chain.iter().rev().map(|n| n.slug.as_str()));
     Some(parts.join("/"))
 }
 
@@ -96,7 +117,10 @@ pub fn path_of(nodes: &[Node], id: i64) -> Option<String> {
 /// # Errors
 /// A message naming the entry and the missing parent.
 pub fn check_parent(nodes: &[Node], id: i64) -> Result<(), String> {
-    let map = by_id(nodes);
+    check_parent_in(&by_id(nodes), id)
+}
+
+fn check_parent_in(map: &BTreeMap<i64, &Node>, id: i64) -> Result<(), String> {
     match map.get(&id).and_then(|n| n.parent_id) {
         Some(p) if !map.contains_key(&p) => Err(format!(
             "entry {id} has a parent ({p}) that is not in this type"
@@ -211,8 +235,9 @@ pub fn apply_moves(nodes: &[Node], moves: &[Move]) -> Result<Vec<Node>, String> 
         node.parent_id = m.parent_id;
         node.position = m.position;
     }
+    let map = by_id(&out);
     for m in moves {
-        check_parent(&out, m.id)?;
+        check_parent_in(&map, m.id)?;
     }
     validate_tree(&out)?;
     Ok(out)
@@ -241,6 +266,15 @@ mod tests {
             parent_id: parent,
             position: pos,
             slug: slug.to_owned(),
+            path: None,
+        }
+    }
+
+    /// `n` with a stored path.
+    fn at(node: Node, path: &str) -> Node {
+        Node {
+            path: Some(path.to_owned()),
+            ..node
         }
     }
 
@@ -308,6 +342,98 @@ mod tests {
         );
         check_parent(&t, 4).unwrap();
         assert!(check_parent(&t, 9).unwrap_err().contains("(404)"));
+    }
+
+    /// `sample()` plus group `a` (404, trashed: not in the set), its child
+    /// 9 `b` stored at `a/b` and grandchild 10 `c` at `a/b/c`.
+    fn with_orphans() -> Vec<Node> {
+        let mut t = sample();
+        t.push(at(n(9, Some(404), 5, "b"), "a/b"));
+        t.push(at(n(10, Some(9), 5, "c"), "a/b/c"));
+        t
+    }
+
+    #[test]
+    fn an_orphan_subtree_keeps_its_stored_prefix() {
+        let t = with_orphans();
+        assert_eq!(path_of(&t, 9).as_deref(), Some("a/b"));
+        assert_eq!(path_of(&t, 10).as_deref(), Some("a/b/c"));
+        // Every path recomputed from the links (an import's rebuild) is unchanged.
+        for node in &t {
+            let stored = node
+                .path
+                .clone()
+                .unwrap_or_else(|| path_of(&t, node.id).unwrap());
+            assert_eq!(path_of(&t, node.id), Some(stored), "entry {}", node.id);
+        }
+    }
+
+    #[test]
+    fn reordering_inside_an_orphan_subtree_moves_no_url() {
+        let t = with_orphans();
+        let after = apply_moves(
+            &t,
+            &[Move {
+                id: 10,
+                parent_id: Some(9),
+                position: 99,
+            }],
+        )
+        .unwrap();
+        assert_eq!(path_of(&after, 10).as_deref(), Some("a/b/c"));
+        assert!(changed_paths(&t, &after).is_empty());
+    }
+
+    #[test]
+    fn a_slug_edit_in_an_orphan_subtree_keeps_the_prefix() {
+        let mut t = with_orphans();
+        t[5].slug = "d".to_owned(); // entry 10
+        assert_eq!(path_of(&t, 10).as_deref(), Some("a/b/d"));
+        let mut t = with_orphans();
+        t[4].slug = "b2".to_owned(); // entry 9, the orphan itself
+        assert_eq!(path_of(&t, 9).as_deref(), Some("a/b2"));
+        assert_eq!(path_of(&t, 10).as_deref(), Some("a/b2/c"));
+    }
+
+    #[test]
+    fn an_entry_moved_under_an_orphan_joins_its_address() {
+        let t = with_orphans();
+        let after = apply_moves(
+            &t,
+            &[Move {
+                id: 4,
+                parent_id: Some(10),
+                position: 0,
+            }],
+        )
+        .unwrap();
+        assert_eq!(path_of(&after, 4).as_deref(), Some("a/b/c/intro"));
+    }
+
+    #[test]
+    fn re_attaching_an_orphan_computes_from_the_live_root() {
+        let after = apply_moves(
+            &with_orphans(),
+            &[Move {
+                id: 9,
+                parent_id: None,
+                position: 0,
+            }],
+        )
+        .unwrap();
+        assert_eq!(path_of(&after, 9).as_deref(), Some("b"));
+        assert_eq!(path_of(&after, 10).as_deref(), Some("b/c"));
+    }
+
+    #[test]
+    fn an_import_throwaway_path_is_not_a_prefix() {
+        let t = vec![
+            at(n(9, Some(404), 0, "b"), "~17/b"),
+            at(n(10, None, 0, "x"), "x"),
+        ];
+        assert_eq!(path_of(&t, 9).as_deref(), Some("b"));
+        let t = vec![at(n(9, Some(404), 0, "b"), "b")];
+        assert_eq!(path_of(&t, 9).as_deref(), Some("b"));
     }
 
     #[test]

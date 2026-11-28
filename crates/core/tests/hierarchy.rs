@@ -255,3 +255,135 @@ async fn a_type_that_is_not_hierarchical_refuses_to_move() {
         .unwrap_err();
     assert!(matches!(err, AppError::Validation { .. }), "{err:?}");
 }
+
+/// A group `a` with child `b` and grandchild `c`, then `a` trashed: `b`
+/// and `c` are orphans stored at `a/b` and `a/b/c`.
+async fn orphaned(svc: &PostService, ty: PostType) -> (i64, i64, i64) {
+    let a = svc.create(create(ty, "A", None)).await.unwrap();
+    let b = svc.create(create(ty, "B", Some(a.id))).await.unwrap();
+    let c = svc.create(create(ty, "C", Some(b.id))).await.unwrap();
+    svc.trash(a.id).await.unwrap();
+    (a.id, b.id, c.id)
+}
+
+async fn path(svc: &PostService, id: i64) -> String {
+    svc.get(id).await.unwrap().path.unwrap_or_default()
+}
+
+#[tokio::test]
+async fn a_restore_under_a_trashed_parent_is_refused() {
+    let (_db, svc, ty) = setup().await;
+    let (a, b, _c) = orphaned(&svc, ty).await;
+    svc.trash(b).await.unwrap();
+    let err = svc.restore(b).await.unwrap_err();
+    assert!(
+        err.to_string().contains(&format!(
+            "entry {b} has a parent ({a}) that is not in this type"
+        )),
+        "{err}"
+    );
+}
+
+#[tokio::test]
+async fn an_orphan_position_update_keeps_its_stored_path() {
+    let (_db, svc, ty) = setup().await;
+    let (a, b, c) = orphaned(&svc, ty).await;
+    for id in [b, c] {
+        let parent = svc.get(id).await.unwrap().parent_id;
+        svc.update(
+            id,
+            UpdatePost {
+                parent_id: Some(parent),
+                position: Some(77),
+                ..UpdatePost::default()
+            },
+        )
+        .await
+        .unwrap();
+    }
+    assert_eq!(svc.get(b).await.unwrap().parent_id, Some(a));
+    assert_eq!(path(&svc, b).await, "a/b");
+    assert_eq!(path(&svc, c).await, "a/b/c");
+}
+
+#[tokio::test]
+async fn a_write_elsewhere_in_a_type_with_an_orphan_succeeds() {
+    let (_db, svc, ty) = setup().await;
+    orphaned(&svc, ty).await;
+    let other = svc.create(create(ty, "Other", None)).await.unwrap();
+    let out = svc
+        .update(
+            other.id,
+            UpdatePost {
+                slug: Some("elsewhere".into()),
+                ..UpdatePost::default()
+            },
+        )
+        .await
+        .unwrap();
+    assert_eq!(out.path.as_deref(), Some("elsewhere"));
+}
+
+#[tokio::test]
+async fn writes_that_recompute_an_orphan_subtree_keep_its_prefix() {
+    let (_db, svc, ty) = setup().await;
+    let (_a, b, c) = orphaned(&svc, ty).await;
+    let live = svc.create(create(ty, "Live", None)).await.unwrap();
+    // A reorder in the tree view (position only).
+    let outcome = svc
+        .move_entries(
+            ty,
+            &[Move {
+                id: c,
+                parent_id: Some(b),
+                position: 99,
+            }],
+        )
+        .await
+        .unwrap();
+    assert!(
+        outcome.changed_paths.is_empty(),
+        "{:?}",
+        outcome.changed_paths
+    );
+    assert_eq!(path(&svc, c).await, "a/b/c");
+    // A slug edit of the grandchild, then of the orphan itself.
+    let slug = |s: &str| UpdatePost {
+        slug: Some(s.into()),
+        ..UpdatePost::default()
+    };
+    svc.update(c, slug("d")).await.unwrap();
+    assert_eq!(path(&svc, c).await, "a/b/d");
+    svc.update(b, slug("b2")).await.unwrap();
+    assert_eq!(path(&svc, b).await, "a/b2");
+    assert_eq!(path(&svc, c).await, "a/b2/d");
+    // A live entry moved under the orphan joins its address.
+    svc.move_entries(
+        ty,
+        &[Move {
+            id: live.id,
+            parent_id: Some(c),
+            position: 0,
+        }],
+    )
+    .await
+    .unwrap();
+    assert_eq!(path(&svc, live.id).await, "a/b2/d/live");
+    // An import's rebuild rewrites nothing in the orphan subtree.
+    svc.rebuild_paths(ty).await.unwrap();
+    assert_eq!(path(&svc, b).await, "a/b2");
+    assert_eq!(path(&svc, live.id).await, "a/b2/d/live");
+    // Moving the orphan under the live root repairs it.
+    svc.move_entries(
+        ty,
+        &[Move {
+            id: b,
+            parent_id: None,
+            position: 0,
+        }],
+    )
+    .await
+    .unwrap();
+    assert_eq!(path(&svc, b).await, "b2");
+    assert_eq!(path(&svc, live.id).await, "b2/d/live");
+}
