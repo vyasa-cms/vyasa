@@ -188,6 +188,8 @@ impl Guest for Docs {
                 host::kv_set("sync/complete", "0")?;
                 // Pages refused earlier are offered again.
                 host::kv_delete(crate::sync::REFUSED_KEY)?;
+                // Pages in their simpler form are tried once more too.
+                host::kv_set(crate::sync::RETRY_SIMPLER_KEY, "1")?;
                 host::kv_set(status::NOW_SEEN_KEY, "1")?;
             }
             NowAction::Rearm => host::kv_set(status::NOW_SEEN_KEY, "0")?,
