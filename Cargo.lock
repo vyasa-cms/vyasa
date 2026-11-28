@@ -304,6 +304,28 @@ dependencies = [
 ]
 
 [[package]]
+name = "async-stream"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0b5a71a6f37880a80d1d7f19efd781e4b5de42c88f0722cc13bcb6cc2cfe8476"
+dependencies = [
+ "async-stream-impl",
+ "futures-core",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "async-stream-impl"
+version = "0.3.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c7c24de15d275a1ecfd47a380fb4d5ec9bfe0933f309ed5e705b775596a3574d"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "async-trait"
 version = "0.1.92"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3905,12 +3927,14 @@ dependencies = [
  "sync_wrapper",
  "tokio",
  "tokio-rustls",
+ "tokio-util",
  "tower",
  "tower-http",
  "tower-service",
  "url",
  "wasm-bindgen",
  "wasm-bindgen-futures",
+ "wasm-streams",
  "web-sys",
 ]
 
@@ -4100,6 +4124,87 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "93fc1dc3aaa9bfed95e02e6eadabb4baf7e3078b0bd1b4d7b6b0b68378900502"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "sarathi-context"
+version = "0.0.0"
+source = "git+https://github.com/KrishivAI/sarathi?rev=3f16f77846a8e0f51bfdfe5ca149127fcc458353#3f16f77846a8e0f51bfdfe5ca149127fcc458353"
+dependencies = [
+ "sarathi-log",
+ "sarathi-protocol",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
+name = "sarathi-core"
+version = "0.0.0"
+source = "git+https://github.com/KrishivAI/sarathi?rev=3f16f77846a8e0f51bfdfe5ca149127fcc458353#3f16f77846a8e0f51bfdfe5ca149127fcc458353"
+dependencies = [
+ "bytes",
+ "sarathi-context",
+ "sarathi-log",
+ "sarathi-protocol",
+ "sarathi-provider",
+ "sarathi-tools",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
+name = "sarathi-log"
+version = "0.0.0"
+source = "git+https://github.com/KrishivAI/sarathi?rev=3f16f77846a8e0f51bfdfe5ca149127fcc458353#3f16f77846a8e0f51bfdfe5ca149127fcc458353"
+dependencies = [
+ "sarathi-protocol",
+ "serde",
+ "serde_json",
+ "sha2 0.11.1",
+ "thiserror 2.0.21",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "sarathi-protocol"
+version = "0.0.0"
+source = "git+https://github.com/KrishivAI/sarathi?rev=3f16f77846a8e0f51bfdfe5ca149127fcc458353#3f16f77846a8e0f51bfdfe5ca149127fcc458353"
+dependencies = [
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+]
+
+[[package]]
+name = "sarathi-provider"
+version = "0.0.0"
+source = "git+https://github.com/KrishivAI/sarathi?rev=3f16f77846a8e0f51bfdfe5ca149127fcc458353#3f16f77846a8e0f51bfdfe5ca149127fcc458353"
+dependencies = [
+ "async-stream",
+ "bytes",
+ "futures",
+ "reqwest",
+ "sarathi-protocol",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.21",
+ "tokio",
+]
+
+[[package]]
+name = "sarathi-tools"
+version = "0.0.0"
+source = "git+https://github.com/KrishivAI/sarathi?rev=3f16f77846a8e0f51bfdfe5ca149127fcc458353#3f16f77846a8e0f51bfdfe5ca149127fcc458353"
+dependencies = [
+ "sarathi-protocol",
+ "serde_json",
+ "thiserror 2.0.21",
 ]
 
 [[package]]
@@ -5674,10 +5779,15 @@ checksum = "0b928f33d975fc6ad9f86c8f283853ad26bdd5b10b7f1542aa2fa15e2289105a"
 
 [[package]]
 name = "vyasa-ai"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "base64 0.23.1",
  "reqwest",
+ "sarathi-core",
+ "sarathi-log",
+ "sarathi-protocol",
+ "sarathi-provider",
+ "sarathi-tools",
  "schemars",
  "serde",
  "serde_json",
@@ -5690,7 +5800,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-api"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "ammonia",
  "async-graphql",
@@ -5748,7 +5858,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-common"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "config",
  "criterion",
@@ -5761,7 +5871,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-core"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "ab_glyph",
  "argon2",
@@ -5800,7 +5910,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-db"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "chrono",
  "serde",
@@ -5815,7 +5925,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-jobs"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "chrono",
  "lettre",
@@ -5835,7 +5945,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-plugins"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "ammonia",
  "chrono",
@@ -5860,7 +5970,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-search"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "tantivy",
  "tempfile",
@@ -5871,7 +5981,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-testkit"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "ed25519-dalek",
  "hex",
@@ -5888,7 +5998,7 @@ dependencies = [
 
 [[package]]
 name = "vyasa-themes"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "ammonia",
  "chrono",
@@ -6045,6 +6155,19 @@ dependencies = [
  "indexmap",
  "wasm-encoder 0.261.0",
  "wasmparser 0.261.0",
+]
+
+[[package]]
+name = "wasm-streams"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d1ec4f6517c9e11ae630e200b2b65d193279042e28edd4a2cda233e46670bbb"
+dependencies = [
+ "futures-util",
+ "js-sys",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
 ]
 
 [[package]]

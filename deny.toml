@@ -37,3 +37,5 @@ allow-wildcard-paths = true
 [sources]
 unknown-registry = "deny"
 unknown-git = "deny"
+# Sarathi (the agent harness) is used as a git dependency pinned to a commit.
+allow-git = ["https://github.com/KrishivAI/sarathi"]
