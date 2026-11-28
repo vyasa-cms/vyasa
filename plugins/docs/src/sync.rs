@@ -440,8 +440,8 @@ impl Problems {
     }
 
     /// Forgets pages that are no longer in the plan. "More" stays until the
-    /// list is empty: a page left off it may be on the site in its simpler
-    /// form, and is not looked at again.
+    /// list is empty; a page in its simpler form that was left off is listed
+    /// again by a later run once there is room.
     fn retain(&mut self, live: &BTreeSet<&str>) {
         let live: BTreeSet<String> = live.iter().map(|k| listed_key(k)).collect();
         let before = self.map.len();
@@ -514,6 +514,9 @@ impl Refused {
         known
     }
 
+    /// Past [`MAX_REFUSED`] the rest are not remembered and are offered
+    /// again on every run: only a site with more pages than that refused
+    /// outright (not under a parent the site lacks) pays for it.
     fn note(&mut self, digest: &str) {
         if self.now.len() < MAX_REFUSED {
             self.now.insert(digest.to_owned());
@@ -553,6 +556,12 @@ fn is_refusal(e: &str) -> bool {
         || e.starts_with("title must be")
         || e.starts_with("key must be")
         || (e.starts_with("parent ") && e.contains("has not been written"))
+}
+
+/// The source hash an entry's simpler form is written with: a run that finds
+/// it knows the page was refused at this version without reading it again.
+fn simpler_hash(hash: &str) -> String {
+    hex(&Sha256::digest(format!("plain:{hash}").as_bytes()))
 }
 
 /// The page as one block of plain text: its Markdown as written.
@@ -954,6 +963,20 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
                 Source::Page(f) => join_repo_path(&f.tree.folder, &f.path),
                 Source::Generated => key.clone(),
             };
+            let simpler = match pe.source {
+                Source::Page(_) => "imported as plain text",
+                Source::Generated => "imported as a list of its pages",
+            };
+            // On the site in its simpler form at this version: unchanged too,
+            // and listed again if it fell off a full list.
+            let fallback_hash = simpler_hash(&hash);
+            if managed.get(key) == Some(&fallback_hash) {
+                cx.report.unchanged += 1;
+                if !problems.contains(key) {
+                    problems.set(key, &name, simpler, "refused at this version");
+                }
+                continue;
+            }
             // An older version may still be on the site.
             let on_site = managed.contains_key(key);
             let left_out = if on_site {
@@ -1072,14 +1095,15 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
                 problems.set(key, &name, left_out, &refusal);
                 continue;
             };
-            let how = match pe.source {
-                Source::Page(_) => "imported as plain text",
-                Source::Generated => "imported as a list of its pages",
+            // Written with a marked hash, so later runs know it is the
+            // simpler form and list it again when the list has room. Listed,
+            // and saved, before it is written, so a stop right after it
+            // still names the reason.
+            let fallback = Entry {
+                source_hash: fallback_hash,
+                ..fallback
             };
-            // Listed, and saved, before the simpler form is written: from
-            // then on the page is unchanged to later runs, and only this list
-            // names it.
-            problems.set(key, &name, how, &refusal);
+            problems.set(key, &name, simpler, &refusal);
             problems.save(cx.env)?;
             match cx.env.put_entry(&fallback) {
                 Ok(put) => cx.report.count(put),
@@ -2509,6 +2533,53 @@ mod tests {
             ["docs/guides/install.md: imported as plain text \
               (validation failed: blocks[$[0]]: callout refused)"]
         );
+    }
+
+    #[test]
+    fn plain_text_pages_left_off_a_full_list_are_listed_once_there_is_room() {
+        let n = MAX_PROBLEMS + 10;
+        let mut files = Files::new();
+        for i in 0..n {
+            files.insert(
+                format!("docs/p{i:03}.md"),
+                format!("# P{i}\n\n<Callout>x</Callout>\n"),
+            );
+        }
+        let f = fake_with(files.clone());
+        f.borrow_mut().refuse_kinds = vec!["callout"];
+        let finish = |f: &RefCell<Fake>| {
+            for _ in 0..20 {
+                let b = budget(f);
+                let r = run(&mut Wrap(f), &cfg(), None, b).unwrap();
+                if r.finished {
+                    return r;
+                }
+            }
+            panic!("the sync never finishes");
+        };
+        let first = finish(&f);
+        assert!(first.more_problems, "{first:?}");
+        let shown = listed(&first);
+        assert_eq!(shown.len(), MAX_PROBLEMS);
+        // The listed pages are fixed; the others are still plain text.
+        let mut fixed = files;
+        for line in &shown {
+            let path = line.split(':').next().unwrap();
+            fixed.insert(path.to_owned(), "# Fixed\n".into());
+        }
+        {
+            let mut fk = f.borrow_mut();
+            fk.commits.insert(SHA2.into(), fixed);
+            fk.head = SHA2.into();
+        }
+        let after = finish(&f);
+        let rest = listed(&after);
+        assert_eq!(rest.len(), 10, "{after:?}");
+        assert!(!after.more_problems, "{after:?}");
+        for line in &rest {
+            assert!(!shown.contains(line), "{line}");
+            assert!(line.contains("imported as plain text"), "{line}");
+        }
     }
 
     #[test]
