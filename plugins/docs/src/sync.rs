@@ -2710,7 +2710,10 @@ mod tests {
         assert_eq!(listed(&finish_sync(&f)).len(), 5);
         // The host now accepts callouts; without "Sync now" nothing changes.
         f.borrow_mut().refuse_kinds = vec![];
-        f.borrow().kv.borrow_mut().insert("sync/complete".into(), "0".into());
+        f.borrow()
+            .kv
+            .borrow_mut()
+            .insert("sync/complete".into(), "0".into());
         let quiet = finish_sync(&f);
         assert_eq!(listed(&quiet).len(), 5, "{quiet:?}");
         assert_eq!(quiet.created + quiet.updated, 0, "{quiet:?}");
@@ -3141,9 +3144,11 @@ mod tests {
         assert_eq!(pages(&f), (0, 6), "the repository root is the main tree");
     }
 
-    /// The broker allows 600 key-value reads a minute, extended task or not.
-    /// A site with two sections of about 620 pages each (one folder each)
-    /// must sync inside that, on the first run, on a run that
+    /// The broker allows 600 key-value reads a minute on ordinary calls; an
+    /// extended task has its own 3,000 (`Quotas::extended`). The sync is
+    /// held to the smaller budget, so it fits either way: a site with two
+    /// sections of about 620 pages each (one folder each) must sync inside
+    /// it, on the first run, on a run that
     /// changes a page, and on a run that changes none.
     #[test]
     fn a_site_of_over_a_thousand_pages_syncs_within_the_key_value_read_quota() {

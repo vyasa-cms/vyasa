@@ -107,8 +107,10 @@ pub fn default_layouts() -> Value {
     })
 }
 
-/// Renders one section. An unchanged payload means "not mine, or nothing
-/// to show", which the host reads as such.
+/// Renders one section. An unchanged payload means "not mine"; an empty
+/// reply is one of this plugin's sections with nothing to show (no headings
+/// for the contents, no banner on the latest version, a page that is not a
+/// doc), which a host from 0.4.7 renders as nothing instead of a marker.
 #[must_use]
 pub fn render(payload: &str, settings: &Settings) -> String {
     render_with(payload, || settings.clone())
@@ -144,7 +146,7 @@ pub fn render_with(payload: &str, settings: impl FnOnce() -> Settings) -> String
                 crate::blocks::esc(&label)
             )
         } else {
-            payload.to_owned()
+            String::new()
         };
     };
     let html = match kind {
@@ -155,11 +157,7 @@ pub fn render_with(payload: &str, settings: impl FnOnce() -> Settings) -> String
             render_with_settings(kind, &req, &page, &settings)
         }
     };
-    if html.is_empty() {
-        payload.to_owned()
-    } else {
-        html
-    }
+    html
 }
 
 fn render_with_settings(kind: &str, req: &Value, page: &nav::Page, settings: &Settings) -> String {
@@ -258,7 +256,7 @@ mod tests {
     }
 
     #[test]
-    fn rendering_dispatches_and_unchanged_means_not_mine() {
+    fn rendering_dispatches_unchanged_means_not_mine_and_empty_means_nothing_to_show() {
         let s = Settings::default();
         assert!(render(&payload("docs/sidebar", false, true), &s).contains("docs-nav"));
         assert!(render(&payload("docs/pager", false, true), &s).contains("rel=\"prev\""));
@@ -266,6 +264,8 @@ mod tests {
         assert!(
             render(&payload("docs/search", false, true), &s).contains("action=\"/docs/search\"")
         );
+        // Ours with nothing to show (the latest version has no banner): empty, not the payload.
+        assert_eq!(render(&payload("docs/version-banner", false, true), &s), "");
         let foreign = payload("store/grid", false, true);
         assert_eq!(render(&foreign, &s), foreign);
         assert_eq!(render("not json", &s), "not json");
@@ -275,8 +275,7 @@ mod tests {
     fn without_an_entry_the_studio_gets_a_placeholder_and_visitors_nothing() {
         let s = Settings::default();
         assert!(render(&payload("docs/sidebar", true, false), &s).contains("docs-placeholder"));
-        let p = payload("docs/sidebar", false, false);
-        assert_eq!(render(&p, &s), p);
+        assert_eq!(render(&payload("docs/sidebar", false, false), &s), "");
     }
 
     #[test]
