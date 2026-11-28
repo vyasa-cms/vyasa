@@ -132,7 +132,10 @@ Run it.
 A fence with `tree` as its info string becomes a file tree (two spaces per
 level, a trailing `/` marks a folder, ` # note` adds a comment); consecutive
 fences with the same `group="name"` become one code group with a tab each
-(`title="..."` names the tab, else the language is used).
+(`title="..."` names the tab, else the language is used). A fence's language
+is its info string up to the first comma or space, lowercased (```` ```rust,ignore ````
+is Rust); a language made of anything but letters, digits, `-`, `+`, `#` and
+`_` is shown as plain text.
 
 ## Versions
 
@@ -173,6 +176,10 @@ commit). Footnotes and math are left as literal text.
 
 The Plugins page shows the `sync` task's last status and error.
 
+- **Pages the site refused**: the site would not store a page as converted
+  (the reason follows its path). It is imported as plain text, a generated
+  section page without its overview, or left out with its child pages; the
+  rest of the sync goes on. Fix the page and it imports as it is next sync.
 - **404**: the repository, branch or folder is wrong, or the token cannot
   see the repository.
 - **403**: GitHub's rate limit. Add a token (it raises the limit).
