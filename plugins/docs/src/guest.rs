@@ -186,6 +186,8 @@ impl Guest for Docs {
         ) {
             NowAction::Trigger => {
                 host::kv_set("sync/complete", "0")?;
+                // Pages refused earlier are offered again.
+                host::kv_delete(crate::sync::REFUSED_KEY)?;
                 host::kv_set(status::NOW_SEEN_KEY, "1")?;
             }
             NowAction::Rearm => host::kv_set(status::NOW_SEEN_KEY, "0")?,
