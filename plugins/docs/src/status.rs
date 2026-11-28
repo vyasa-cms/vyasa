@@ -27,6 +27,8 @@ pub struct Status {
     pub error: String,
     /// Pages the host refused, as "path: what happened (why)".
     pub problems: Vec<String>,
+    /// More pages were refused than `problems` holds.
+    pub more_problems: bool,
 }
 
 impl Status {
@@ -50,13 +52,14 @@ impl Status {
                         .collect()
                 })
                 .unwrap_or_default(),
+            more_problems: v["more_problems"].as_bool().unwrap_or(false),
         }
     }
 
     /// The stored form.
     #[must_use]
     pub fn to_json(&self) -> String {
-        json!({"at_ms": self.at_ms, "pages": self.pages, "complete": self.complete, "error": self.error, "problems": self.problems})
+        json!({"at_ms": self.at_ms, "pages": self.pages, "complete": self.complete, "error": self.error, "problems": self.problems, "more_problems": self.more_problems})
             .to_string()
     }
 
@@ -74,11 +77,13 @@ impl Status {
                 },
                 complete: r.finished,
                 error: String::new(),
-                // An up-to-date run looked at no page: the last list holds.
-                problems: if r.up_to_date {
-                    prev.problems.clone()
+                // A run that looked at no page (up to date, or stopped
+                // before phase B) keeps the last list.
+                problems: r.problems.clone().unwrap_or_else(|| prev.problems.clone()),
+                more_problems: if r.problems.is_some() {
+                    r.more_problems
                 } else {
-                    r.problems.clone()
+                    prev.more_problems
                 },
             },
             Err(e) => Self {
@@ -87,6 +92,7 @@ impl Status {
                 complete: false,
                 error: e.chars().take(300).collect(),
                 problems: prev.problems.clone(),
+                more_problems: prev.more_problems,
             },
         }
     }
@@ -119,8 +125,9 @@ impl Status {
             let shown = self.problems.iter().take(SHOWN_PROBLEMS);
             let more = self.problems.len().saturating_sub(SHOWN_PROBLEMS);
             line.push_str(&format!(
-                " Pages the site refused: {}: {}{}.",
+                " Pages the site refused: {}{}: {}{}.",
                 self.problems.len(),
+                if self.more_problems { " or more" } else { "" },
                 shown.cloned().collect::<Vec<_>>().join("; "),
                 if more > 0 {
                     format!("; and {more} more")
@@ -243,6 +250,7 @@ mod tests {
             complete: true,
             error: "x".into(),
             problems: vec!["a.md: imported as plain text (why)".into()],
+            more_problems: true,
         };
         assert_eq!(Status::parse(Some(&s.to_json())), s);
         assert_eq!(Status::parse(Some("not json")), Status::default());
@@ -257,6 +265,7 @@ mod tests {
             complete: false,
             error: String::new(),
             problems: Vec::new(),
+            more_problems: false,
         };
         assert_eq!(
             s.line(1_000 + 120_000),
@@ -270,7 +279,7 @@ mod tests {
             .map(|i| format!("p{i}.md: not imported (x)"))
             .collect();
         let r = Report {
-            problems: problems.clone(),
+            problems: Some(problems.clone()),
             ..report(true)
         };
         let s = Status::after(&Status::default(), 9, Ok(&r));
@@ -288,6 +297,22 @@ mod tests {
         // A failed run keeps the list of the last one.
         let failed = Status::after(&s, 10, Err("boom"));
         assert_eq!(failed.problems, problems);
+        // So does a run that stopped before it looked at the pages.
+        let paused = Status::after(&s, 11, Ok(&report(false)));
+        assert_eq!(paused.problems, problems);
+        // A full list says so.
+        let full = Report {
+            problems: Some(problems.clone()),
+            more_problems: true,
+            ..report(true)
+        };
+        let s = Status::after(&Status::default(), 12, Ok(&full));
+        assert!(
+            s.line(12).contains(" Pages the site refused: 7 or more: "),
+            "{}",
+            s.line(12)
+        );
+        assert!(Status::after(&s, 13, Ok(&report(false))).more_problems);
     }
 
     #[test]

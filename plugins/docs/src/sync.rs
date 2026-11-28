@@ -307,9 +307,12 @@ pub struct Report {
     pub warnings: Vec<String>,
     /// Pages the host refused, as "path: what happened (why)": imported in a
     /// simpler form or left out. Kept between runs until the page is written
-    /// as it is or leaves the repository. Empty on an up-to-date run, which
-    /// reads nothing: the last list still holds.
-    pub problems: Vec<String>,
+    /// as it is or leaves the repository. `None` when the run stopped before
+    /// it looked at the pages (an up-to-date run reads nothing): the last
+    /// list still holds.
+    pub problems: Option<Vec<String>>,
+    /// More pages were refused than the list holds.
+    pub more_problems: bool,
 }
 
 impl Report {
@@ -324,64 +327,220 @@ impl Report {
 
 /// Where the pages the host refused are listed between runs.
 pub const PROBLEMS_KEY: &str = "sync/problems";
-/// Most refused pages listed; the store refuses a value of 64 KiB.
+/// Most refused pages listed.
 const MAX_PROBLEMS: usize = 100;
+/// Largest serialized list: well under the store's 64 KiB, so the list and
+/// the status that repeats its texts are always saved.
+const MAX_PROBLEMS_BYTES: usize = 48 * 1024;
+/// Longest entry key the list keeps as it is (the host's own key limit).
+const MAX_LISTED_KEY_BYTES: usize = 512;
+/// Longest path and reason kept in a listed text.
+const MAX_TEXT_PART_BYTES: usize = 300;
+
+/// The first `max` bytes of `s`, cut on a character boundary.
+fn cut_bytes(s: &str, max: usize) -> &str {
+    if s.len() <= max {
+        return s;
+    }
+    let mut end = max;
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
+/// The key a page is listed under: its entry key, or for a key the host
+/// refuses for its length, its start and a hash of the whole.
+fn listed_key(key: &str) -> String {
+    if key.len() <= MAX_LISTED_KEY_BYTES {
+        return key.to_owned();
+    }
+    let digest = hex(&Sha256::digest(key.as_bytes()));
+    format!("{}#{}", cut_bytes(key, 400), &digest[..16])
+}
 
 /// Pages the host refused, by entry key: kept in one key-value entry.
 struct Problems {
     map: BTreeMap<String, String>,
+    /// A refused page was not listed: the list is full.
+    full: bool,
     dirty: bool,
 }
 
 impl Problems {
     fn load<E: Env>(env: &mut E) -> Result<Self, String> {
-        let map = env
+        let v: serde_json::Value = env
             .kv_get(PROBLEMS_KEY)?
             .and_then(|t| serde_json::from_str(&t).ok())
             .unwrap_or_default();
-        Ok(Self { map, dirty: false })
+        // Stored as {"pages": {key: text}, "full": bool}; before 0.1.16 the
+        // map alone.
+        let (pages, full) = if v["pages"].is_object() {
+            (v["pages"].clone(), v["full"].as_bool().unwrap_or(false))
+        } else {
+            (v, false)
+        };
+        Ok(Self {
+            map: serde_json::from_value(pages).unwrap_or_default(),
+            full,
+            dirty: false,
+        })
     }
 
-    fn set(&mut self, key: &str, text: String) {
-        if self.map.len() >= MAX_PROBLEMS && !self.map.contains_key(key) {
+    fn serialized(&self) -> String {
+        serde_json::json!({"pages": self.map, "full": self.full}).to_string()
+    }
+
+    /// Lists a page as "`name`: `how` (`reason`)", the parts cut so that the
+    /// list stays within its byte limit; a page that does not fit is counted
+    /// as "more".
+    fn set(&mut self, key: &str, name: &str, how: &str, reason: &str) {
+        let key = listed_key(key);
+        let text = format!(
+            "{}: {how} ({})",
+            cut_bytes(name, MAX_TEXT_PART_BYTES),
+            cut_bytes(reason, MAX_TEXT_PART_BYTES)
+        );
+        if self.map.get(&key) == Some(&text) {
             return;
         }
-        if self.map.get(key) != Some(&text) {
-            self.map.insert(key.to_owned(), text);
-            self.dirty = true;
+        let new = !self.map.contains_key(&key);
+        if new && self.map.len() >= MAX_PROBLEMS {
+            self.dirty |= !self.full;
+            self.full = true;
+            return;
         }
+        let old = self.map.insert(key.clone(), text);
+        if self.serialized().len() > MAX_PROBLEMS_BYTES {
+            match old {
+                Some(o) => {
+                    self.map.insert(key, o);
+                }
+                None => {
+                    self.map.remove(&key);
+                }
+            }
+            self.dirty |= !self.full;
+            self.full = true;
+            return;
+        }
+        self.dirty = true;
+    }
+
+    fn contains(&self, key: &str) -> bool {
+        self.map.contains_key(&listed_key(key))
     }
 
     fn clear(&mut self, key: &str) {
-        self.dirty |= self.map.remove(key).is_some();
-    }
-
-    /// Forgets pages that are no longer in the plan.
-    fn retain(&mut self, live: &BTreeSet<&str>) {
-        let before = self.map.len();
-        self.map.retain(|k, _| live.contains(k.as_str()));
-        self.dirty |= self.map.len() != before;
-    }
-
-    /// Saves a changed list. A refused write is left for the next run, which
-    /// finds the same pages again.
-    fn flush<E: Env>(&mut self, env: &mut E) {
-        if !self.dirty {
-            return;
+        self.dirty |= self.map.remove(&listed_key(key)).is_some();
+        if self.map.is_empty() {
+            self.dirty |= self.full;
+            self.full = false;
         }
-        let ok = if self.map.is_empty() {
+    }
+
+    /// Forgets pages that are no longer in the plan. "More" stays until the
+    /// list is empty: a page left off it may be on the site in its simpler
+    /// form, and is not looked at again.
+    fn retain(&mut self, live: &BTreeSet<&str>) {
+        let live: BTreeSet<String> = live.iter().map(|k| listed_key(k)).collect();
+        let before = self.map.len();
+        self.map.retain(|k, _| live.contains(k));
+        self.dirty |= self.map.len() != before;
+        if self.map.is_empty() {
+            self.dirty |= self.full;
+            self.full = false;
+        }
+    }
+
+    /// Saves a changed list.
+    fn save<E: Env>(&mut self, env: &mut E) -> Result<(), String> {
+        if !self.dirty {
+            return Ok(());
+        }
+        if self.map.is_empty() && !self.full {
             env.kv_delete(PROBLEMS_KEY);
-            true
         } else {
-            serde_json::to_string(&self.map)
-                .ok()
-                .is_some_and(|t| env.kv_set(PROBLEMS_KEY, &t).is_ok())
-        };
-        self.dirty = !ok;
+            env.kv_set(PROBLEMS_KEY, &self.serialized())?;
+        }
+        self.dirty = false;
+        Ok(())
     }
 
     fn lines(&self) -> Vec<String> {
         self.map.values().cloned().collect()
+    }
+}
+
+/// Where the entries the host refused outright are remembered, so a
+/// continuation run does not fetch and offer them again.
+pub const REFUSED_KEY: &str = "sync/refused";
+/// Most refused entries remembered (16 hex characters each).
+const MAX_REFUSED: usize = 2_500;
+
+/// Entries the host refused even in their simpler form, each as a digest of
+/// its key, its source hash and the commits synced: a new commit, plan or
+/// FORMAT tries them again, and so does "Sync now", which forgets them.
+struct Refused {
+    before: BTreeSet<String>,
+    now: BTreeSet<String>,
+}
+
+impl Refused {
+    fn load<E: Env>(env: &mut E) -> Result<Self, String> {
+        let before = env
+            .kv_get(REFUSED_KEY)?
+            .and_then(|t| serde_json::from_str(&t).ok())
+            .unwrap_or_default();
+        Ok(Self {
+            before,
+            now: BTreeSet::new(),
+        })
+    }
+
+    fn digest(key: &str, hash: &str, commits: &str) -> String {
+        let d = hex(&Sha256::digest(
+            format!("{key}\n{hash}\n{commits}").as_bytes(),
+        ));
+        d[..16].to_owned()
+    }
+
+    /// Whether this entry was refused at this version; it is kept if so.
+    fn check(&mut self, digest: &str) -> bool {
+        let known = self.before.contains(digest) || self.now.contains(digest);
+        if known {
+            self.note(digest);
+        }
+        known
+    }
+
+    fn note(&mut self, digest: &str) {
+        if self.now.len() < MAX_REFUSED {
+            self.now.insert(digest.to_owned());
+        }
+    }
+
+    /// Saves the entries refused this run; with `all_seen` (the whole plan was
+    /// looked at) the older ones are dropped. A lost write only means one
+    /// more try of each page.
+    fn save<E: Env>(&self, env: &mut E, all_seen: bool) {
+        let mut keep = self.now.clone();
+        if !all_seen {
+            for d in &self.before {
+                if keep.len() >= MAX_REFUSED {
+                    break;
+                }
+                keep.insert(d.clone());
+            }
+        }
+        if keep == self.before {
+            return;
+        }
+        if keep.is_empty() {
+            env.kv_delete(REFUSED_KEY);
+        } else if let Ok(t) = serde_json::to_string(&keep) {
+            let _ = env.kv_set(REFUSED_KEY, &t);
+        }
     }
 }
 
@@ -772,8 +931,13 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
     }
     let today = civil_date(cx.env.now_ms());
     let mut problems = Problems::load(cx.env)?;
+    let mut refused = Refused::load(cx.env)?;
+    // Entries the site does not have after this run: their children are
+    // refused too, so they are listed without being read or offered.
+    let mut absent: BTreeSet<String> = BTreeSet::new();
     let wrote = (|| -> Result<(), Stop> {
         for pe in &p.entries {
+            let key = &pe.planned.key;
             let hash_basis = match &pe.source {
                 Source::Page(f) => format!("{FORMAT}:{}:{sig}", f.sha),
                 Source::Generated => {
@@ -781,19 +945,54 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
                 }
             };
             let hash = hex(&Sha256::digest(hash_basis.as_bytes()));
-            if managed.get(&pe.planned.key) == Some(&hash) {
+            if managed.get(key) == Some(&hash) {
                 cx.report.unchanged += 1;
+                continue;
+            }
+            // What the problems list calls it.
+            let name = match &pe.source {
+                Source::Page(f) => join_repo_path(&f.tree.folder, &f.path),
+                Source::Generated => key.clone(),
+            };
+            // An older version may still be on the site.
+            let on_site = managed.contains_key(key);
+            let left_out = if on_site {
+                "not updated"
+            } else {
+                "not imported"
+            };
+            if let Some(parent) = pe
+                .planned
+                .parent_key
+                .as_deref()
+                .filter(|k| absent.contains(*k))
+            {
+                if !on_site {
+                    absent.insert(key.clone());
+                }
+                let why = format!("its parent {parent} is not on the site");
+                problems.set(key, &name, left_out, &why);
+                continue;
+            }
+            // Refused outright at this version by an earlier run of this
+            // sync: not read or offered again.
+            let digest = Refused::digest(key, &hash, &combined);
+            if refused.check(&digest) {
+                if !on_site {
+                    absent.insert(key.clone());
+                }
+                if !problems.contains(key) {
+                    problems.set(key, &name, left_out, "refused at this version");
+                }
                 continue;
             }
             if cx.report.created + cx.report.updated >= cx.budget.max_writes {
                 return Err(Stop::Budget);
             }
-            // The entry, what the problems list calls it, and what to write
-            // instead when the host refuses it.
-            let (entry, name, fallback) = match &pe.source {
+            // The entry, and what to write instead when the host refuses it.
+            let (entry, fallback) = match &pe.source {
                 Source::Page(f) => {
-                    let repo_path = join_repo_path(&f.tree.folder, &f.path);
-                    let url = github::raw_url(&cx.cfg.repo, &f.tree.commit, &repo_path);
+                    let url = github::raw_url(&cx.cfg.repo, &f.tree.commit, &name);
                     let body = match bodies.remove(&f.sha) {
                         Some(b) => b,
                         None => cx.get(&url, "text/plain", None)?.body,
@@ -810,7 +1009,7 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
                         &infos,
                     );
                     let fallback = plain_text_entry(&entry, frontmatter::split(&body).body);
-                    (entry, repo_path, Some(fallback))
+                    (entry, Some(fallback))
                 }
                 Source::Generated => {
                     // A root with its own top-level index page shows that page.
@@ -850,7 +1049,6 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
                         .then(|| build_generated_entry(pe, &p, &hash, &infos, None));
                     (
                         build_generated_entry(pe, &p, &hash, &infos, overview),
-                        pe.planned.key.clone(),
                         fallback,
                     )
                 }
@@ -860,28 +1058,37 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
             let refusal = match cx.env.put_entry(&entry) {
                 Ok(put) => {
                     cx.report.count(put);
-                    problems.clear(&entry.key);
+                    problems.clear(key);
                     continue;
                 }
                 Err(e) if is_refusal(&e) => e,
                 Err(e) => return Err(e.into()),
             };
-            let reason = refusal.chars().take(200).collect::<String>();
             let Some(fallback) = fallback else {
-                problems.set(&entry.key, format!("{name}: not imported ({reason})"));
+                refused.note(&digest);
+                if !on_site {
+                    absent.insert(key.clone());
+                }
+                problems.set(key, &name, left_out, &refusal);
                 continue;
             };
+            let how = match pe.source {
+                Source::Page(_) => "imported as plain text",
+                Source::Generated => "imported as a list of its pages",
+            };
+            // Listed, and saved, before the simpler form is written: from
+            // then on the page is unchanged to later runs, and only this list
+            // names it.
+            problems.set(key, &name, how, &refusal);
+            problems.save(cx.env)?;
             match cx.env.put_entry(&fallback) {
-                Ok(put) => {
-                    cx.report.count(put);
-                    let how = match pe.source {
-                        Source::Page(_) => "imported as plain text",
-                        Source::Generated => "imported as a list of its pages",
-                    };
-                    problems.set(&entry.key, format!("{name}: {how} ({reason})"));
-                }
+                Ok(put) => cx.report.count(put),
                 Err(e) if is_refusal(&e) => {
-                    problems.set(&entry.key, format!("{name}: not imported ({reason})"));
+                    refused.note(&digest);
+                    if !on_site {
+                        absent.insert(key.clone());
+                    }
+                    problems.set(key, &name, left_out, &refusal);
                 }
                 Err(e) => return Err(e.into()),
             }
@@ -889,8 +1096,13 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
         problems.retain(&wanted);
         Ok(())
     })();
-    problems.flush(cx.env);
-    cx.report.problems = problems.lines();
+    // The refused entries are remembered only beside a saved list, so a page
+    // that is not offered again is always named.
+    if problems.save(cx.env).is_ok() {
+        refused.save(cx.env, wrote.is_ok());
+    }
+    cx.report.problems = Some(problems.lines());
+    cx.report.more_problems = problems.full;
     wrote?;
 
     // 7. Done: remember it, and forget what is no longer in the repository.
@@ -1774,6 +1986,9 @@ mod tests {
         /// From the first write to this key on, every write is refused as
         /// over quota (a write quota spent part way through a run).
         refuse_writes_from: Option<String>,
+        /// Once this entry is written, every later write (entry or
+        /// key-value) is refused as over the quota.
+        quota_after_put: Option<String>,
         /// Whether `refuse_writes_from` has been reached.
         refusing_writes: std::cell::Cell<bool>,
     }
@@ -1983,6 +2198,9 @@ mod tests {
         }
         fn put_entry(&mut self, e: &Entry) -> Result<Put, String> {
             let mut f = self.0.borrow_mut();
+            if f.refusing_writes.get() && f.quota_after_put.is_some() {
+                return Err(QUOTA_EXCEEDED.to_owned());
+            }
             if f.refuse_keys.contains(&e.key) {
                 return Err(format!(
                     "validation failed: blocks[$[0]]: {} refused",
@@ -1998,6 +2216,9 @@ mod tests {
                 if !f.entries.contains_key(parent) {
                     return Err(format!("parent {parent} has not been written"));
                 }
+            }
+            if f.quota_after_put.as_deref() == Some(e.key.as_str()) {
+                f.refusing_writes.set(true);
             }
             match f.entries.get(&e.key) {
                 Some((_, h)) if *h == e.source_hash => Ok(Put::Unchanged),
@@ -2084,6 +2305,10 @@ mod tests {
                     .len()
             })
             .sum()
+    }
+
+    fn listed(r: &Report) -> Vec<String> {
+        r.problems.clone().unwrap_or_default()
     }
 
     fn budget(f: &RefCell<Fake>) -> Budget {
@@ -2177,7 +2402,7 @@ mod tests {
         let report = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
         assert!(report.finished, "{report:?}");
         assert_eq!(
-            report.problems,
+            listed(&report),
             ["docs/guides/install.md: imported as plain text \
               (validation failed: blocks[$[0]]: callout refused)"]
         );
@@ -2192,13 +2417,13 @@ mod tests {
         // The list is kept while the page is unchanged ...
         let b = budget(&f);
         let again = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
-        assert!(again.up_to_date && again.problems.is_empty(), "{again:?}");
+        assert!(again.up_to_date && again.problems.is_none(), "{again:?}");
         let kept = crate::status::Status::after(
             &crate::status::Status::after(&crate::status::Status::default(), 1, Ok(&report)),
             2,
             Ok(&again),
         );
-        assert_eq!(kept.problems, report.problems);
+        assert_eq!(kept.problems, listed(&report));
         // ... and goes once the page is written as it is.
         {
             let mut fk = f.borrow_mut();
@@ -2212,7 +2437,7 @@ mod tests {
         }
         let b = budget(&f);
         let fixed = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
-        assert!(fixed.finished && fixed.problems.is_empty(), "{fixed:?}");
+        assert!(fixed.finished && listed(&fixed).is_empty(), "{fixed:?}");
         assert!(!f.borrow().kv.borrow().contains_key(PROBLEMS_KEY));
     }
 
@@ -2224,7 +2449,7 @@ mod tests {
         let report = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
         assert!(report.finished, "{report:?}");
         assert_eq!(
-            report.problems,
+            listed(&report),
             ["docs/guides/install.md: not imported \
               (validation failed: blocks[$[0]]: callout refused)"]
         );
@@ -2248,16 +2473,125 @@ mod tests {
         let b = budget(&f);
         let report = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
         assert!(report.finished, "{report:?}");
-        assert_eq!(report.problems.len(), 2, "{:?}", report.problems);
-        assert!(report
-            .problems
+        let problems = listed(&report);
+        assert_eq!(problems.len(), 2, "{problems:?}");
+        assert!(problems
             .iter()
             .any(|p| p.starts_with(&format!("{guides}: not imported (validation failed"))));
-        assert!(report
-            .problems
-            .iter()
-            .any(|p| p.starts_with("docs/guides/install.md: not imported (parent ")));
+        assert!(problems.iter().any(|p| p.starts_with(&format!(
+            "docs/guides/install.md: not imported (its parent {guides} is not on the site)"
+        ))));
         assert!(f.borrow().entries.contains_key("main:intro.md"));
+    }
+
+    #[test]
+    fn a_page_imported_as_plain_text_stays_listed_when_the_quota_runs_out_after_it() {
+        let f = fake_with(repo_one());
+        {
+            let mut fk = f.borrow_mut();
+            fk.refuse_kinds = vec!["callout"];
+            fk.quota_after_put = Some("main:guides/install.md".into());
+        }
+        let b = budget(&f);
+        let first = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
+        assert!(first.throttled, "{first:?}");
+        assert!(f.borrow().entries.contains_key("main:guides/install.md"));
+        {
+            let mut fk = f.borrow_mut();
+            fk.quota_after_put = None;
+            fk.refusing_writes.set(false);
+        }
+        let b = budget(&f);
+        let again = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
+        assert!(again.finished, "{again:?}");
+        assert_eq!(
+            listed(&again),
+            ["docs/guides/install.md: imported as plain text \
+              (validation failed: blocks[$[0]]: callout refused)"]
+        );
+    }
+
+    #[test]
+    fn pages_left_out_are_not_offered_again_so_the_sync_finishes() {
+        let mut files = Files::new();
+        for i in 0..30 {
+            files.insert(
+                format!("docs/p{i:02}.md"),
+                format!("# P{i}\n\n<Callout>x</Callout>\n"),
+            );
+        }
+        // A refused folder: its pages are listed without being read.
+        files.insert("docs/big/_meta.json".into(), r#"{"title":"Big"}"#.into());
+        for i in 0..30 {
+            files.insert(format!("docs/big/q{i:02}.md"), format!("# Q{i}\n"));
+        }
+        let probe = fake_with(files.clone());
+        let b = budget(&probe);
+        run(&mut Wrap(&probe), &cfg(), None, b).unwrap();
+        let big = probe.borrow().entries["main:big/q00.md"]
+            .0
+            .parent_key
+            .clone()
+            .unwrap();
+        let f = fake_with(files);
+        {
+            let mut fk = f.borrow_mut();
+            fk.refuse_kinds = vec!["callout", "code"];
+            fk.refuse_keys = vec![big];
+        }
+        let mut runs = 0;
+        let last = loop {
+            runs += 1;
+            assert!(runs <= 12, "the sync never finishes");
+            let b = Budget {
+                max_requests: 12,
+                ..budget(&f)
+            };
+            let r = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
+            if r.finished {
+                break r;
+            }
+        };
+        let problems = listed(&last);
+        assert_eq!(problems.len(), 61, "{problems:?}");
+        assert!(problems
+            .iter()
+            .any(|p| p.starts_with("docs/p00.md: not imported (validation failed")));
+        // The next run of the same commit is up to date and keeps the list.
+        let b = budget(&f);
+        let r = run(&mut Wrap(&f), &cfg(), None, b).unwrap();
+        assert!(r.up_to_date, "{r:?}");
+    }
+
+    #[test]
+    fn the_problems_list_and_the_status_stay_under_the_store_limit() {
+        let mut problems = Problems {
+            map: BTreeMap::new(),
+            full: false,
+            dirty: false,
+        };
+        let long_name = "文".repeat(210);
+        let reason = format!("validation failed: \"{}\"", "鍵\"".repeat(300));
+        for i in 0..150 {
+            let key = format!("{i:03}{}", "キ".repeat(200));
+            problems.set(&key, &long_name, "not imported", &reason);
+        }
+        assert!(problems.full);
+        assert!(problems.map.keys().all(|k| k.len() <= MAX_LISTED_KEY_BYTES));
+        assert!(problems.serialized().len() <= MAX_PROBLEMS_BYTES);
+        let r = Report {
+            problems: Some(problems.lines()),
+            more_problems: problems.full,
+            ..Report::default()
+        };
+        let s = crate::status::Status::after(&crate::status::Status::default(), 1, Ok(&r));
+        assert!(s.to_json().len() < 64 * 1024);
+        assert!(s.line(1).contains(" or more: "));
+        // A key the host refuses for its length is still found again.
+        let key = format!("000{}", "キ".repeat(200));
+        assert!(problems.contains(&key));
+        problems.clear(&key);
+        assert!(!problems.contains(&key));
     }
 
     #[test]

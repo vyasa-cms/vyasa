@@ -731,14 +731,15 @@ impl Builder<'_, '_> {
 }
 
 /// The language a fence's info string names: the part before the first
-/// comma or space, lowercased (`rust,ignore` and `rust ignore` are `rust`).
+/// comma, space or `{`, lowercased (`rust,ignore` and `rust ignore` are `rust`,
+/// `js{1,3}` is `js`).
 /// Anything the host would refuse as a language (over 40 characters, or a
 /// character other than a letter, digit, `-`, `+`, `#` or `_`) is plain text:
 /// the empty string.
 pub(crate) fn fence_language(info: &str) -> String {
     let head = info
         .trim()
-        .split(|c: char| c == ',' || c.is_whitespace())
+        .split(|c: char| c == ',' || c == '{' || c.is_whitespace())
         .next()
         .unwrap_or("");
     let lang = head.to_ascii_lowercase();
@@ -996,6 +997,7 @@ mod tests {
         for (info, want) in [
             ("rust,ignore", "rust"),
             ("Rust, no_run", "rust"),
+            ("js{1,3}", "js"),
             ("rust ignore", "rust"),
             ("  SQL  ", "sql"),
             ("c++", "c++"),
