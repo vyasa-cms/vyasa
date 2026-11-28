@@ -187,6 +187,11 @@ pub struct Broker {
     /// Changed only while the `grants` write guard is held, together with
     /// `grants`, so every cached grants entry has its name.
     names: Arc<std::sync::Mutex<HashMap<i64, String>>>,
+    /// Bumped by every [`Broker::evict`] under the grants write guard. A
+    /// lookup notes it before reading the repository and caches what it read
+    /// only if no eviction landed meanwhile, so grants read before a
+    /// reinstall are never cached after it.
+    generation: Arc<std::sync::atomic::AtomicU64>,
 }
 
 impl std::fmt::Debug for Broker {
@@ -208,6 +213,7 @@ impl Broker {
             quota_refused: Arc::new(std::sync::Mutex::new(HashMap::new())),
             overrides: Arc::from(Vec::new()),
             names: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            generation: Arc::new(std::sync::atomic::AtomicU64::new(0)),
         }
     }
 
@@ -264,9 +270,15 @@ impl Broker {
     }
 
     async fn granted_for(&self, plugin_id: i64) -> Result<Vec<Capability>, AppError> {
-        if let Some(hit) = self.grants.read().await.get(&plugin_id) {
-            return Ok(hit.clone());
-        }
+        let generation = {
+            let grants = self.grants.read().await;
+            if let Some(hit) = grants.get(&plugin_id) {
+                return Ok(hit.clone());
+            }
+            // Read under the guard `evict` bumps it under, so an eviction
+            // either finished before this point or is seen below.
+            self.generation.load(std::sync::atomic::Ordering::Acquire)
+        };
         let row = self
             .repo
             .list()
@@ -275,16 +287,36 @@ impl Broker {
             .find(|p| p.id == plugin_id)
             .ok_or_else(|| AppError::not_found("plugin", plugin_id))?;
         let caps = Capability::parse_list(&row.capabilities).unwrap_or_default();
+        self.cache_if_current(generation, plugin_id, row.name, &caps)
+            .await;
+        Ok(caps)
+    }
+
+    /// Caches `caps` and `name` for `plugin_id` unless an eviction happened
+    /// since `generation` was read; returns whether it cached. The caller
+    /// still answers with what it read: the lookup overlapped the eviction,
+    /// so either order is a valid outcome for it, but a later lookup reads
+    /// the repository again.
+    async fn cache_if_current(
+        &self,
+        generation: u64,
+        plugin_id: i64,
+        name: String,
+        caps: &[Capability],
+    ) -> bool {
         // Rule: `names` and `grants` change only together, under the grants
         // write guard (here and in `evict`), so cached grants always come with
         // a cached name and the plugin's quota override keeps matching.
         let mut grants = self.grants.write().await;
+        if self.generation.load(std::sync::atomic::Ordering::Acquire) != generation {
+            return false;
+        }
         self.names
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .insert(plugin_id, row.name.clone());
-        grants.insert(plugin_id, caps.clone());
-        Ok(caps)
+            .insert(plugin_id, name);
+        grants.insert(plugin_id, caps.to_vec());
+        true
     }
 
     async fn audit(&self, plugin_id: i64, kind: &str, capability: &Capability, detail: &str) {
@@ -496,6 +528,8 @@ impl Broker {
     /// until the next restart.
     pub async fn evict(&self, plugin_id: i64) {
         let mut grants = self.grants.write().await;
+        self.generation
+            .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         self.names
             .lock()
             .unwrap_or_else(std::sync::PoisonError::into_inner)
@@ -775,5 +809,36 @@ mod name_cache_tests {
                 "cached grants without a cached name"
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn broker() -> Broker {
+        // Never connects: these tests stay on the in-memory cache.
+        let pool = sqlx::postgres::PgPoolOptions::new()
+            .connect_lazy("postgres://nobody@127.0.0.1:1/none")
+            .unwrap_or_else(|e| panic!("lazy pool: {e}"));
+        Broker::new(PluginsRepo::new(pool.clone()), pool)
+    }
+
+    /// The race in `granted_for`: a lookup reads the old capability list,
+    /// the plugin is reinstalled (evicted) before the lookup caches it. The
+    /// old list must not be cached.
+    #[tokio::test]
+    async fn a_lookup_racing_a_reinstall_never_caches_the_old_grants() {
+        let b = broker();
+        let old = vec![Capability::DbReadPosts];
+        let before = b.generation.load(std::sync::atomic::Ordering::Acquire);
+        b.evict(7).await; // the reinstall lands while the lookup reads
+        assert!(!b.cache_if_current(before, 7, "p".into(), &old).await);
+        assert!(!b.has_cached_grants(7).await);
+        assert!(b.names.lock().is_ok_and(|m| !m.contains_key(&7)));
+        // A lookup that started after the eviction caches as before.
+        let after = b.generation.load(std::sync::atomic::Ordering::Acquire);
+        assert!(b.cache_if_current(after, 7, "p".into(), &old).await);
+        assert!(b.has_cached_grants(7).await);
     }
 }
