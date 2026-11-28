@@ -3,6 +3,7 @@
 //! answered into `form_submissions.data`, and mailed to whoever the form
 //! names.
 
+use rand::Rng;
 use serde::{Deserialize, Serialize};
 use vyasa_common::AppError;
 use vyasa_core::block::{Block, BlockKind};
@@ -15,7 +16,8 @@ pub struct Field {
     /// The input name; letters, digits, dashes, underscores.
     pub key: String,
     pub label: String,
-    /// `text`, `email`, `textarea`, `number`, `select`, `checkbox`.
+    /// `text`, `email`, `textarea`, `number`, `select`, `checkbox`, `consent` (a required checkbox
+    /// whose acceptance is stored with its time; `options[0]` may link the privacy page).
     #[serde(default = "text")]
     pub kind: String,
     #[serde(default)]
@@ -38,6 +40,8 @@ pub struct FormRow {
     pub notify_email: String,
     pub success_message: String,
     pub enabled: bool,
+    /// Whether a submission waits for the submitter's email confirmation.
+    pub confirm: bool,
     pub created_at: chrono::DateTime<chrono::Utc>,
     pub updated_at: chrono::DateTime<chrono::Utc>,
 }
@@ -53,13 +57,18 @@ pub struct FormInput {
     pub success_message: String,
     #[serde(default = "yes")]
     pub enabled: bool,
+    /// Hold a submission until its sender confirms by email (needs an email field).
+    #[serde(default)]
+    pub confirm: bool,
 }
 fn yes() -> bool {
     true
 }
 
+pub(crate) use vyasa_db::repo::audience::PENDING_FORM_DAYS as PENDING_DAYS;
+
 const COLS: &str =
-    "id, name, slug, fields, notify_email, success_message, enabled, created_at, updated_at";
+    "id, name, slug, fields, notify_email, success_message, enabled, confirm, created_at, updated_at";
 
 fn slugify(name: &str) -> String {
     let base: String = name
@@ -109,12 +118,29 @@ fn check(input: &FormInput) -> Result<(), AppError> {
         }
         if !matches!(
             f.kind.as_str(),
-            "text" | "email" | "textarea" | "number" | "select" | "checkbox"
+            "text" | "email" | "textarea" | "number" | "select" | "checkbox" | "consent"
         ) {
             return Err(AppError::validation(format!(
                 "unknown field kind {:?}",
                 f.kind
             )));
+        }
+        if f.kind == "consent" {
+            if !f.required {
+                return Err(AppError::validation(format!(
+                    "consent field {:?} must be required",
+                    f.key
+                )));
+            }
+            if f.options
+                .first()
+                .is_some_and(|link| !(link.starts_with('/') || link.starts_with("https://")))
+            {
+                return Err(AppError::validation(format!(
+                    "the privacy link of {:?} must start with / or https://",
+                    f.key
+                )));
+            }
         }
         if f.kind == "select" && f.options.is_empty() {
             return Err(AppError::validation(format!(
@@ -126,6 +152,11 @@ fn check(input: &FormInput) -> Result<(), AppError> {
     if !input.notify_email.trim().is_empty() && !input.notify_email.contains('@') {
         return Err(AppError::validation(
             "the notification address is not an email",
+        ));
+    }
+    if input.confirm && !input.fields.iter().any(|f| f.kind == "email" && f.required) {
+        return Err(AppError::validation(
+            "a form that asks for confirmation needs a required email field",
         ));
     }
     Ok(())
@@ -189,8 +220,8 @@ pub async fn create(state: &AppState, input: FormInput) -> Result<FormRow, AppEr
         input.success_message.trim().to_owned()
     };
     sqlx::query_as::<_, FormRow>(sqlx::AssertSqlSafe(format!(
-        "INSERT INTO forms (id, name, slug, fields, notify_email, success_message, enabled)
-         VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING {COLS}"
+        "INSERT INTO forms (id, name, slug, fields, notify_email, success_message, enabled, confirm)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING {COLS}"
     )))
     .bind(vyasa_common::next_id_i64())
     .bind(input.name.trim())
@@ -199,6 +230,7 @@ pub async fn create(state: &AppState, input: FormInput) -> Result<FormRow, AppEr
     .bind(input.notify_email.trim())
     .bind(success)
     .bind(input.enabled)
+    .bind(input.confirm)
     .fetch_one(&state.pool)
     .await
     .map_err(|e| AppError::db(format!("form insert: {e}")))
@@ -215,7 +247,7 @@ pub async fn update(state: &AppState, id: i64, input: FormInput) -> Result<FormR
     };
     sqlx::query_as::<_, FormRow>(sqlx::AssertSqlSafe(format!(
         "UPDATE forms SET name = $2, fields = $3, notify_email = $4, success_message = $5,
-                enabled = $6, updated_at = now() WHERE id = $1 RETURNING {COLS}"
+                enabled = $6, confirm = $7, updated_at = now() WHERE id = $1 RETURNING {COLS}"
     )))
     .bind(id)
     .bind(input.name.trim())
@@ -223,6 +255,7 @@ pub async fn update(state: &AppState, id: i64, input: FormInput) -> Result<FormR
     .bind(input.notify_email.trim())
     .bind(success)
     .bind(input.enabled)
+    .bind(input.confirm)
     .fetch_optional(&state.pool)
     .await
     .map_err(|e| AppError::db(format!("form update: {e}")))?
@@ -336,7 +369,14 @@ pub async fn accept(
                 f.label
             )));
         }
-        lines.push(serde_json::json!({ "label": f.label, "value": if f.kind == "checkbox" { if value.is_empty() { "no" } else { "yes" }.to_owned() } else { value.clone() } }));
+        if f.kind == "consent" {
+            // Given or the entry is refused (required); stored with when it was given.
+            data.insert(
+                format!("{}_consent_at", f.key),
+                serde_json::Value::String(chrono::Utc::now().to_rfc3339()),
+            );
+        }
+        lines.push(serde_json::json!({ "label": f.label, "value": if f.kind == "checkbox" || f.kind == "consent" { if value.is_empty() { "no" } else { "yes" }.to_owned() } else { value.clone() } }));
         data.insert(f.key.clone(), serde_json::Value::String(value));
     }
     // Name, email and message columns get the obvious fields, so the
@@ -351,37 +391,137 @@ pub async fn accept(
     let name = pick(&[], &["name", "full_name", "your_name"]);
     let email = pick(&["email"], &["email"]);
     let message = pick(&["textarea"], &["message"]);
+    let data = serde_json::Value::Object(data);
+    if form.confirm {
+        // The address the confirmation goes to is a required email field, so
+        // an optional one left empty cannot skip the confirmation.
+        let to = fields
+            .iter()
+            .find(|f| f.kind == "email" && f.required)
+            .map(|f| get(&f.key))
+            .unwrap_or_default();
+        if !crate::public::form_submit::email_ok(&to) {
+            return Err(AppError::validation(
+                "that email address doesn't look right",
+            ));
+        }
+        return hold_entry(state, form, &to, &name, &message, path, &data).await;
+    }
     state
         .audience
-        .add_submission_with(
-            &form.slug,
-            &name,
-            &email,
-            &message,
-            path,
-            &serde_json::Value::Object(data),
-        )
+        .add_submission_with(&form.slug, &name, &email, &message, path, &data)
         .await?;
-    if !form.notify_email.is_empty() {
-        let site = state
-            .options_service
-            .site_identity()
-            .await
-            .ok()
-            .map(|i| i.title)
-            .filter(|t| !t.is_empty())
-            .unwrap_or_else(|| String::from("Vyasa"));
-        let ctx = serde_json::json!({
-            "site": site, "form": form.name, "fields": lines, "path": path,
-        });
-        if let Err(e) = vyasa_core::notify::EmailService::new(state.pool.clone())
-            .queue(&form.notify_email, "form_submission", &ctx)
-            .await
-        {
-            tracing::warn!("form notification not queued: {e}");
-        } else {
-            state.publisher_notify.notify_one();
-        }
-    }
+    notify_owner(state, form, &lines, path, true).await;
     Ok(form.success_message.clone())
+}
+
+/// Stores an entry as held and mails its sender the confirm and delete links.
+async fn hold_entry(
+    state: &AppState,
+    form: &FormRow,
+    to: &str,
+    name: &str,
+    message: &str,
+    path: &str,
+    data: &serde_json::Value,
+) -> Result<String, AppError> {
+    let base = state
+        .options_service
+        .site_url()
+        .await
+        .map_err(|e| AppError::internal(e, "the site URL is not configured"))?;
+    if base.is_empty() {
+        return Err(AppError::validation(
+            "this form cannot send confirmations: the site URL is not set",
+        ));
+    }
+    let token: String = rand::thread_rng()
+        .sample_iter(&rand::distributions::Alphanumeric)
+        .take(40)
+        .map(char::from)
+        .collect();
+    // A repeat submission from the same address replaces its held entry.
+    state.audience.drop_pending_for(&form.slug, to).await?;
+    state
+        .audience
+        .add_pending_submission(&vyasa_db::repo::audience::PendingSubmission {
+            form: &form.slug,
+            name,
+            email: to,
+            message,
+            path,
+            data,
+            token: &token,
+        })
+        .await?;
+    let base = base.trim_end_matches('/').to_owned();
+    let ctx = serde_json::json!({
+        "site": site_title(state).await,
+        "form": form.name,
+        "confirm_url": format!("{base}/form/confirm?token={token}"),
+        "delete_url": format!("{base}/form/delete?token={token}"),
+    });
+    if let Err(e) = vyasa_core::notify::EmailService::new(state.pool.clone())
+        .queue(to, "form_confirm", &ctx)
+        .await
+    {
+        // No mail went out, so nobody can ever confirm this row.
+        let _ = state.audience.delete_by_token(&token).await;
+        return Err(AppError::internal(e, "confirmation not queued"));
+    }
+    state.publisher_notify.notify_one();
+    Ok(String::from("Check your inbox to confirm your entry."))
+}
+
+async fn site_title(state: &AppState) -> String {
+    state
+        .options_service
+        .site_identity()
+        .await
+        .ok()
+        .map(|i| i.title)
+        .filter(|t| !t.is_empty())
+        .unwrap_or_else(|| String::from("Vyasa"))
+}
+
+/// Mails the form's `notify_email` the answers of one accepted entry.
+/// With `include_answers` false (a confirmed entry) the mail names the form
+/// only: the answers, and the sender's address, stay in the admin.
+pub async fn notify_owner(
+    state: &AppState,
+    form: &FormRow,
+    lines: &[serde_json::Value],
+    path: &str,
+    include_answers: bool,
+) {
+    if form.notify_email.is_empty() {
+        return;
+    }
+    let mut ctx = serde_json::json!({
+        "site": site_title(state).await, "form": form.name, "fields": lines, "path": path,
+    });
+    if !include_answers {
+        // The notice of a confirmed entry: how many entries the form has now, and where to read
+        // them. Nothing the submitter wrote.
+        ctx["count"] = serde_json::json!(state
+            .audience
+            .counted_submissions(&form.slug)
+            .await
+            .unwrap_or(0));
+        let base = state.options_service.site_url().await.unwrap_or_default();
+        ctx["admin_url"] = serde_json::json!(format!("{}/admin/forms", base.trim_end_matches('/')));
+    }
+    let template = if include_answers {
+        "form_submission"
+    } else {
+        "form_confirmed_notice"
+    };
+    if let Err(e) = vyasa_core::notify::EmailService::new(state.pool.clone())
+        .queue(&form.notify_email, template, &ctx)
+        .await
+    {
+        tracing::warn!("form notification not queued: {e}");
+    } else {
+        state.publisher_notify.notify_one();
+    }
 }

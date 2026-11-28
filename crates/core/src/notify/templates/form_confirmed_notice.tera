@@ -1,0 +1,4 @@
+{{ site }}: a "{{ form }}" entry was confirmed
+Someone confirmed their entry on the "{{ form }}" form on {{ site }}. The form now has {{ count }} confirmed {% if count == 1 %}entry{% else %}entries{% endif %}.
+
+Read them here: {{ admin_url }}

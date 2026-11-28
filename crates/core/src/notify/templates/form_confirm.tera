@@ -1,0 +1,10 @@
+Confirm your entry on {{ site }}
+You (or someone with your address) filled in "{{ form }}" on {{ site }}.
+
+Confirm with one click:
+
+    {{ confirm_url }}
+
+Your entry only counts once you confirm. To delete it, or if this wasn't you:
+
+    {{ delete_url }}

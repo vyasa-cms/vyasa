@@ -89,6 +89,9 @@ follows [semantic versioning](https://semver.org) as described in
 ### Added
 - The contact path of `POST /form` keeps every other posted field (`company`, `role`, a `wants_contact` checkbox ...) in the submission, at most 20 fields of 1000 characters, and Admin submissions lists them; `GET /api/v1/audience/submissions` returns them as `data` (#119).
 - Docs plugin 0.1.4: a section slug may be `product/version` (`app/2.0`), served at `/docs/app/2.0/` with its own sidebar and search scope; a hidden `product` root is generated when no section of that name exists.
+- Forms can hold each entry until its sender confirms by email (double opt-in). A held entry stays out of the
+  inbox, the CSV and the unread counts, the owner is mailed only after the click, and the confirmation mail
+  carries a link that deletes the entry. The links open a page with a button, so a mail scanner that fetches them changes nothing. The owner mail after a confirmation names the form only (`/form/confirm`, `/form/delete`). The mail names the form, the count of confirmed entries and an admin link. A `consent` field kind (required, stored with its time, optional privacy link), `?held=true` on the submissions listing, and a forms docs page. A form's email check now also refuses lists and angle brackets, newsletter sign-up included.
 
 ## [0.4.1] - 2026-11-10
 

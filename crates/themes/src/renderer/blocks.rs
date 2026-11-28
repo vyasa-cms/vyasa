@@ -221,16 +221,30 @@ fn render_form(attrs: &serde_json::Value) -> String {
                     .collect();
                 format!("<select id=\"{id}\" name=\"{k}\"{req}>{opts}</select>")
             }
-            "checkbox" => {
+            "checkbox" | "consent" => {
                 format!("<input id=\"{id}\" type=\"checkbox\" name=\"{k}\" value=\"yes\"{req}>")
             }
             "email" => format!("<input id=\"{id}\" type=\"email\" name=\"{k}\"{req}>"),
             "number" => format!("<input id=\"{id}\" type=\"number\" name=\"{k}\"{req}>"),
             _ => format!("<input id=\"{id}\" type=\"text\" name=\"{k}\"{req}>"),
         };
-        if kind == "checkbox" {
+        if kind == "checkbox" || kind == "consent" {
+            // A consent field may link the privacy page (its first option).
+            let link = f
+                .get("options")
+                .and_then(|v| v.as_array())
+                .and_then(|o| o.first())
+                .and_then(|o| o.as_str())
+                .filter(|l| kind == "consent" && (l.starts_with('/') || l.starts_with("https://")))
+                .map(|l| {
+                    format!(
+                        " (<a href=\"{}\" rel=\"noopener\">privacy</a>)",
+                        super::esc(l)
+                    )
+                })
+                .unwrap_or_default();
             out.push_str(&format!(
-                "<label class=\"vy-form-check\">{control} {lb}</label>"
+                "<label class=\"vy-form-check\">{control} {lb}{link}</label>"
             ));
         } else {
             out.push_str(&format!(
@@ -828,7 +842,7 @@ fn render_embed(attrs: &serde_json::Value) -> String {
 mod tests {
     #![allow(clippy::unwrap_used)]
 
-    use super::render_cover;
+    use super::{render_cover, render_form};
 
     #[test]
     fn a_cover_url_cannot_break_out_of_css() {
@@ -868,5 +882,37 @@ mod tests {
         }
         let ok = render_cover(&serde_json::json!({"url": "/api/v1/media/3/raw"})).unwrap();
         assert!(ok.contains("url('/api/v1/media/3/raw')"), "{ok}");
+    }
+
+    #[test]
+    fn a_form_renders_its_select_checkboxes_and_the_consent_with_its_privacy_link() {
+        let html = render_form(
+            &serde_json::json!({"definition": {"slug": "early", "fields": [
+                {"key": "role", "label": "Role", "kind": "select", "required": true,
+                 "options": ["Analyst", "Other"]},
+                {"key": "use_case", "label": "Use case", "kind": "textarea"},
+                {"key": "wants_contact", "label": "Talk to the team", "kind": "checkbox"},
+                {"key": "consent", "label": "I agree", "kind": "consent", "required": true,
+                 "options": ["/privacy"]},
+                {"key": "bad", "label": "Bad link", "kind": "consent", "required": true,
+                 "options": ["javascript:alert(1)"]}
+            ]}}),
+        );
+        assert!(
+            html.contains("<select id=\"vy-f-early-0\" name=\"role\" required>"),
+            "{html}"
+        );
+        assert!(html.contains("<option>Analyst</option>"), "{html}");
+        assert!(html.contains("<textarea"), "{html}");
+        assert!(
+            html.contains("name=\"wants_contact\" value=\"yes\">"),
+            "{html}"
+        );
+        assert!(
+            html.contains("name=\"consent\" value=\"yes\" required> I agree (<a href=\"/privacy\""),
+            "{html}"
+        );
+        // A link that is not a path or https never becomes an href.
+        assert!(!html.contains("javascript:"), "{html}");
     }
 }
