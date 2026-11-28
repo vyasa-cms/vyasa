@@ -40,6 +40,9 @@ pub struct Usage {
     pub prompt_tokens: u32,
     /// Output tokens.
     pub completion_tokens: u32,
+    /// The part of the input read from the provider's prompt cache; 0 when
+    /// the reply does not say.
+    pub cached_tokens: u32,
 }
 
 /// Raw text completion from a provider plus usage.

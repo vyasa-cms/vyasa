@@ -17,6 +17,9 @@ use crate::anthropic::DEFAULT_TIMEOUT;
 /// not, on at least one host.
 const MAX_STRUCTURED_TOKENS: u32 = 8192;
 
+/// OpenAI's own API root.
+const OPENAI_BASE_URL: &str = "https://api.openai.com/v1";
+
 /// OpenAI-compatible client bound to one API key.
 #[derive(Clone)]
 pub struct OpenAiProvider {
@@ -48,7 +51,7 @@ impl OpenAiProvider {
     /// # Errors
     /// [`AppError`]-shaped validation when the key is blank.
     pub fn new(key: &str) -> Result<Self, String> {
-        Self::build(key, "openai", "https://api.openai.com/v1", true)
+        Self::build(key, "openai", OPENAI_BASE_URL, true)
     }
 
     /// An OpenRouter client: same protocol, different door.
@@ -371,11 +374,8 @@ impl OpenAiProvider {
         self
     }
 
-    /// One chat completion.
-    ///
-    /// # Errors
-    /// [`ProviderError`] on transport/status problems.
-    pub async fn complete(&self, spec: &PromptSpec) -> Result<Completion, ProviderError> {
+    /// The request body of one chat completion.
+    fn chat_body(&self, spec: &PromptSpec) -> Value {
         let user_content: Value = if spec.attachments.is_empty() {
             Value::String(spec.user.clone())
         } else {
@@ -396,20 +396,37 @@ impl OpenAiProvider {
                 {"role": "system", "content": format!("{}\nRespond with exactly one JSON object conforming to this JSON Schema:\n{}", spec.system, spec.output_schema)},
                 {"role": "user", "content": user_content},
             ],
-            // Structured replies are whole documents, not sentences: a
-            // composed page layout — hero, a grid of cards, a scoped band —
-            // runs to several thousand tokens of JSON. Without an explicit
-            // ceiling the provider default applies, and on some hosts that is
-            // small enough to truncate the object mid-array, which surfaces
-            // as "invalid JSON: expected `,` or `]`" rather than as a limit.
-            "max_tokens": self.max_tokens.unwrap_or(MAX_STRUCTURED_TOKENS),
         });
+        // Structured replies are whole documents, not sentences: a
+        // composed page layout — hero, a grid of cards, a scoped band —
+        // runs to several thousand tokens of JSON. Without an explicit
+        // ceiling the provider default applies, and on some hosts that is
+        // small enough to truncate the object mid-array, which surfaces
+        // as "invalid JSON: expected `,` or `]`" rather than as a limit.
+        //
+        // OpenAI's own reasoning models refuse `max_tokens`; other servers
+        // that speak the protocol may only know that name.
+        let limit = if self.base_url.trim_end_matches('/') == OPENAI_BASE_URL {
+            "max_completion_tokens"
+        } else {
+            "max_tokens"
+        };
+        body[limit] = json!(self.max_tokens.unwrap_or(MAX_STRUCTURED_TOKENS));
         if let Some(t) = self.temperature {
             body["temperature"] = json!(t);
         }
         if self.json_mode {
             body["response_format"] = json!({"type": "json_object"});
         }
+        body
+    }
+
+    /// One chat completion.
+    ///
+    /// # Errors
+    /// [`ProviderError`] on transport/status problems.
+    pub async fn complete(&self, spec: &PromptSpec) -> Result<Completion, ProviderError> {
+        let body = self.chat_body(spec);
         let response = self
             .request(reqwest::Method::POST, "chat/completions")
             .json(&body)
@@ -446,6 +463,10 @@ impl OpenAiProvider {
                     .as_u64()
                     .and_then(|v| u32::try_from(v).ok())
                     .unwrap_or_else(missing_usage),
+                cached_tokens: payload["usage"]["prompt_tokens_details"]["cached_tokens"]
+                    .as_u64()
+                    .and_then(|v| u32::try_from(v).ok())
+                    .unwrap_or(0),
             },
             provider: None,
             model: None,
@@ -532,6 +553,34 @@ impl LlmProvider for OpenAiProvider {
 fn missing_usage() -> u32 {
     tracing::warn!("provider reply carried no usage; recording zero tokens");
     0
+}
+
+#[cfg(test)]
+mod token_limit_tests {
+    use super::OpenAiProvider;
+    use crate::provider::PromptSpec;
+
+    #[test]
+    fn only_openai_itself_is_sent_max_completion_tokens() {
+        // OpenAI's reasoning models refuse `max_tokens`; other servers that
+        // speak the protocol may only know the older name.
+        let spec = PromptSpec::default();
+        let openai = OpenAiProvider::new("k").expect("builds");
+        let body = openai.chat_body(&spec);
+        assert_eq!(body["max_completion_tokens"], 8192);
+        assert!(body.get("max_tokens").is_none());
+        for other in [
+            OpenAiProvider::openrouter("k").expect("builds"),
+            OpenAiProvider::compatible("k", "custom", "http://127.0.0.1:1/v1").expect("builds"),
+            OpenAiProvider::new("k")
+                .expect("builds")
+                .with_base_url("https://api.openai.com.example/v1"),
+        ] {
+            let body = other.chat_body(&spec);
+            assert_eq!(body["max_tokens"], 8192);
+            assert!(body.get("max_completion_tokens").is_none());
+        }
+    }
 }
 
 #[cfg(test)]

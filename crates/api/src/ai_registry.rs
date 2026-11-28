@@ -213,6 +213,7 @@ impl vyasa_ai::AiUsageSink for Sink {
             vyasa_ai::Usage {
                 prompt_tokens: pt,
                 completion_tokens: ct,
+                ..Default::default()
             },
         );
         let repo = vyasa_db::repo::AiLogRepo::new(self.pool.clone());

@@ -233,6 +233,7 @@ mod tests {
                     usage: Usage {
                         prompt_tokens: 1,
                         completion_tokens: 1,
+                        ..Default::default()
                     },
                     provider: None,
                     model: None,
