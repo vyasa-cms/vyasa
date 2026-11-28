@@ -9,6 +9,7 @@ pub mod cacheable;
 pub mod comment_form;
 mod errors;
 pub mod form_submit;
+pub mod go;
 pub mod health;
 pub mod page_meta;
 pub mod plugin_routes;
@@ -45,6 +46,7 @@ pub fn router(state: &AppState) -> Router<AppState> {
         .route("/tag/{slug}/feed.xml", get(crate::feeds::tag_rss_route))
         .route("/author/{username}", get(routes::author_archive))
         .route("/search", get(routes::search))
+        .route("/go/{name}", get(go::go))
         .route("/comment", post(comment_form::submit))
         .route("/form", post(form_submit::submit))
         .route("/newsletter/confirm", get(form_submit::confirm))

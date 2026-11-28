@@ -210,6 +210,7 @@ export const CAPABILITIES: Record<string, CapabilityInfo> = {
       "redirects",
       "site health checks and cleanup",
       "deleting a submission or subscriber outright",
+      "the outbound-link redirect table (/go/ links counted on the Audience page)",
       "the privacy policy page's content",
       "content types and their fields — creating, relabelling and deleting them",
       "whether the active theme can draw social cards",
@@ -222,7 +223,7 @@ export const CAPABILITIES: Record<string, CapabilityInfo> = {
       "applying updates",
       "importing a site archive",
     ],
-    areas: ["ai", "audience", "audit-log", "content-types", "export", "import", "mail", "media", "options", "privacy", "redirects", "registry", "search", "site-health", "social-cards", "updates"],
+    areas: ["ai", "analytics", "audience", "audit-log", "content-types", "export", "import", "mail", "media", "options", "privacy", "redirects", "registry", "search", "site-health", "social-cards", "updates"],
   },
   view_admin: {
     label: "Use the admin screens",

@@ -3,6 +3,8 @@ import { parseJsonPreservingIds } from "./json-bigint";
 
 /** Generated schema types re-exported for convenience. */
 /** Where the marketplace or update channel points, as the server reports it. */
+/** One counted value of an audience dimension (a device, a search term, a 404 path ...). */
+export type AnalyticsCount = { name: string; detail: string; count: number };
 export type SourceInfo = { state: "official" | "mirror" | "off"; url: string };
 
 export type UserResponse = IdAsString<components["schemas"]["UserResponse"]>;
@@ -1250,8 +1252,37 @@ export const api = {
     series: { day: string; views: number }[];
     top_paths: { name: string; views: number }[];
     top_referrers: { name: string; views: number }[];
+    traffic?: { day: string; views: number; visitors: number; bots: number }[];
+    visitors?: number;
+    bots?: number;
+    trends?: { path: string; views: number; previous: number }[];
+    devices?: AnalyticsCount[];
+    browsers?: AnalyticsCount[];
+    utm_sources?: AnalyticsCount[];
+    utm_mediums?: AnalyticsCount[];
+    utm_campaigns?: AnalyticsCount[];
+    entry_pages?: AnalyticsCount[];
+    not_found?: AnalyticsCount[];
+    searches?: AnalyticsCount[];
+    outbound?: AnalyticsCount[];
+    conversions?: AnalyticsCount[];
   }> {
     return request(`/api/v1/analytics/summary?days=${days}`);
+  },
+
+  listAnalyticsLinks(): Promise<{ name: string; url: string; conversion: boolean }[]> {
+    return request("/api/v1/analytics/links");
+  },
+
+  putAnalyticsLink(name: string, body: { url: string; conversion: boolean }): Promise<void> {
+    return request(`/api/v1/analytics/links/${encodeURIComponent(name)}`, {
+      method: "PUT",
+      body: JSON.stringify(body),
+    });
+  },
+
+  deleteAnalyticsLink(name: string): Promise<void> {
+    return request(`/api/v1/analytics/links/${encodeURIComponent(name)}`, { method: "DELETE" });
   },
 
   listSubmissions(): Promise<

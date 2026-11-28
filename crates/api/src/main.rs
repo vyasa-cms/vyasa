@@ -1335,6 +1335,8 @@ async fn cmd_serve(config: &VyasaConfig) -> ExitCode {
     // Outbound work a visitor could aim anywhere stays off in a demo.
     let outbound = policy::outbound_jobs_allowed(&state);
     let _link_sweep = outbound.then(|| seo::spawn_sweep(pg_pool.clone()));
+    let _audience_purge =
+        analytics::spawn_purge(vyasa_db::repo::AudienceRepo::new(pg_pool.clone()));
     // Accounts that registered and never confirmed their address go after
     // a week (phase 98).
     let _registration_purge = vyasa_jobs::registration::spawn(pg_pool.clone());

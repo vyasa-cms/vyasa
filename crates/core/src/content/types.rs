@@ -51,6 +51,7 @@ pub const RESERVED_TYPE_SLUGS: &[&str] = &[
     "comment",
     "form",
     "newsletter",
+    "go",
     "preview",
     "plugin-assets",
     "theme-assets",

@@ -9,6 +9,7 @@ follows [semantic versioning](https://semver.org) as described in
 
 ### Added
 - The `ai_harness` option (`vyasa`, the default, or `sarathi`) picks the agent harness a site's AI surfaces run on, read per request, so both run side by side without a restart. On Sarathi the registry's primary model is called with native tool use; usage rows, budget caps, the step list and the proposal stay as on Vyasa's own loop. In Theme Studio a Sarathi run must state its criteria with a `plan` tool and render the page with `look` after its last edit before it may finish; a finish without that is sent back to the model, and after three refusals the run ends as out of steps.
+- Cookieless audience analytics, counted on the server with no cookies, no script and no stored IP address: bots and crawlers on their own line, `X-Vyasa-Internal: 1`, Do Not Track, Global Privacy Control and signed-in sessions not counted; views and unique visitors per day (a visitor is a hash keyed by a secret that lives in memory for one UTC day, and the day's hashes are deleted when the next day starts); a trend per page; referrer, `utm_source`/`utm_medium`/`utm_campaign`, device class and browser family; entry pages, 404s with their referrers, internal search terms, outbound clicks through a `/go/<name>` redirect table, and form and newsletter conversions. The Audience page shows them and manages the redirect table (`GET /api/v1/analytics/links`, `PUT`/`DELETE /api/v1/analytics/links/{name}`). Migration 0057. See [docs/ANALYTICS.md](docs/ANALYTICS.md).
 
 ## [0.4.6] - 2026-11-27
 
