@@ -158,6 +158,24 @@ pub async fn first(
         })
 }
 
+/// The chain's primary model for a Sarathi run, or `None` when the
+/// registry has none for `kind` (the environment-key fallback has no row).
+/// Call it after [`chain`], which enforces the month cap.
+pub async fn sarathi_model(
+    state: &AppState,
+    kind: ModelKind,
+) -> Option<vyasa_ai::harness::SarathiModel> {
+    match state.ai_models.chain(kind).await {
+        Ok(models) => models
+            .first()
+            .map(vyasa_ai::harness::SarathiModel::from_resolved),
+        Err(e) => {
+            tracing::warn!(error = %e, "the model registry could not be read for a Sarathi run");
+            None
+        }
+    }
+}
+
 /// The usage sink: writes `ai_logs` rows priced from the registry's
 /// per-model costs, falling back to the built-in table.
 pub struct Sink {

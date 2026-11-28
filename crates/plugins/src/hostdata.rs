@@ -35,7 +35,7 @@ pub struct Ctx<'a> {
     pub pool: &'a PgPool,
     /// Calling plugin.
     pub plugin_id: i64,
-    /// Whether the call is an extended task (its reads have their own budget).
+    /// Whether the call is an extended task (its reads and writes count on their own budget).
     pub task: bool,
 }
 
@@ -64,7 +64,11 @@ impl Ctx<'_> {
 
     /// A write confined to the plugin's own storage: quota'd, not audited.
     async fn allow_private_write(&self, cap: &Capability) -> Result<(), String> {
-        match self.broker.private_write_gate(self.plugin_id, cap).await {
+        match self
+            .broker
+            .private_write_gate(self.plugin_id, cap, self.task)
+            .await
+        {
             Gate::Allowed => Ok(()),
             Gate::NotGranted => Err(String::from("capability-denied")),
             Gate::OverQuota => Err(String::from(QUOTA_EXCEEDED)),
@@ -72,7 +76,11 @@ impl Ctx<'_> {
     }
 
     async fn allow_write(&self, cap: &Capability, detail: &str) -> Result<(), String> {
-        match self.broker.write_gate(self.plugin_id, cap, detail).await {
+        match self
+            .broker
+            .write_gate(self.plugin_id, cap, detail, self.task)
+            .await
+        {
             Gate::Allowed => Ok(()),
             Gate::NotGranted => Err(String::from("capability-denied")),
             Gate::OverQuota => Err(String::from(QUOTA_EXCEEDED)),
