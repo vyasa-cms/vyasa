@@ -24,6 +24,8 @@ describe("mail relay panel", () => {
     mocked.mailSettings.mockResolvedValue({ host: "smtp.env.example", port: 587, username: "u", from: "a@b.c", has_password: true, source: "environment", encrypted: true });
     mount();
     expect(await screen.findByText(/Set in the environment/)).toBeInTheDocument();
+    // The form fills in an effect after the query resolves; wait for it.
+    await waitFor(() => expect((screen.getByLabelText("Relay host") as HTMLInputElement).value).toBe("smtp.env.example"));
     expect((screen.getByLabelText("Relay host") as HTMLInputElement).value).toBe("smtp.env.example");
     expect((screen.getByLabelText("Password") as HTMLInputElement).value).toBe("");
     await user.click(screen.getByRole("button", { name: "SendGrid" }));
