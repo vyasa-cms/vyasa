@@ -1390,12 +1390,13 @@ mod refresh_trap_tests {
 #[cfg(test)]
 mod refusal_tests {
     use std::sync::Arc;
+    use std::time::{Duration, Instant};
 
     use vyasa_common::AppError;
     use vyasa_db::repo::PluginsRepo;
     use vyasa_testkit::TestDb;
 
-    use super::{HostEnv, WasmtimeHost};
+    use super::{HostEnv, WasmtimeHost, REFUSAL_TTL};
     use crate::broker::Broker;
 
     #[tokio::test]
@@ -1438,6 +1439,51 @@ mod refusal_tests {
         }
         // Enable, disable and install evict: the next load reads the table again.
         host.evict(row.id).await;
+        assert!(matches!(
+            host.load(row.id, &env).await,
+            Err(AppError::NotFound { .. })
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_remembered_refusal_expires_after_the_ttl() {
+        let db = TestDb::new().await;
+        let repo = PluginsRepo::new(db.pool().clone());
+        let row = crate::lifecycle::install(
+            &repo,
+            "docs",
+            "1.0.0",
+            b"\0asm",
+            "aaa",
+            &serde_json::json!([]),
+        )
+        .await
+        .expect("install");
+        let host = WasmtimeHost::new(repo.clone()).expect("engine");
+        let env = HostEnv::background(
+            Arc::new(Broker::new(repo.clone(), db.pool().clone())),
+            db.pool().clone(),
+        );
+        repo.set_enabled(row.id, false).await.expect("disable");
+        // The first load reads the disabled row and remembers the refusal.
+        assert!(matches!(
+            host.load(row.id, &env).await,
+            Err(AppError::Validation { .. })
+        ));
+        repo.delete_plugin(row.id).await.expect("delete");
+        assert!(host.recent_refusal(row.id).is_some());
+        // Age the entry past the TTL instead of sleeping a minute.
+        let aged = Instant::now()
+            .checked_sub(REFUSAL_TTL + Duration::from_secs(1))
+            .expect("the monotonic clock is past one minute");
+        host.refused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get_mut(&row.id)
+            .expect("remembered")
+            .0 = aged;
+        assert!(host.recent_refusal(row.id).is_none());
+        // An expired refusal is not used: the load reads the table again (the row is gone).
         assert!(matches!(
             host.load(row.id, &env).await,
             Err(AppError::NotFound { .. })
