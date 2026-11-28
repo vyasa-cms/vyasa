@@ -11,6 +11,7 @@ pub mod budget;
 pub mod catalog;
 pub mod circuit;
 pub mod failover;
+pub mod harness;
 pub mod openai;
 pub mod page_designer;
 pub mod provider;

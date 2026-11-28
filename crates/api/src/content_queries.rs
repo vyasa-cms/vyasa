@@ -27,6 +27,10 @@ const MONTH_NAMES: [&str; 12] = [
     "December",
 ];
 
+/// The most nodes a published tree (a docs sidebar's `context.tree`) holds.
+/// The docs plugin imports up to 5000 pages, so the tree holds as many.
+const MAX_TREE_NODES: usize = 5000;
+
 /// Concrete query facade.
 pub struct ApiContentQueries {
     posts: PostsRepo,
@@ -85,7 +89,7 @@ impl ApiContentQueries {
     }
 
     /// The published tree of a hierarchical type a visitor may open, in
-    /// reading order, at most 2000 entries. Empty for anything else.
+    /// reading order, at most [`MAX_TREE_NODES`] entries. Empty for anything else.
     async fn tree_impl(
         &self,
         post_type: &str,
@@ -103,7 +107,7 @@ impl ApiContentQueries {
         }
         let rows = self
             .posts
-            .published_tree(ty, 2000)
+            .published_tree(ty, MAX_TREE_NODES)
             .await
             .map_err(|e| e.to_string())?;
         let (pattern, _, _) = self.presentation().await;

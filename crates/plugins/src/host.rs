@@ -222,7 +222,8 @@ pub struct HostCtx {
     pub ai_window: AiWindow,
     /// When the host will stop this call, for `call-budget-ms`.
     pub call_deadline: Option<std::time::Instant>,
-    /// The call's budget: an extended task's reads have their own quota.
+    /// The call's budget: an extended task counts every quota (reads,
+    /// writes, fetches, fetched bytes, model calls) on its own budget.
     pub budget: TaskBudget,
 }
 
@@ -260,13 +261,6 @@ impl HostEnv {
         }
     }
 
-    /// The same environment under the extended budget.
-    #[must_use]
-    pub fn extended(mut self) -> Self {
-        self.budget = TaskBudget::Extended;
-        self
-    }
-
     /// The same environment, serving `viewer`.
     #[must_use]
     pub fn for_viewer(mut self, viewer: Option<Viewer>) -> Self {
@@ -283,8 +277,14 @@ impl HostCtx {
             broker: &self.broker,
             pool: &self.dest,
             plugin_id: self.plugin_id,
-            task: self.budget == TaskBudget::Extended,
+            task: self.extended_budget(),
         }
+    }
+
+    /// Whether this call spends the extended-task quotas (its own counters)
+    /// rather than the ordinary ones.
+    fn extended_budget(&self) -> bool {
+        self.budget == TaskBudget::Extended
     }
 }
 
@@ -455,8 +455,16 @@ impl host::Host for HostCtx {
         if !url.starts_with("https://") {
             return Err(String::from("only https:// URLs may be fetched"));
         }
-        if self.broker.check_fetch(self.plugin_id, &url).await != crate::broker::Decision::Allowed {
-            return Err(String::from("capability-denied"));
+        match self
+            .broker
+            .fetch_gate(self.plugin_id, &url, self.extended_budget())
+            .await
+        {
+            crate::broker::Gate::Allowed => {}
+            crate::broker::Gate::NotGranted => return Err(String::from("capability-denied")),
+            crate::broker::Gate::OverQuota => {
+                return Err(String::from(crate::hostdata::QUOTA_EXCEEDED));
+            }
         }
         let Some(fetch) = self.fetch.clone() else {
             return Err(String::from(
@@ -468,10 +476,10 @@ impl host::Host for HostCtx {
         // gets the body it already paid for and is refused next time.
         if !self
             .broker
-            .record_bytes(self.plugin_id, body.len() as u64)
+            .record_bytes(self.plugin_id, body.len() as u64, self.extended_budget())
             .await
         {
-            return Err(String::from("byte quota exceeded"));
+            return Err(String::from(crate::hostdata::QUOTA_EXCEEDED));
         }
         Ok(body)
     }
@@ -573,10 +581,16 @@ impl host::Host for HostCtx {
         if !req.url.starts_with("https://") {
             return Err(String::from("only https:// URLs may be fetched"));
         }
-        if self.broker.check_fetch(self.plugin_id, &req.url).await
-            != crate::broker::Decision::Allowed
+        match self
+            .broker
+            .fetch_gate(self.plugin_id, &req.url, self.extended_budget())
+            .await
         {
-            return Err(String::from("capability-denied"));
+            crate::broker::Gate::Allowed => {}
+            crate::broker::Gate::NotGranted => return Err(String::from("capability-denied")),
+            crate::broker::Gate::OverQuota => {
+                return Err(String::from(crate::hostdata::QUOTA_EXCEEDED));
+            }
         }
         let Some(fetch) = self.fetch.clone() else {
             return Err(String::from(
@@ -586,10 +600,14 @@ impl host::Host for HostCtx {
         let reply = fetch.get_with(&req.url, req.headers).await?;
         if !self
             .broker
-            .record_bytes(self.plugin_id, reply.body.len() as u64)
+            .record_bytes(
+                self.plugin_id,
+                reply.body.len() as u64,
+                self.extended_budget(),
+            )
             .await
         {
-            return Err(String::from("byte quota exceeded"));
+            return Err(String::from(crate::hostdata::QUOTA_EXCEEDED));
         }
         Ok(host::FetchResponse {
             status: reply.status,
@@ -675,8 +693,16 @@ impl host::Host for HostCtx {
         if system.chars().count() > MAX_AI_SYSTEM_CHARS {
             return Err(String::from("system prompt too long"));
         }
-        if self.broker.check_ai(self.plugin_id).await != crate::broker::Decision::Allowed {
-            return Err(String::from("capability-denied"));
+        match self
+            .broker
+            .ai_gate(self.plugin_id, self.extended_budget())
+            .await
+        {
+            crate::broker::Gate::Allowed => {}
+            crate::broker::Gate::NotGranted => return Err(String::from("capability-denied")),
+            crate::broker::Gate::OverQuota => {
+                return Err(String::from(crate::hostdata::QUOTA_EXCEEDED));
+            }
         }
         let Some(ai) = self.ai.clone() else {
             return Err(String::from("no text model is set up on this site"));
@@ -727,7 +753,14 @@ pub struct WasmtimeHost {
     fetch: Arc<std::sync::RwLock<Option<Arc<dyn FetchBackend>>>>,
     /// Recent resource traps (epoch deadline, fuel) per plugin; see [`TrapStrikes`].
     strikes: Arc<std::sync::Mutex<HashMap<i64, TrapStrikes>>>,
+    /// Plugins `load` refused (disabled or errored), with when the refusal was read and logged; see [`REFUSAL_TTL`].
+    refused: Arc<std::sync::Mutex<HashMap<i64, (std::time::Instant, String)>>>,
 }
+
+/// How long `load` answers a refused plugin from memory before it reads the plugins table again. An errored plugin
+/// keeps its sections registered until a restart, so without this every section of every page ran a full `plugins`
+/// `SELECT` and failed with nothing in the log. [`WasmtimeHost::evict`] (enable, disable, install) clears it at once.
+const REFUSAL_TTL: Duration = Duration::from_secs(60);
 
 /// Resource traps within this window count against one plugin.
 const STRIKE_WINDOW: Duration = Duration::from_secs(600);
@@ -834,6 +867,7 @@ impl WasmtimeHost {
             ai: Arc::new(std::sync::RwLock::new(None)),
             fetch: Arc::new(std::sync::RwLock::new(None)),
             strikes: Arc::new(std::sync::Mutex::new(HashMap::new())),
+            refused: Arc::new(std::sync::Mutex::new(HashMap::new())),
         })
     }
 
@@ -855,6 +889,9 @@ impl WasmtimeHost {
         if let Some(hit) = self.instances.lock().await.get(&plugin_id) {
             return Ok(Arc::clone(hit));
         }
+        if let Some(name) = self.recent_refusal(plugin_id) {
+            return Err(Self::refusal(&name));
+        }
         let row: PluginRow = self
             .repo
             .list()
@@ -863,10 +900,8 @@ impl WasmtimeHost {
             .find(|p| p.id == plugin_id)
             .ok_or_else(|| AppError::not_found("plugin", plugin_id))?;
         if !row.enabled || row.status == "errored" {
-            return Err(AppError::validation(format!(
-                "plugin {} is disabled or errored",
-                row.name
-            )));
+            self.remember_refusal(plugin_id, &row.name, &row.status);
+            return Err(Self::refusal(&row.name));
         }
         let inst = self.instantiate(&row, env).await?;
         let mut pool = self.instances.lock().await;
@@ -887,6 +922,40 @@ impl WasmtimeHost {
     /// database. Call after install, enable, disable or rollback.
     pub async fn evict(&self, plugin_id: i64) {
         self.instances.lock().await.remove(&plugin_id);
+        self.refused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&plugin_id);
+    }
+
+    fn refusal(name: &str) -> AppError {
+        AppError::validation(format!("plugin {name} is disabled or errored"))
+    }
+
+    /// The plugin's name if `load` refused it less than [`REFUSAL_TTL`] ago.
+    fn recent_refusal(&self, plugin_id: i64) -> Option<String> {
+        let refused = self
+            .refused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        refused
+            .get(&plugin_id)
+            .filter(|(at, _)| at.elapsed() < REFUSAL_TTL)
+            .map(|(_, name)| name.clone())
+    }
+
+    /// Remembers a refusal and logs it: once per plugin per [`REFUSAL_TTL`], however many sections ask.
+    fn remember_refusal(&self, plugin_id: i64, name: &str, status: &str) {
+        tracing::warn!(
+            plugin_id,
+            plugin = name,
+            status,
+            "plugin is disabled or errored: its sections, blocks and filters render nothing until it is enabled again"
+        );
+        self.refused
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(plugin_id, (std::time::Instant::now(), name.to_owned()));
     }
 
     /// Whether a compiled component for the plugin is held in the pool.
@@ -1319,6 +1388,64 @@ mod refresh_trap_tests {
 }
 
 #[cfg(test)]
+mod refusal_tests {
+    use std::sync::Arc;
+
+    use vyasa_common::AppError;
+    use vyasa_db::repo::PluginsRepo;
+    use vyasa_testkit::TestDb;
+
+    use super::{HostEnv, WasmtimeHost};
+    use crate::broker::Broker;
+
+    #[tokio::test]
+    async fn an_errored_plugin_is_refused_from_memory_until_evicted() {
+        let db = TestDb::new().await;
+        let repo = PluginsRepo::new(db.pool().clone());
+        let row = crate::lifecycle::install(
+            &repo,
+            "docs",
+            "1.0.0",
+            b"\0asm",
+            "aaa",
+            &serde_json::json!([]),
+        )
+        .await
+        .expect("install");
+        repo.set_enabled(row.id, true).await.expect("enable");
+        let host = WasmtimeHost::new(repo.clone()).expect("engine");
+        let env = HostEnv::background(
+            Arc::new(Broker::new(repo.clone(), db.pool().clone())),
+            db.pool().clone(),
+        );
+        host.mark_errored(row.id).await;
+        // The first section reads the row and is refused.
+        assert!(matches!(
+            host.load(row.id, &env).await,
+            Err(AppError::Validation { .. })
+        ));
+        // With the row gone, a lookup would say NotFound: the next sections
+        // of the page are refused without reading the plugins table.
+        repo.delete_plugin(row.id).await.expect("delete");
+        for _ in 0..6 {
+            assert!(
+                matches!(
+                    host.load(row.id, &env).await,
+                    Err(AppError::Validation { .. })
+                ),
+                "a remembered refusal answers without a query"
+            );
+        }
+        // Enable, disable and install evict: the next load reads the table again.
+        host.evict(row.id).await;
+        assert!(matches!(
+            host.load(row.id, &env).await,
+            Err(AppError::NotFound { .. })
+        ));
+    }
+}
+
+#[cfg(test)]
 mod strike_tests {
     use std::time::{Duration, Instant};
 
@@ -1548,16 +1675,16 @@ impl WasmtimeHost {
                 .await
                 == crate::broker::Decision::Allowed;
         let extended_env;
-        let (env, _scope) = if granted {
+        let env = if granted {
             extended_env = HostEnv {
                 broker: env.broker.clone(),
                 dest: env.dest.clone(),
                 viewer: env.viewer.clone(),
                 budget: TaskBudget::Extended,
             };
-            (&extended_env, Some(env.broker.extended_scope(plugin_id)))
+            &extended_env
         } else {
-            (env, None)
+            env
         };
         let (bindings, mut store) = match self.begin_call_v2(plugin_id, env).await {
             Ok(Some(pair)) => pair,
