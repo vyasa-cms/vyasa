@@ -184,6 +184,8 @@ pub struct Broker {
     /// The operator's quota overrides, by plugin name.
     overrides: Arc<[PluginQuotaOverride]>,
     /// Plugin names by id, learned with the grants (overrides name plugins).
+    /// Changed only while the `grants` write guard is held, together with
+    /// `grants`, so every cached grants entry has its name.
     names: Arc<std::sync::Mutex<HashMap<i64, String>>>,
 }
 
@@ -246,7 +248,9 @@ impl Broker {
         }
         let known = self.names.lock().is_ok_and(|m| m.contains_key(&plugin_id));
         if !known {
-            let _ = self.granted_for(plugin_id).await;
+            if let Err(e) = self.granted_for(plugin_id).await {
+                tracing::debug!(plugin_id, "plugin quota overrides not applied: {e}");
+            }
         }
     }
 
@@ -271,10 +275,15 @@ impl Broker {
             .find(|p| p.id == plugin_id)
             .ok_or_else(|| AppError::not_found("plugin", plugin_id))?;
         let caps = Capability::parse_list(&row.capabilities).unwrap_or_default();
-        if let Ok(mut names) = self.names.lock() {
-            names.insert(plugin_id, row.name.clone());
-        }
-        self.grants.write().await.insert(plugin_id, caps.clone());
+        // Rule: `names` and `grants` change only together, under the grants
+        // write guard (here and in `evict`), so cached grants always come with
+        // a cached name and the plugin's quota override keeps matching.
+        let mut grants = self.grants.write().await;
+        self.names
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(plugin_id, row.name.clone());
+        grants.insert(plugin_id, caps.clone());
         Ok(caps)
     }
 
@@ -486,10 +495,12 @@ impl Broker {
     /// plugin with a different capability list kept enforcing the old one
     /// until the next restart.
     pub async fn evict(&self, plugin_id: i64) {
-        if let Ok(mut names) = self.names.lock() {
-            names.remove(&plugin_id);
-        }
-        self.grants.write().await.remove(&plugin_id);
+        let mut grants = self.grants.write().await;
+        self.names
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(&plugin_id);
+        grants.remove(&plugin_id);
     }
 
     /// Whether the plugin's capability set is cached.
@@ -705,6 +716,64 @@ mod url_host_tests {
             "not a url",
         ] {
             assert_eq!(url_host(bad), None, "{bad}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod name_cache_tests {
+    use std::sync::Arc;
+
+    use vyasa_db::repo::PluginsRepo;
+    use vyasa_testkit::TestDb;
+
+    use super::Broker;
+
+    /// Every cached grants entry has a cached name, checked after many lookups
+    /// and evictions racing on several threads. Before the two maps changed
+    /// under one guard, an evict between the name insert and the grants
+    /// insert could leave grants without a name.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn cached_grants_always_have_a_name_while_lookups_race_evictions() {
+        let db = TestDb::new().await;
+        let repo = PluginsRepo::new(db.pool().clone());
+        let row = crate::lifecycle::install(
+            &repo,
+            "docs",
+            "1.0.0",
+            b"\0asm",
+            "aaa",
+            &serde_json::json!([]),
+        )
+        .await
+        .expect("install");
+        let broker = Arc::new(Broker::new(repo, db.pool().clone()));
+        for _ in 0..50 {
+            let tasks: Vec<_> = (0..8)
+                .map(|i| {
+                    let b = Arc::clone(&broker);
+                    tokio::spawn(async move {
+                        if i % 2 == 0 {
+                            b.granted_for(row.id).await.map(|_| ())
+                        } else {
+                            b.evict(row.id).await;
+                            Ok(())
+                        }
+                    })
+                })
+                .collect();
+            for t in tasks {
+                t.await.expect("join").expect("lookup");
+            }
+            let grants = broker.grants.read().await;
+            let names = broker
+                .names
+                .lock()
+                .unwrap_or_else(std::sync::PoisonError::into_inner);
+            assert!(
+                grants.keys().all(|id| names.contains_key(id)),
+                "cached grants without a cached name"
+            );
         }
     }
 }
