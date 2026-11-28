@@ -365,6 +365,9 @@ struct Problems {
     /// A refused page was not listed: the list is full.
     full: bool,
     dirty: bool,
+    /// Listed key and text of each page left off this run, offered again by
+    /// [`Problems::relist`] once the run's own clears have made room.
+    dropped: Vec<(String, String)>,
 }
 
 impl Problems {
@@ -384,6 +387,7 @@ impl Problems {
             map: serde_json::from_value(pages).unwrap_or_default(),
             full,
             dirty: false,
+            dropped: Vec::new(),
         })
     }
 
@@ -404,27 +408,55 @@ impl Problems {
         if self.map.get(&key) == Some(&text) {
             return;
         }
-        let new = !self.map.contains_key(&key);
-        if new && self.map.len() >= MAX_PROBLEMS {
+        if !self.insert(&key, &text) {
             self.dirty |= !self.full;
             self.full = true;
-            return;
+            if !self.map.contains_key(&key) {
+                self.dropped.push((key, text));
+            }
         }
-        let old = self.map.insert(key.clone(), text);
+    }
+
+    /// Puts `text` under `key` if the list has room for it; the list is
+    /// unchanged otherwise.
+    fn insert(&mut self, key: &str, text: &str) -> bool {
+        if !self.map.contains_key(key) && self.map.len() >= MAX_PROBLEMS {
+            return false;
+        }
+        let old = self.map.insert(key.to_owned(), text.to_owned());
         if self.serialized().len() > MAX_PROBLEMS_BYTES {
             match old {
                 Some(o) => {
-                    self.map.insert(key, o);
+                    self.map.insert(key.to_owned(), o);
                 }
                 None => {
-                    self.map.remove(&key);
+                    self.map.remove(key);
                 }
             }
-            self.dirty |= !self.full;
-            self.full = true;
-            return;
+            return false;
         }
         self.dirty = true;
+        true
+    }
+
+    /// Lists the pages left off this run that now fit, without a request:
+    /// pages cleared later in the run may have made room. With `all_seen`
+    /// (the whole plan was looked at) "more" is then exactly whether a page
+    /// is still left off; otherwise it is only ever set.
+    fn relist(&mut self, all_seen: bool) {
+        let mut left = false;
+        for (key, text) in std::mem::take(&mut self.dropped) {
+            if !self.map.contains_key(&key) && !self.insert(&key, &text) {
+                left = true;
+            }
+        }
+        if all_seen {
+            self.dirty |= self.full != left;
+            self.full = left;
+        } else if left {
+            self.dirty |= !self.full;
+            self.full = true;
+        }
     }
 
     fn contains(&self, key: &str) -> bool {
@@ -440,8 +472,7 @@ impl Problems {
     }
 
     /// Forgets pages that are no longer in the plan. "More" stays until the
-    /// list is empty; a page in its simpler form that was left off is listed
-    /// again by a later run once there is room.
+    /// list is empty or [`Problems::relist`] finds nothing left off.
     fn retain(&mut self, live: &BTreeSet<&str>) {
         let live: BTreeSet<String> = live.iter().map(|k| listed_key(k)).collect();
         let before = self.map.len();
@@ -475,6 +506,10 @@ impl Problems {
 /// Where the entries the host refused outright are remembered, so a
 /// continuation run does not fetch and offer them again.
 pub const REFUSED_KEY: &str = "sync/refused";
+/// Set by "Sync now": the next sync tries each page in its simpler form once
+/// more (the host may accept it now), and deletes the key once it has looked
+/// at the whole plan.
+pub const RETRY_SIMPLER_KEY: &str = "sync/retry-simpler";
 /// Most refused entries remembered (16 hex characters each).
 const MAX_REFUSED: usize = 2_500;
 
@@ -941,6 +976,8 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
     let today = civil_date(cx.env.now_ms());
     let mut problems = Problems::load(cx.env)?;
     let mut refused = Refused::load(cx.env)?;
+    // After "Sync now", each page in its simpler form is tried once more.
+    let retry = cx.env.kv_get(RETRY_SIMPLER_KEY)?.is_some();
     // Entries the site does not have after this run: their children are
     // refused too, so they are listed without being read or offered.
     let mut absent: BTreeSet<String> = BTreeSet::new();
@@ -970,7 +1007,9 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
             // On the site in its simpler form at this version: unchanged too,
             // and listed again if it fell off a full list.
             let fallback_hash = simpler_hash(&hash);
-            if managed.get(key) == Some(&fallback_hash) {
+            let retry_digest = Refused::digest(key, &fallback_hash, &combined);
+            if managed.get(key) == Some(&fallback_hash) && (!retry || refused.check(&retry_digest))
+            {
                 cx.report.unchanged += 1;
                 if !problems.contains(key) {
                     problems.set(key, &name, simpler, "refused at this version");
@@ -1106,7 +1145,13 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
             problems.set(key, &name, simpler, &refusal);
             problems.save(cx.env)?;
             match cx.env.put_entry(&fallback) {
-                Ok(put) => cx.report.count(put),
+                Ok(put) => {
+                    cx.report.count(put);
+                    // Tried again since "Sync now": not again until the next.
+                    if retry {
+                        refused.note(&retry_digest);
+                    }
+                }
                 Err(e) if is_refusal(&e) => {
                     refused.note(&digest);
                     if !on_site {
@@ -1120,10 +1165,14 @@ fn sync<E: Env>(cx: &mut Ctx<E>, hint: Option<&str>) -> Result<(), Stop> {
         problems.retain(&wanted);
         Ok(())
     })();
+    problems.relist(wrote.is_ok());
     // The refused entries are remembered only beside a saved list, so a page
     // that is not offered again is always named.
     if problems.save(cx.env).is_ok() {
         refused.save(cx.env, wrote.is_ok());
+        if retry && wrote.is_ok() {
+            cx.env.kv_delete(RETRY_SIMPLER_KEY);
+        }
     }
     cx.report.problems = Some(problems.lines());
     cx.report.more_problems = problems.full;
@@ -2572,14 +2621,148 @@ mod tests {
             fk.commits.insert(SHA2.into(), fixed);
             fk.head = SHA2.into();
         }
+        f.borrow_mut().requests.clear();
         let after = finish(&f);
         let rest = listed(&after);
         assert_eq!(rest.len(), 10, "{after:?}");
         assert!(!after.more_problems, "{after:?}");
+        // Only the fixed pages are read and written; the others are not.
+        assert_eq!(raw_fetches(&f), MAX_PROBLEMS, "{after:?}");
+        assert_eq!(after.created + after.updated, MAX_PROBLEMS, "{after:?}");
         for line in &rest {
             assert!(!shown.contains(line), "{line}");
-            assert!(line.contains("imported as plain text"), "{line}");
+            assert!(
+                line.contains("imported as plain text (refused at this version)"),
+                "{line}"
+            );
         }
+    }
+
+    /// Runs the sync until it finishes.
+    fn finish_sync(f: &RefCell<Fake>) -> Report {
+        for _ in 0..20 {
+            let b = budget(f);
+            let r = run(&mut Wrap(f), &cfg(), None, b).unwrap();
+            if r.finished {
+                return r;
+            }
+        }
+        panic!("the sync never finishes");
+    }
+
+    #[test]
+    fn a_page_left_off_before_the_listed_ones_are_fixed_is_listed_in_the_same_run() {
+        let mut files = Files::new();
+        for i in 0..MAX_PROBLEMS {
+            files.insert(
+                format!("docs/p{i:03}.md"),
+                format!("# P{i}\n\n<Callout>x</Callout>\n"),
+            );
+        }
+        let f = fake_with(files.clone());
+        f.borrow_mut().refuse_kinds = vec!["callout"];
+        let first = finish_sync(&f);
+        assert_eq!(listed(&first).len(), MAX_PROBLEMS);
+        assert!(!first.more_problems, "{first:?}");
+        // A page that sorts before them joins a full list: left off.
+        files.insert("docs/a.md".into(), "# A\n\n<Callout>x</Callout>\n".into());
+        {
+            let mut fk = f.borrow_mut();
+            fk.commits.insert(SHA2.into(), files.clone());
+            fk.head = SHA2.into();
+        }
+        let second = finish_sync(&f);
+        assert!(second.more_problems, "{second:?}");
+        assert!(!listed(&second).iter().any(|l| l.starts_with("docs/a.md")));
+        // Then every listed page is fixed; the left-off page comes first in
+        // the plan, while the list is still full.
+        for i in 0..MAX_PROBLEMS {
+            files.insert(format!("docs/p{i:03}.md"), "# Fixed\n".into());
+        }
+        {
+            let mut fk = f.borrow_mut();
+            fk.commits.insert("3".repeat(40), files);
+            fk.head = "3".repeat(40);
+            fk.requests.clear();
+        }
+        let third = finish_sync(&f);
+        assert_eq!(
+            listed(&third),
+            vec!["docs/a.md: imported as plain text (refused at this version)".to_owned()],
+            "{third:?}"
+        );
+        assert!(!third.more_problems, "{third:?}");
+        let fetched_a = f.borrow().requests.iter().any(|u| u.ends_with("/a.md"));
+        assert!(!fetched_a, "the page in its simpler form is not read again");
+    }
+
+    #[test]
+    fn sync_now_tries_pages_in_their_simpler_form_once_more() {
+        let mut files = Files::new();
+        for i in 0..5 {
+            files.insert(
+                format!("docs/p{i}.md"),
+                format!("# P{i}\n\n<Callout>x</Callout>\n"),
+            );
+        }
+        let f = fake_with(files);
+        f.borrow_mut().refuse_kinds = vec!["callout"];
+        assert_eq!(listed(&finish_sync(&f)).len(), 5);
+        // The host now accepts callouts; without "Sync now" nothing changes.
+        f.borrow_mut().refuse_kinds = vec![];
+        f.borrow().kv.borrow_mut().insert("sync/complete".into(), "0".into());
+        let quiet = finish_sync(&f);
+        assert_eq!(listed(&quiet).len(), 5, "{quiet:?}");
+        assert_eq!(quiet.created + quiet.updated, 0, "{quiet:?}");
+        // "Sync now" (guest.rs) sets the flag and clears the completed mark.
+        {
+            let fk = f.borrow();
+            let mut kv = fk.kv.borrow_mut();
+            kv.insert(RETRY_SIMPLER_KEY.into(), "1".into());
+            kv.insert("sync/complete".into(), "0".into());
+        }
+        let now = finish_sync(&f);
+        assert!(listed(&now).is_empty(), "{now:?}");
+        assert_eq!(now.updated, 5, "{now:?}");
+        assert!(!f.borrow().kv.borrow().contains_key(RETRY_SIMPLER_KEY));
+    }
+
+    #[test]
+    fn sync_now_retries_each_simpler_page_once_even_over_several_runs() {
+        let n = 30;
+        let mut files = Files::new();
+        for i in 0..n {
+            files.insert(
+                format!("docs/p{i:02}.md"),
+                format!("# P{i}\n\n<Callout>x</Callout>\n"),
+            );
+        }
+        let f = fake_with(files);
+        f.borrow_mut().refuse_kinds = vec!["callout"];
+        finish_sync(&f);
+        {
+            let fk = f.borrow();
+            let mut kv = fk.kv.borrow_mut();
+            kv.insert(RETRY_SIMPLER_KEY.into(), "1".into());
+            kv.insert("sync/complete".into(), "0".into());
+        }
+        f.borrow_mut().requests.clear();
+        // Still refused, and a run writes at most 7 entries.
+        let mut runs = 0;
+        loop {
+            runs += 1;
+            assert!(runs <= 20, "the sync never finishes");
+            let b = Budget {
+                max_writes: 7,
+                ..budget(&f)
+            };
+            if run(&mut Wrap(&f), &cfg(), None, b).unwrap().finished {
+                break;
+            }
+        }
+        assert!(runs > 1, "the budget splits the retry over several runs");
+        assert_eq!(raw_fetches(&f), n, "each page is read once");
+        assert!(!f.borrow().kv.borrow().contains_key(RETRY_SIMPLER_KEY));
     }
 
     #[test]
